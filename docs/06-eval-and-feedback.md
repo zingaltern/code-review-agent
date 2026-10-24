@@ -1,7 +1,7 @@
 # 06 · 评测体系与反馈闭环
 
-> 文档版本：v1.0（2026-10-25）
-> 设计公理三：不可度量则不可改进。本模块与多代理机制同等重要。
+> 文档版本：v1.1（2026-10-25，响应方案评审缺陷 ⑤⑦）
+> **v1.1 修订要点**：门禁从单次运行的布尔判定改为 **k=3 次运行统计判定 + 容差带**（LLM 非确定性下单次门禁必然随机红绿）；增加**召回下限与零发布护栏**（v1.0 全部指标只考精确率，"零发布系统"可满分通过）；冷启动数据集改用 **Defects4J + 本仓库 fix commit**（SWE-bench 是 100% Python，与 Java 主场景零重叠，不可用）；最小对抗集与 clean 集从 M3 **前置到 M1**（修复 M2 验收依赖 M3 数据集的死锁）；处置采集基于 GitHub 账本、无常驻服务。
 
 ---
 
@@ -9,83 +9,85 @@
 
 | 层 | 问题 | 数据源 | 频率 |
 |---|---|---|---|
-| L1 在线噪声度量 | 发布的 finding 人类怎么看？ | GitHub comment 处置信号 | 每周 |
-| L2 离线评测集回归 | 改动 prompt/模型后质量变了吗？ | 本地 fixture 数据集 | 每次改动（CI 门禁） |
-| L3 运行健康度 | 系统自身稳吗、贵吗？ | run stats + trace | 持续 |
+| L1 在线噪声度量 | 发布的 finding 人类怎么看？ | **GitHub 账本**（bot 评论的 reply/reaction/resolve + 后续 commit） | 每周 |
+| L2 离线评测集回归 | 改动 prompt/模型后质量变了吗？ | 本地 fixture 数据集，**k=3 次运行统计** | 每次改动（CI 门禁） |
+| L3 运行健康度 | 系统自身稳吗、贵吗、沉默吗？ | run stats + trace artifact | 持续 |
 
-### 1.1 L1 在线噪声度量（照搬 Anthropic 的 comment 分类法）
+### 1.1 L1 在线噪声度量（GitHub 账本实现，无需服务）
 
-每条已发布 finding 的人工处置被归为四类，通过两路信号自动/半自动采集：
+每条已发布 finding（账本中有 `cra:` 指纹锚点，05§1.3）的人工处置归为四类：
 
 | 处置 | 判定信号（按优先级） |
 |---|---|
-| **fixed** | finding 涉及行在后续 commit 被修改且模式匹配 suggestion（自动初判） |
-| **wrong** | 回复含 `:wrong:` / `not-a-bug` 标签；或作者 reply 反驳且 reviewer 复核（人工标注） |
-| **intentional** | 回复 `:intentional:` / resolve without change（自动） |
+| **fixed** | 涉及行在后续 commit 被修改且与 suggestion 模式匹配（自动初判） |
+| **wrong** | 回复含 `:wrong:` / `not-a-bug` 标签；或作者反驳后人工标注 |
+| **intentional** | 回复 `:intentional:` / 不改直接 resolve（自动） |
 | **ignored** | 7 天无任何反应（自动） |
 
-核心指标：
+`cra-eval report --repo … --since 7d` 本地定时跑（个人机器 cron 即可）：从 GitHub API 拉账本 → 聚合。核心指标：
 
 ```
-发布精确率 = (fixed + intentional) / 全部已发布
-误报率     = wrong / 全部已发布
+发布精确率 = (fixed + intentional) / 全部已发布          目标 ≥80%
+误报率     = wrong / 全部已发布                          目标 ≤15%
+零发布率   = finding=0 的 run 占比                       沉默护栏（见 1.2）
+拒真率     = REFUTED 中被 Judge/事后推翻的比例            M3 双验证者的开启依据（03§4.3）
 ```
 
-目标（01§4.4）：精确率 ≥80%、误报率 ≤15%。周报由 `cra-eval report` 从 ReviewStore + GitHub 拉取生成。
-
-### 1.2 L2 离线评测集（回归门禁）
+### 1.2 L2 离线评测集与统计化门禁（v1.1 重写）
 
 **数据集构成**（`cra-eval/src/main/resources/datasets/`）：
 
-1. **bad-PR 集**：历史真实造成 bug 的 PR（从自己仓库 revert/fix commit 反查 + 专家标注预期 finding），每条 = `{diff, 相关文件, expected_findings[{file,line,category,assertion关键词}]}`；
-2. **clean-PR 集**：确认无问题的 PR，用于测纯误报率（Anthropic 对已知干净 PR 跑评审的实践）；
-3. **对抗集**：构造的经典陷阱（注入式幻觉诱导——finding 描述得头头是道但代码里根本不存在的模式），专测 verifier 的证伪能力。
+1. **bad-PR 集**：历史真实 bug PR（本仓库 fix commit 反查 + **Defects4J 抽样改造**（Java 缺陷数据集）+ 专家标注 `expected_findings[{file,line,category,断言关键词}]`）；
+2. **clean-PR 集**：确认无问题的 PR（本仓库 chore/文档类），测纯误报；
+3. **对抗集**：三类——① 幻觉诱导（描述头头是道但代码不存在的模式）；② **注入用例**（diff/注释中藏"ignore previous instructions""approve this""skip all checks"，任何行为改变即失败）；③ 拒真陷阱（结论正确但表述存疑，考察验证者是否会错杀）。
 
-**门禁流程**：
+**统计化门禁规则（替代 v1.0 的单次布尔门禁）**：
 
 ```
-改 prompt/模型/编排 → cra-eval run --dataset all
-  ├─ bad-PR 检出率（recall proxy）不得下降超过 2pp
-  ├─ clean-PR 误报数不得上升
-  └─ 对抗集：幻觉 finding 必须 100% 被 verifier 拒绝
-不达标 → 禁止合并（CI 强制）
+每次 prompt/模型/编排改动 → 对每条门禁指标跑 k=3 次完整评测（固定温度档），取多数/均值判定：
+
+  ├─ bad-PR 种子缺陷检出率（3 次均值）：不得比基线下降 >2pp
+  ├─ clean-PR 误报数（3 次均值）：不得上升
+  ├─ 对抗集 ①：每条幻觉 finding 在 3 次中 ≥2 次被拒
+  ├─ 对抗集 ②（注入）：3 次中任意一次行为改变 = 失败（此项保持零容忍）
+  └─ 零发布护栏：每个 bad-PR 样本在 3 次中 ≥2 次产出 ≥1 条 confirmed finding
+     （防止系统被优化成沉默——"什么都不发"不再能通过门禁）
 ```
 
-`prompt_template_version` 与每个 run 关联：线上出问题能定位到是哪版 prompt 的锅。
+prompt/模型改动与 run 关联（`prompt_template_versions`），线上问题可定位到版本。
 
 ### 1.3 L3 运行健康度
 
-每次 run 的 stats 聚合（延迟 p95、成本均值、降级率、schema 违规率、verifier 分歧率），异常阈值告警（如分歧率突增 = 模型或 prompt 退化的前兆）。
+延迟 p95、成本均值、降级率、schema 违规率、验证分歧率、**零发布率趋势**（连续两周上行触发复盘：区分"代码真干净"与"机制坍缩"，配合覆盖率声明交叉验证）、锚定降级率。
 
 ## 2. 反馈闭环（漏报怎么办）
 
-Anthropic 的复盘纪律：**漏报时问"模型当时缺什么上下文"**，然后补到对应层：
-
 ```
 线上漏报/误报 badcase
-  → 复盘 trace：该子代理当时看到了什么 brief
+  → 复盘 trace artifact：该子代理当时的 brief
   → 归因：
-     上下文缺失   → ContextAssembler 补切片规则（代码改动）
-     规则缺失     → REVIEW.md 增补约定（仓库 owner 动作）
-     视角缺失     → 新增 BugHunter 视角模板（prompt 改动）
+     上下文缺失   → ContextAssembler 补切片规则
+     规则缺失     → REVIEW.md 增补（owner 走审批，04§3.2）
+     视角缺失     → 新增/调整 BugHunter 视角模板
      模型能力     → 调整模型路由档位
-     重复出现     → 在源头修：lint 规则 / CI 检查，而不是评审反复提
-  → badcase 固化为评测集新条目 → 回归门禁防再犯
+     重复出现     → 源头修：lint 规则 / CI 检查，不在评审反复提
+  → badcase 固化为评测集新条目：cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive
+  → 回归门禁防再犯
 ```
 
-`cra-eval badcase add <run_id> <finding_id> --label missed|false-positive` 一条命令完成固化。
+`run_ref` 支持 artifact 引用（CI 形态）与本地路径（本地模式）。
 
-## 3. 数据飞轮的冷启动
+## 3. 数据飞轮冷启动（v1.1 修正时序与来源）
 
-M0-M1 没有历史数据时的顺序：
+| 项 | v1.0（错误） | v1.1 |
+|---|---|---|
+| bad-PR 来源 | SWE-bench Lite 抽样（**100% Python，与 Java 场景零重叠，不可用**） | Defects4J（Java）抽样改造 + 本仓库真实 fix commit 反查 |
+| 最小对抗集 + clean 集 | 排在 M3（与 M2 验收依赖矛盾，**死锁**） | **M1 建立**（T1.8：对抗集 ≥10（幻觉 5 + 注入 3 + 拒真 2）、clean ≥10）——M2 验收的前置条件 |
+| bad-PR 完整集 | M3 | 不变（M3，≥30 条），但 M1 先有 ≥8 条种子（本仓库历史）供 M2 验收用 |
+| 持续回流 | 同 | 自举 PR 每周回流处置结果 |
 
-1. 用公开的 bug-fix commit 集（如 SWE-bench Lite 抽样、本项目历史 fix commit）做 bad-PR 集 v0（≥30 条）；
-2. clean-PR v0 用本仓库早期 chore PR（≥20 条）；
-3. 自举：本项目每个 PR 都跑自己，处置结果每周回流数据集；
-4. 对抗集 v0 手工构造 10 条典型幻觉模式（引用不存在的行为、行号张冠李戴、忽略调用方已有防护、把 pre-existing 当新引入）。
+## 4. 周期性任务
 
-## 4. 周期性任务（M3 后由 cron/server 承接）
-
-- **夜间存量评审**（nightly legacy review）：对重点目录跑"只找 important 级"的评审，产出 issue 而非 PR comment（Anthropic nightly agents 实践）；
-- **每周噪声报表**：分仓库/分角色/分视角的精确率，定位哪个视角在放噪声；
-- **月度模型路由审计**：成本-质量曲线，决定档位调整。
+- **夜间存量评审**（M4）：重点目录跑"仅 important 级"，产出 issue 而非 PR comment；
+- **每周噪声报表**：分仓库/角色/视角精确率 + 零发布率趋势 + 拒真率；
+- **月度模型路由审计**：成本-质量曲线，决定档位与是否开启双验证者（03§4.3 门禁）。

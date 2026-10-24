@@ -1,182 +1,201 @@
 # 03 · 核心设计：子代理隔离审查与评判
 
-> 文档版本：v1.0（2026-10-25）
-> 本文档是项目的技术核心：**为什么隔离、隔离什么、如何评判、如何收敛**。
-> 所有子代理实现必须严格遵循此处的抽象模型与隔离规则。
+> 文档版本：v1.1（2026-10-25，响应方案评审缺陷 ②③④）
+> **v1.1 修订要点**：
+> ① 放弃"盲评"概念——finding 的 `description/failure_mode` 本身就是完整论证，"剥离推理"要么剥不掉（盲评是装饰）要么剥掉后无从验证，v1.0 该设计**不成立**，改为"独立复核 + 反锚定输出约束"（可测试）；
+> ② 承认验证者多样性是投票成立的**前提而非默认**：M2 = 单强模型验证者 + 仲裁；M3 = 异构双验证者投票（模型家族与指令模板必须不同），按评测数据门禁引入；
+> ③ 溯源表诚实化：盲评、证伪导向、judge 仲裁是**本项目自主设计，无 Anthropic 生产背书**；
+> ④ 验证失败/预算击穿的投票语义补全（不再有未定义行为）。
 
 ---
 
 ## 1. 子代理统一抽象
 
-所有子代理（Reviewer / Verifier / Judge）共享同一个执行模型，差异仅在 **prompt 模板、输入 brief、输出 schema、工具白名单**：
+所有子代理（Reviewer / Verifier / Judge）共享同一执行模型，差异仅在 **prompt 模板、输入 brief、输出 schema、工具白名单、模型档位**：
 
 ```java
 interface SubAgent<I, O> {
-    AgentRole role();                 // 角色 + 视角标识
-    AgentBrief buildBrief(I input);   // 由编排器注入，自包含（见 §2.1）
-    O execute(AgentBrief brief);      // LLM 循环：可选工具调用 + 最终结构化输出
-    StructuredSchema<O> outputSchema(); // JSON Schema 校验
-    ToolWhitelist tools();            // 工具白名单（默认只读）
-    Budget budget();                  // token / 轮次 / 时间
+    AgentRole role();                 // 角色 + 视角/模板版本标识
+    AgentBrief buildBrief(I input);   // 由编排器注入，自包含
+    O execute(AgentBrief brief);      // LLM 循环：可选受限工具 + 最终结构化输出
+    StructuredSchema<O> outputSchema();
+    ToolWhitelist tools();            // 默认只读
+    Budget budget();                  // token / 轮次 / 时间 三重硬限
 }
 ```
 
 关键性质：
 
-- **无状态**：子代理不持有跨调用状态，一切输入来自 brief；
-- **单向通信**：子代理只能向编排器返回结果，不能主动与其他子代理通信，不能感知其他子代理的存在；
-- **结构化出口**：输出必须通过 schema 校验，解析失败按 02§4.2 降级；
-- **预算硬限**：token、对话轮次、墙钟时间三项硬限，超限即杀，标记 `BUDGET_EXCEEDED`。
+- **无状态**：一切输入来自 brief；brief 全文落盘可复现；
+- **单向通信**：只能向编排器返回结果，不感知其他子代理存在；
+- **结构化出口**：输出过 schema 校验，失败按 02§4.2 降级；
+- **预算硬限**：超限即杀，标记 `BUDGET_EXCEEDED`。
 
 ## 2. 隔离机制（三重隔离）
 
-隔离的目的不是安全洁癖，而是**降低错误相关性**：N 个高相关性的评审者投票等价于 1 个评审者。多样性是精确率的来源（调研依据见 01§3.2/3.3）。
+隔离的目的：**降低错误相关性**。"N 个高相关性评审者投票等价于 1 个评审者"这条公理**同时适用于评审层和验证层**——v1.0 只在评审层做了多样性、却给验证层配了同模板同模型的两个副本，是自体瓦解；v1.1 修正（见 §2.3、§4）。
 
-### 2.1 上下文隔离（Contextual Isolation）
+### 2.1 上下文隔离
 
-- 每个子代理拥有**独立、全新的上下文窗口**，编排器以 `AgentBrief`（一份自包含文档）传递其所需的一切：变更代码、相关文件、规范、任务指令、输出格式要求；
-- **brief 中不得包含**：编排器的中间推理、其他子代理的输出、历史对话残留；
-- 依赖切片（被调用方/调用方文件）由编排器**预取并内联**进 brief，而非让子代理自行漫游仓库——子代理默认无"读整个仓库"的自由工具，只有 `read_file(白名单内)` 这类受限工具，且白名单在 brief 生成时即确定（只含已判定相关的文件）；
-- 好处：可重放（brief 落盘即可复现）、可测试（录制 brief 做单测）、上下文无污染。
+- 每个子代理独立全新上下文，编排器以自包含 `AgentBrief` 传递一切所需；
+- brief 不含编排器中间推理、不含其他子代理输出；
+- 依赖切片由编排器预取内联，子代理仅有 `read_file(白名单)` 受限工具（白名单在 brief 生成时确定）；
+- 好处：可重放、可测试、无上下文污染。
 
-### 2.2 视角隔离（Perspective Isolation，提示词多样性注入）
+### 2.2 视角隔离（评审层提示词多样性）
 
-同角色的多个实例使用**不同视角的系统提示词**，从不同错误类别切入，降低同源盲区：
+同角色多实例使用不同视角系统提示词：
 
-| BugHunter 实例 | 视角提示词核心指令 | 针对的错误类别 |
+| BugHunter 实例 | 视角 | 针对错误类别 |
 |---|---|---|
 | BH-boundary | 边界条件：空/null/越界/Off-by-one/类型截断 | 输入校验类 |
-| BH-concurrency | 并发与竞态：共享可变状态/锁粒度/可见性/事务边界 | 时序类 |
-| BH-dataflow | 数据流追踪：输入→变换→输出，断裂点与假设错误 | 逻辑类 |
+| BH-concurrency | 并发与竞态：共享可变状态/锁粒度/事务边界 | 时序类 |
+| BH-dataflow | 数据流追踪：输入→变换→输出断裂点 | 逻辑类 |
 | BH-resource | 资源生命周期：泄漏/未关闭/超时/重试风暴 | 运维类 |
 
-视角池在 `cra-agents` 中以模板文件管理；扇出 N 时选取相关度最高的 N 个视角（按变更文件语言/目录特征排序）。
+### 2.3 执行隔离与模型异构（v1.1 扩展到验证层）
 
-### 2.3 执行隔离（Execution Isolation）
+- 工具白名单默认 `[read_file(scoped)]`；SecurityReviewer 加 `grep_pattern(scoped)`；任何子代理无网络、无写盘、无 shell；
+- 超时与预算独立，单代理失败不传染；
+- **模型异构路由**：不同角色/实例可路由到不同模型。v1.0 只把异构给了 reviewer 视角（不需要统计独立性的层）；v1.1 起**验证层的多样性是硬性要求**——凡配置 ≥2 个验证者，其模型家族与指令模板**必须不同**，否则配置校验直接失败（宁可单验证者+仲裁，不要两个相关性 0.9 的"独立"验证者）。
 
-- **工具白名单**：默认 `[read_file(scoped)]`；SecurityReviewer 额外 `grep_pattern(scoped)`；任何子代理无网络、无写盘、无 shell；
-- **超时与预算独立**：单代理超时不影响其他代理（编排器用并行提交 + future 超时实现）；
-- **模型可异构**：brief 中携带 `preferred_model`，编排器可将不同视角路由到不同模型（如敏感安全审查用更强模型），进一步降低同源相关性——这是 LlmGateway 多模型路由的主要动机之一。
+### 2.4 隔离的例外
 
-### 2.4 隔离的例外（唯一允许的信息流动）
-
-聚合阶段允许将**已确认 finding 的位置**用于去重合并；除此之外，任何跨代理信息流动都需要在本文档修订中显式批准。
+聚合阶段允许使用已确认 finding 的位置做去重合并；除此之外跨代理信息流动需修订本文档显式批准。
 
 ## 3. 评审层：角色化 Reviewer 子代理
 
 | 角色 | 触发条件 | 输入重点 | 输出 |
 |---|---|---|---|
-| BugHunter ×N | 总是（N 由深度档位决定） | diff + 文件全文 + 视角指令 | `CandidateFinding[]` |
-| SecurityReviewer | 总是（独立于 BugHunter，Anthropic 的独立安全 pass 思想） | diff + 依赖清单 + 安全规范段 | `CandidateFinding[]`（category=security） |
-| TestReviewer | 变更含逻辑文件且测试变更比例低时 | diff + 测试目录结构 | 测试缺口类 finding |
-| ConventionReviewer | REVIEW.md 定义了约定时 | diff + REVIEW.md 约定段 | 约定违反（多数为 nit） |
-| PerfReviewer | Deep 档位或变更命中 perf 路径 | diff + 热点标注 | 性能风险类 finding |
+| BugHunter ×N | 总是（N 由深度档位决定） | diff + 窗口/全文 + 视角指令 | `CandidateFinding[]` |
+| SecurityReviewer | 总是（独立 pass） | diff + 依赖清单 + 安全规范段 + 文件全文 | `CandidateFinding[]`（category=security） |
+| TestReviewer | 逻辑文件变更且测试变更比例低 | diff + 测试目录结构 | 测试缺口类 |
+| ConventionReviewer | REVIEW.md 定义约定时 | diff + REVIEW.md 约定段 | 约定违反（多为 nit） |
+| PerfReviewer | Deep 或命中 perf 路径 | diff + 热点标注 | 性能风险类 |
 
-Reviewer 的 prompt 设计原则（模板见 04 文档）：
+Reviewer prompt 原则（模板见 04）：
 
-1. **只报告有文件/行级证据、可指出具体失败模式的问题**——"可能有问题""建议关注"类输出被 schema 层拒绝（`evidence` 字段必填且必须引用 diff 行号或文件行号）；
-2. **允许且鼓励输出空结果**——"此变更未发现问题，理由：…"是合法且被鼓励的输出（对抗强制找茬倾向，这是降噪第一关）；
-3. **标注 pre-existing 嫌疑**：若怀疑问题在 base commit 已存在，报告时置 `pre_existing_suspect=true`，由编排器用 git blame 复核；
-4. **nit 预算意识**：brief 中注入本 run 剩余 nit 配额，超出则不输出 nit。
+1. 只报告有文件/行级证据、可说明"触发条件→错误结果"的问题；`evidence` 必须引用行号；
+2. **空结果合法且被鼓励**——但注意：召回护栏（01§4.4）在系统层面防"鼓励空结果"退化为"全部空结果"；
+3. pre-existing 嫌疑置 `pre_existing_suspect=true`，由编排器用本地 jgit blame 复核（05§2）；
+4. brief 注入剩余 nit 配额。
 
-## 4. 评判层：盲评 Verifier 与仲裁 Judge（本项目的差异化核心）
+## 4. 评判层：独立复核 Verifier 与仲裁 Judge（v1.1 重写）
 
-### 4.1 为什么需要独立评判
+### 4.1 设计承认与出发点
 
-单评审者的 finding 有两类污染：幻觉（引用不存在的行为）与过时假设（忽略了 brief 外的事实，如某处已有 null 检查）。Anthropic 实践（verifier 投票，仅存活者发布）与 AEGIS-D（误报降 8.2×）共同证明：**发现与验证分离、验证者独立取证**，是精确率的杠杆。
+- **"盲评"已废弃**：finding 的 `description/failure_mode` 就是发现者的完整论证；要么 verifier 看到完整论证（锚定风险仍在，"盲"是装饰），要么剥离论证（verifier 失去待验证的断言内容）。与其假装看不见，不如**放开看、但约束其必须独立重建证据链**；
+- **证伪导向已降级**：v1.0 的"尝试推翻它"指令 × 双确认门槛会系统性拒真（错杀真 bug）。M2 改为**平衡式独立复核**（同等寻找支持与反驳证据）；纯证伪指令保留给 M3 的第二验证者作为**指令差异化的手段**（与第一验证者形成视角互补，而非双份同构）；
+- **投票是 M3 增量而非 M2 默认**：投票的统计收益依赖验证者错误去相关（AEGIS-D 的前提，见 01§3.2 域声明）；在做不到异构前，单强模型验证者 + 仲裁是诚实且资源合理的形态。
 
-### 4.2 VerifierAgent：对抗式盲评
+### 4.2 VerifierAgent：独立复核（M2 形态：每文件批次 × 1 个强模型验证者）
 
-每条 `CandidateFinding` 派 **2 个** VerifierAgent 独立复核，规则：
+**批处理单元**：同一文件的候选 finding 合并为一个验证 brief（上下文按文件组织，天然省 token，见 04§2 算术）。
 
-**盲评（Blind）**——verifier 的 brief 只包含：
-- finding 的**断言本身**（category/title/description/evidence 位置/声称的失败模式）；
-- **原始代码上下文**（完整变更文件全文 + 相关切片，与 reviewer 同级或更全）；
-- **不包含**：发现者身份、发现者的推理过程、confidence、其他 verifier 的结论。
+**输入**：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段。
 
-目的：防止锚定效应——verifier 若先看到"这里有空指针"的完整论证，会倾向于顺着找支持证据。对抗式设定要求它**独立重建证据链**。
-
-**证伪导向（Refute-or-Promote）**——verifier 的任务指令是"**推翻这条 finding**"，输出三值判定：
+**指令核心（平衡式复核）**：
 
 ```
-Verdict ∈ { REFUTED, CONFIRMED, INSUFFICIENT_EVIDENCE }
-- REFUTED：必须给出反证（如"第 87 行已有 null 检查"引用具体行）
-- CONFIRMED：必须独立复现证据链（自己定位到行号并重述失败模式，不得照抄 finding 原文）
-- INSUFFICIENT_EVIDENCE：上下文不足以判断（如需要 diff 之外的调用方代码）
+你是独立复核员。下面是若干条待复核的代码评审结论及其原始代码上下文。
+对每一条：以同等强度寻找支持证据与反驳证据，独立作出判定。
+
+判定要求：
+- CONFIRMED：你必须 (a) 自己定位到证据行号（不得照抄结论中的引用），
+  (b) 用你自己的话重述失败模式——禁止复述结论原文的表述，
+  (c) 主动检查结论未提及的上下文（如上游已有防护、不可能触发的路径）后仍成立；
+- REFUTED：给出具体反证（行号 + 引用），如已有防护、行号张冠李戴、触发条件不可达；
+- INSUFFICIENT_EVIDENCE：当前上下文无法判断，用 read_file 补查一次后仍无法判断。
 ```
 
-`INSUFFICIENT_EVIDENCE` 时允许 verifier 使用一次受控工具调用（`read_file` 白名单扩一圈）补证后重新判定——这是 2.1 中"依赖切片预取"的兜底路径。
+**反锚定输出约束（可测试，替代 v1.0 的"断言剥离器"）**：CONFIRMED 判定的 `rationale` 必须包含 finding 原文中**未出现**的代码引用（自动校验：rationale 中的行号/代码片段与 finding 文本的重叠率低于阈值）。剥离器单测（M2 验收 2）相应改为**本约束的校验器单测**——这是可判定的：给定 rationale 与 finding 文本，机器可判重叠率。
 
-### 4.3 投票与晋升规则（Stage-Gated Promotion）
+### 4.3 判定与晋升规则
+
+**M2（单验证者 + 仲裁）**：
 
 ```
-2 个 verifier 均 CONFIRMED            → finding.status = CONFIRMED   → 进入发布
-2 个 verifier 均 REFUTED / INSUFF     → finding.status = REJECTED    → 丢弃（trace 留档）
-1 CONFIRMED + 1 REFUTED               → 分歧 → 交 JudgeAgent 仲裁
-1 CONFIRMED + 1 INSUFFICIENT          → JudgeAgent 仲裁（倾向降级为 nit）
+CONFIRMED                      → 发布
+REFUTED                        → 丢弃（trace 留档，进入拒真统计）
+INSUFFICIENT（补查后仍不能判）   → Judge 仲裁（仲裁者拥有更大上下文配额）
+security/important 级 REFUTED   → 抽查比例进 Judge 复核（防单个验证者错杀，
+                                 比例可配，默认 20%）——召回侧的保险丝
+验证不可得（超时/预算击穿，缩上下文重试 1 次仍失败）
+                               → UNVERIFIED，默认不发布（02§4.2）
 ```
 
-Security 类 finding 加严：必须 2/2 CONFIRMED 才 CONFIRMED，分歧一律仲裁且仲裁结果只能 CONFIRMED 或 REJECTED（安全类没有 nit 档）。
+**M3（异构双验证者投票，数据门禁开启）**：两个验证者**模型家族不同、指令模板不同**（V1 平衡复核 + 强模型；V2 证伪导向 + 异构模型）：
 
-### 4.4 JudgeAgent：分歧仲裁（保护正确少数派）
+```
+2/2 CONFIRMED → 发布；2/2 REFUTED → 丢弃
+混合/含 INSUFFICIENT → Judge 终裁（CONFIRMED / REJECTED / DOWNGRADE_TO_NIT）
+security 类：仅 2/2 CONFIRMED 或 Judge CONFIRMED 才发布
+```
 
-NeurIPS 2025 的结论：强求共识的辩论会杀死正确的少数派。因此仲裁设计为**终裁制**而非继续辩论：
+**开启门禁**（M2 末用数据决定）：M2 的拒真统计（REFUTED 中被 Judge 推翻的比例）≥10%，或发布精确率未达 80% 时，引入第二验证者；否则维持单验证者（成本低一半）。
 
-- Judge brief = finding 断言 + 双方 verifier 的**结论与证据**（此时代码上下文仍全量提供）；
-- Judge 被明确指令："两个验证者分歧时，其中一人可能是对的。你的任务是裁决哪一方证据链成立，而非折中。"
-- 输出：`CONFIRMED / REJECTED / DOWNGRADE_TO_NIT` + 裁决理由；
-- Judge 使用更强模型档位（LlmGateway 路由规则），调用次数少（仅分歧时），成本可控。
+### 4.4 JudgeAgent：一次性终裁（自主设计，无生产背书）
+
+- 适用于：INSUFFICIENT 仲裁、M3 分歧终裁、重要级 REFUTED 抽查；
+- brief = finding + 验证者判定与证据 + 更大配额的代码上下文；
+- 指令明确："分歧时其中一方可能是对的，裁决哪方证据链成立，不折中、不求共识"（Debate or Vote 的结论：辩论不必然优于投票，故仲裁是一次性的，不做多轮辩论）；
+- 强模型档位；调用次数少（仅上述场景），成本可控。
 
 ### 4.5 端到端判定流（伪代码）
 
 ```java
-List<CandidateFinding> cands = fanOutReviewers(plan, context);      // 并行隔离
-for (Batch<CandidateFinding> batch : groupByIdentity(cands)) {       // 同位置合并先做粗去重
-    CandidateFinding merged = mergeDuplicates(batch);
-    List<Verdict> verdicts = fanOutVerifiers(merged, 2);             // 并行盲评
-    merged.status = vote(verdicts);                                  // §4.3 规则
-    if (merged.status == DISPUTED) {
-        merged.status = judge(merged, verdicts);                     // 仲裁终裁
+List<CandidateFinding> cands = fanOutReviewers(plan, context);       // 并行隔离
+Map<FileKey, List<CandidateFinding>> byFile = groupByIdentity(cands); // 同位置粗去重后按文件分组
+for (var e : byFile.entrySet()) {
+    List<CandidateFinding> merged = mergeDuplicates(e.getValue());
+    VerifierReport r = verify(e.getKey(), merged);                    // 1(M2)/2(M3) 个验证者
+    for (CandidateFinding f : merged) {
+        f.status = switch (r.verdictOf(f)) {                          // §4.3 规则
+            case CONFIRMED -> CONFIRMED;
+            case REFUTED -> securityOrImportant(f) && spotCheck()
+                           ? judge(f, r) : REJECTED;
+            case INSUFFICIENT, UNAVAILABLE -> judge(f, r);            // 仲裁或 UNVERIFIED
+        };
+        if (f.status == CONFIRMED) publishable.add(f);
     }
-    if (merged.status == CONFIRMED) publishable.add(merged);
 }
 ```
 
-`groupByIdentity`：按 `(file, 行号区间重叠, category, 断言语义相似度)` 二级去重——先精确（同 file±3 行同 category），再语义（description 嵌入相似度 > 0.9，M2 实现；M1 只做精确去重）。
+`groupByIdentity` 去重：M2 精确去重（同 file ±3 行同 category）；M3 增语义去重（description 嵌入相似度 >0.9）。
 
 ## 5. 收敛控制（ConvergenceGuard）
 
-针对 Anthropic 观察到的"作者-评审者无限循环"（50+ 轮），流水线内置四条硬规则：
+1. **轮次上限**：同一 PR 验证-复审循环最多 3 轮，之后停止新 finding，Summary 提示"建议重新考虑实现方案"；
+2. **diff-only 复审**：PR 新 push 只评审增量 diff；已发布 finding 不重验证，除非涉及文件被后续 commit 修改；指纹从账本读取（02§5）；
+3. **finding 级去重**：该 PR 已发布 finding 指纹（账本）命中即抑制；
+4. **pre-existing 处理**：本地 jgit blame 复核（无本地仓库时降级为不标注并在 Summary 声明）；确认后标 `pre-existing` 单独列出，不占 nit 预算、不阻塞。
 
-1. **轮次上限**：同一 PR 的验证-复审循环最多 3 轮，之后停止新 finding，输出"建议重新考虑实现方案"级别的 summary 提示；
-2. **diff-only 复审**：PR 有新 push 时，只对**增量 diff** 重新评审；已确认/已发布 finding 不重新验证，除非其涉及文件被后续 commit 修改；
-3. **finding 级去重**：`ReviewStore` 记录该 PR 已发布 finding 的指纹（file+line+category+断言哈希），重复发现直接抑制；
-4. **pre-existing 处理**：git blame 复核确认 base 已存在的问题 → 标 `pre-existing` 单独列出（不计入本次 nit 预算、不阻塞），杜绝"59% 的 flagged 代码其实是存量"的信任损耗。
+## 6. 各子代理规格速查表（v1.1 重算，预算为默认值、部署配置可覆盖）
 
-## 6. 各子代理规格速查表
+| 子代理 | 数量/运行 | 模型档位 | 工具 | 输入预算 | 输出预算 | 轮次 |
+|---|---|---|---|---|---|---|
+| BugHunter | 每视角 1，并行 | 标准 | read_file(scoped) | ≤24k | ≤2k | 3 |
+| SecurityReviewer | 1 | 强 | read_file+grep(scoped) | ≤24k | ≤2k | 3 |
+| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤1k | 2 |
+| ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
+| PerfReviewer | 条件触发 | 标准 | read_file | ≤16k | ≤1k | 2 |
+| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次 | ≤1.5k | 2 |
+| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k | ≤1k | 2 |
 
-| 子代理 | 数量/运行 | 模型档位 | 工具 | 输出 schema | 预算（默认） |
-|---|---|---|---|---|---|
-| BugHunter | 每视角 1 实例，并行 | 标准 | read_file(scoped) | CandidateFinding[] | 8k in / 2k out / 3 轮 |
-| SecurityReviewer | 1 | 强 | read_file + grep(scoped) | CandidateFinding[] | 12k in / 2k out |
-| TestReviewer | 条件触发 | 标准 | read_file | CandidateFinding[] | 6k in / 1k out |
-| ConventionReviewer | 条件触发 | 轻 | 无（纯 brief） | CandidateFinding[] | 4k in / 1k out |
-| PerfReviewer | 条件触发 | 标准 | read_file | CandidateFinding[] | 8k in / 1k out |
-| VerifierAgent | 每候选 finding ×2 | 标准 | read_file(scoped+) | Verdict | 8k in / 1k out |
-| JudgeAgent | 仅分歧时 | 强 | read_file | Judgement | 10k in / 1k out |
+预算与算术假设的完整推导见 04§2（v1.0 的 8k 输入预算与"L1 全文总是注入"相差 10–20 倍，已重算）。
 
-所有数值均为部署级配置可覆盖项，集中在 `application.yml` 的 `cra.agents.*` 下。
+## 7. 设计依据溯源（v1.1 诚实化）
 
-## 7. 设计依据溯源（为什么这样设计）
-
-| 设计点 | 依据 |
-|---|---|
-| 多实例并行找 bug | Anthropic："multiple agents hunt bugs in parallel" |
-| 独立验证者投票、仅存活者发布 | Anthropic 同上；AEGIS-D 92.5% precision |
-| 证伪式 verifier 指令 | Refute-or-Promote（arXiv 2604.19049） |
-| 盲评（隐去发现者推理） | 锚定效应；Anthropic "fresh context" 原则的推广 |
-| 仲裁而非继续辩论 | NeurIPS 2025《Debate or Vote》：辩论不必然优于投票，需保护正确少数派 |
-| 轮次上限 / diff-only 复审 / 去重 | Anthropic 收敛修复（50+ 轮案例；一轮过率 65%→78%） |
-| pre-existing 标注 | Anthropic：git blame 显示 ~59% flagged 代码为存量 |
-| 安全独立 pass 且加严 | Anthropic：security review 为独立阻塞 pass |
-| 允许空结果输出 | Anthropic：要求"明确说明无需修改"的总结 |
+| 设计点 | 依据类型 | 说明 |
+|---|---|---|
+| 多实例并行找 bug | **Anthropic 原文** | "multiple agents hunt bugs in parallel" |
+| 独立验证者投票、仅存活者发布 | **Anthropic 原文**（存在性）；**本项目构造**（实现细节） | 博客未公开验证者数量/指令/独立性构造；本项目的验证者形态是自主设计 |
+| 轮次上限 / diff-only 复审 / finding 去重 | Anthropic 原文 | 收敛修复实践 |
+| pre-existing 标注（59% 存量） | Anthropic 原文 | 实现路径为本项目自定（jgit blame） |
+| 安全独立 pass 加严 | Anthropic 原文 | 加严规则细节为自定 |
+| 允许空结果输出 | Anthropic 原文 | "明确说明无需修改" |
+| **独立复核 + 反锚定输出约束** | **自主设计** | 替代 v1.0"盲评"（概念不成立）；锚定抑制靠输出约束而非信息隐藏 |
+| **平衡式复核指令（弃纯证伪）** | **自主设计** | Refute-or-Promote（C/C++ 域）的思想借鉴 + 拒真风险的修正 |
+| **Judge 一次性终裁** | **自主设计** | Debate or Vote 支持"投票>辩论"，故仲裁不做辩论循环 |
+| **验证者异构硬性要求** | **自主设计** | 由"N 个高相关性投票者等价于 1 个"公理推出；AEGIS-D 的误报下降依赖多样性前提（数学验证域，间接证据） |
+| 三重隔离、模型异构路由 | 自主设计 | 工程化构造 |
