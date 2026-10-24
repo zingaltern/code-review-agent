@@ -1,8 +1,9 @@
 # 05 · 数据模型与集成设计
 
-> 文档版本：v1.2（2026-10-25，响应第二轮评审缺陷 ①②③及遗漏细节）
-> **v1.1 修订**：SPI 增加本地 jgit blame；账本指纹规范；inline 锚定校验与逐条降级；workflow 仅 PR 触发 + artifact；安全检查单扩充。
-> **v1.2 修订**：§1.3 指纹 v2 + **解析器规则**（v1.1 未定义，账本可被评论正文引用的伪造标记污染）+ 发布侧转义剥离；§2.3 补 replies 双端点；§4 补 draft 过滤/ready_for_review/cli 分发方案与冲突、fork 限制声明。
+> 文档版本：v1.2.1（2026-10-25，响应第三轮评审缺陷 ①②⑤）
+> **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
+> **v1.2**：指纹 v2 + 解析器规则 + 发布侧转义剥离；replies 双端点；workflow draft 过滤与 cli 分发。
+> **v1.2.1**：§1.3 增加 **run 完成标记（status=DONE）**——commit 级幂等闸的"完整发布"判定依据（缺陷 ①）；§2.2/§2.3 **Summary 载体改为 issue comment**（`PATCH /pulls/comments/{id}` 只能编辑 inline 评论，已提交 review 的 body 在 REST v3 不可编辑——缺陷 ②，经官方文档钉死）；指纹标记含锚行上下文哈希（滑窗容错见 02§4.1）。
 
 ---
 
@@ -69,27 +70,38 @@
 }
 ```
 
-### 1.3 账本指纹规范（v1.2：指纹 v2 + 解析器规则）
+### 1.3 账本指纹规范（v1.2.1：DONE 完成标记）
 
-**发布格式**：每条 bot 评论体末尾内嵌 HTML 注释（渲染不可见）：
+**两类标记，同套解析规则**：
+
+**finding 级标记**（每条 inline bot 评论末尾）：
 
 ```markdown
 **[Important] Offset 计算在空列表时越界** — `src/…/Foo.java:87`
 …(转义后的 finding 正文)…
-<!-- cra:v=2 | fp=<anchor_line_content_hash|anchor_context_hash 截断十六进制>
+<!-- cra:v=2.1 | fp=<anchor_line_content_hash|anchor_context_hash 截断十六进制>
      | file=src/…/Foo.java | cat=bug | id=f_01hxy… | run=run_01hxy…
      | commit=abc1234 | line=87 -->
 ```
 
-指纹键构成（完整定义见 02§4.1）：`file_path | category | 代码行内容哈希 | ±2 行上下文哈希`——**不含任何 LLM 生成文本与绝对行号**（assertion 措辞漂移、跨 push 行漂移均不影响）；`line=` 字段仅作展示辅助，不参与键。
+**run 完成标记**（每次 run 收尾发布的 Summary issue comment 末尾，v1.2.1 新增——commit 级幂等闸**只认它**）：
 
-**解析器规则（v1.2 补齐——账本是被评审代码可达的输入，必须防污染）**：
+```markdown
+…(Summary 正文：概述/分级列表/覆盖声明/截断声明)…
+<!-- cra:v=2.1 | run=run_01hxy… | commit=abc1234 | status=DONE | findings=5 | suppressed=0 -->
+```
 
-1. **仅认末位**：只解析评论 body 的**最后一行**之后（即 body 末尾）且**位于任何代码围栏之外**的 `cra:` 标记；正文中间、代码块内的同类标记一律忽略；
-2. **严格格式校验**：`v=` 必须为已知版本、字段集合与顺序合法、哈希为规整十六进制；任一不满足 → 忽略该标记 + trace 记 `LEDGER_SUSPECT`（同一 PR 出现 ≥3 次可疑标记时 Summary 警告，疑似注入尝试）；
-3. **发布侧双向防护**：finding 正文转义时将 `<!--` 替换为 `&lt;!--`（正文永远不可能再产生未转义 HTML 注释）；指纹行由发布器在全部正文之后追加；
-4. **一致性校验**：标记内 `commit` 与该 PR 评论所在 run 记录不符 → 忽略该标记；标记 `file` 与评论正文 file:line 不一致 → 忽略并告警；
-5. **兜底分层**（对应 02§4.1）：解析不到任何有效标记 → 退回 **commit 级幂等闸**（同 sha 仍跳过，防重复回帖），仅指纹级去重失效；**永不**退到"空账本全量重发"。
+无 DONE 标记的 run（发布中途崩溃、被 cancel-in-progress 掐断）视为**不完整**：重跑时不全量跳过，走指纹级补发（02§4.1）——修复"发布 3/8 条后崩溃的 run 与完整发布在账本中不可区分，余下 5 条永久静默"的缺陷。
+
+指纹键构成与锚行选取规则、±5 行滑窗容错匹配：见 02§4.1（**不含 LLM 生成文本与绝对行号**）。
+
+**解析器规则（防污染，两类标记同规则）**：
+
+1. **仅认末位**：只解析评论 body 的**最后一行**之后（body 末尾）且**位于任何代码围栏之外**的 `cra:` 标记；正文中间、代码块内的同类标记一律忽略；
+2. **严格格式校验**：`v=` 必须为已知版本、字段集合与顺序合法、哈希为规整十六进制；`status=` 仅允许 DONE/DEGRADED；任一不满足 → 忽略该标记 + trace 记 `LEDGER_SUSPECT`（同一 PR 出现 ≥3 次可疑标记时 Summary 警告，疑似注入尝试）；
+3. **发布侧双向防护**：finding 正文转义时将 `<!--` 替换为 `&lt;!--`（正文永远不可能再产生未转义 HTML 注释）；标记行由发布器在全部正文之后追加；
+4. **一致性校验**：标记内 `commit` 须与该评论所属 PR 的 run 上下文一致（run 上下文由同 PR 的 DONE 标记链提供，不依赖运行器侧记录）；标记 `file` 与评论正文 file:line 不一致 → 忽略并告警；
+5. **兜底分层**（对应 02§4.1）：解析不到任何有效标记 → 退回 **commit 级幂等闸**（有 DONE 才跳过），仅指纹级去重失效；**永不**退到"空账本全量重发"。
 
 ### 1.4 Trace 格式（NDJSON）
 
@@ -98,8 +110,9 @@
 {"ts":"…","event":"agent_output","agent":"…","findings":3,"tokens":{…},"latency_ms":8200}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{…}}
 {"ts":"…","event":"anchor_check","finding_id":"f_…","status":"SUMMARY_FALLBACK"}
+{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
-{"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"suppressed_by_truncation":0}
+{"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"suppressed_by_truncation":0,"done_marker":true}
 ```
 
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
@@ -133,17 +146,33 @@ public interface LocalRepoContext {                                            /
 - **blame 走本地 jgit**：GitHub REST/GraphQL 均无行级 blame 端点（open feature request）。CI workflow 本就 checkout 仓库，本地模式天然有仓库；`localRepoRoot()` 为空（如未来服务形态无 checkout）时 pre-existing 检测**降级为不标注 + Summary 声明**，不假装有该能力；
 - v1.0"不再依赖本地 git 进程"的说法**收回**：diff 获取用 compare API（不依赖 fetch-depth），blame 用本地 jgit，两者并存。
 
-### 2.2 发布：锚定校验与逐条降级（v1.1 新增，防整包 422）
+### 2.2 发布：载体分离 + 锚定校验与逐条降级（v1.2.1 修正端点）
 
-1. 提交前逐条校验：finding 的 (file, line) 必须落在该 PR diff 的某个 hunk 内（PR Review API 硬性要求）；pre-existing finding 与窗口边缘 finding 常不满足；
-2. 不满足者 `anchor_status=SUMMARY_FALLBACK`：正文进 Summary 列表（带 file:line 普通链接，无 inline 定位）；
-3. 提交策略：整包一次 review 请求；收到 422 → 降级为逐条提交，仍失败的按 SUMMARY_FALLBACK；全部结果回写账本。
+**载体分离（缺陷 ② 修复，经官方文档钉死）**：`PATCH /repos/{o}/{r}/pulls/comments/{id}` **只能编辑 inline diff 评论**；已提交 PR review 的 body 在 REST v3 下**不可编辑**（update-review 仅对 pending review 生效），GraphQL 的 updatePullRequestReview 才能改——本项目锁 REST v3。因此：
 
-### 2.3 GitHub 实现要点
+1. **Summary = issue comment**（`POST /repos/{o}/{r}/issues/{n}/comments`）：可编辑（PATCH 同端点，用于 02§5 过期收尾前缀）、有独立 reaction API（处置采集新增 👍/👎 快捷信号，06§1.1）、文末带 run 完成标记（§1.3）；
+2. **PR review 只装 inline 评论**：body 为固定引导语（"发现 N 条问题，详见本 PR 的评审 Summary 评论"，不能为空）；
+3. 发布顺序：先发 inline review → 再发 Summary issue comment（含 DONE 标记）——DONE 标记存在即"完整发布"证据（02§4.1）。
 
-认证 `GITHUB_TOKEN`；读 `X-RateLimit-Remaining` 主动节流 + 指数退避（≤3 次）；inline comment 走 PR Review API（`commit_id` 绑定 head sha, event=COMMENT）；bot 身份识别按 token 对应 login（CI 内为 `github-actions[bot]`）。
+**锚定校验与逐条降级**（不变）：
 
-**账本与处置采集的端点覆盖（v1.2 补）**：bot 的 inline 评论与 review replies 分属两类端点（`pulls/comments` 与 review replies 线索）——`fetchBotComments` 须同时轮询 pulls 评论端点与 review 评论端点并合并去重；**resolve 状态为 GraphQL-only**，本项目锁 REST v3，处置采集不使用 resolve 信号（06§1.1）。上一轮 Summary 的 PATCH 收尾（02§5 评论生命周期）用 `PATCH /repos/{o}/{r}/pulls/comments/{id}`（bot 自己的评论可改）。
+1. 提交前逐条校验：finding 的 (file, line) 必须落在该 PR diff 的某个 hunk 内；不满足者 `anchor_status=SUMMARY_FALLBACK`（正文进 Summary 列表）；
+2. 提交策略：整包一次 review 请求；收到 422 → 降级为逐条提交，仍失败的按 SUMMARY_FALLBACK；全部结果回写账本。
+
+### 2.3 GitHub 实现要点（v1.2.1 端点清单修正）
+
+认证 `GITHUB_TOKEN`；读 `X-RateLimit-Remaining` 主动节流 + 指数退避（≤3 次）；inline comment 走 PR Review API（`commit_id` 绑定 head sha, event=COMMENT）；**Summary 走 issue comments 端点**（§2.2）；bot 身份识别按 token 对应 login（CI 内为 `github-actions[bot]`）。
+
+**端点清单（按用途锁定）**：
+
+| 用途 | 端点 | 说明 |
+|---|---|---|
+| inline 评论发布 | `POST /repos/{o}/{r}/pulls/{n}/reviews` | 只装 inline，body 固定引导语 |
+| Summary 发布/收尾编辑 | `POST` / `PATCH /repos/{o}/{r}/issues/{n}/comments/{id}` | issue comment 可编辑（review body 不可） |
+| Summary reaction（处置信号） | `POST /repos/{o}/{r}/issues/comments/{id}/reactions` | 👍/👎 快捷处置（06§1.1） |
+| 账本拉取 | `GET /pulls/comments` + `GET /issues/{n}/comments` + review replies 线索 | bot 的 inline 与 Summary 分属不同端点，合并去重（v1.2 已定） |
+
+**resolve 状态为 GraphQL-only**：REST v3 锁定下不采、不操作（06§1.1、02§5）。
 
 ## 3. CLI 契约（cra-runner-cli）
 
@@ -224,7 +253,7 @@ cra:
         v1: { model: strong,  template: balanced-review }
         v2: { model: "<异构>", template: refute-oriented }
       important-refuted-spotcheck: 0.20       # 拒真保险丝（03§4.3）
-    budget: { run-total-tokens: 400000, degrade-at: [0.6, 0.8] }
+    budget: { run-total-tokens: 500000, degrade-at: [0.70, 0.85] }   # v1.2.1：500k + 阈值重校（02§4.4）
   review:
     default-depth: standard
     large-diff-lines: 2000

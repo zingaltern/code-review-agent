@@ -1,8 +1,9 @@
 # 07 · 实施路线图与任务拆解
 
-> 文档版本：v1.2（2026-10-25，响应第二轮评审缺陷 ①③④⑤⑨）
-> **v1.2 修订**：T1.2 指纹 v2 + 过期评论收尾；T1.8 数据集改 Defects4J 双侧生成并调整数量；**新增 T1.9 整仓 fixture 规格**（v1.1 把子系统级工程塞进一个 checkbox）；T2.4 反锚定校验降级为质控信号；T2.10 pre-PR 增实跑 `mvn verify` 并展示输出（对齐博客"展示输出而非声称完成"）；M2 验收改**聚合 Wilson CI 判定**并新增账本污染/生命周期用例；T3.3 门禁三级分级；T3.6 加最小样本量门槛。
+> 文档版本：v1.2.1（2026-10-25，响应第三轮评审 7 项缺陷 + 三功能框架写入）
+> **v1.2.1 修订**：T0.5/T1.2 验收依赖 **DONE 完整发布标记**（05§1.3）与 **Summary issue comment 载体**（05§2.2，两个 API 事实修正的前置）；M1 验收 1 增锚行漂移用例（滑窗容错）；M2 验收 2/6 对齐聚合 Wilson 口径与 500k 预算；**新增 M4f CrossChecker**（三功能框架的 cross check 落地，01§3.4/03§0）。
 > 面向后续开发 agent：按里程碑顺序执行，**未达验收标准不进入下一阶段**。
+> **数字与端点纪律（三轮评审的教训成文）**：任何写入任务/验收的数字（阈值、预算、概率、百分比）与任何点名的 API 端点，提交前必须独立推演或对照官方文档核查一遍——三轮 24 项缺陷无一出在思路，几乎全部出在这两类细节。
 
 ---
 
@@ -30,14 +31,14 @@
 - [ ] T0.2 cra-llm：`LlmGateway` 最小实现——单模型、chat+JSON 双模式、超时重试、并发信号量（8）、token 计数；
 - [ ] T0.3 cra-git-github：`fetchDiff`（compare API）+ `postReview`（含锚定校验与逐条降级最小版）+ `readFile`；WireMock 录制回放单测；
 - [ ] T0.4 cra-agents：单一 `GeneralReviewer` prompt（04§4.1 简化版），UNTRUSTED 定界从第一天内建；
-- [ ] T0.5 cra-core：线性 pipeline：assemble → review(×1) → publish；**commit 级幂等闸**（02§4.1 第一道闸：拉 bot 历史评论标记，同 commit_sha 已有成功 run 则只更新 Summary）；
+- [ ] T0.5 cra-core：线性 pipeline：assemble → review(×1) → publish；**commit 级幂等闸**（02§4.1：账本存在该 commit 的 **status=DONE 标记**才全量跳过——run 收尾必须发 Summary issue comment 带 DONE 标记，05§1.3/§2.2）；
 - [ ] T0.6 cra-runner-cli：`cra review` + 参数解析 + 退出码（05§3）；
 - [ ] T0.7 自举 workflow（05§4：PR 触发 + draft 过滤 + maven 缓存分发 + artifact 上传）跑通真实回帖。
 
 **验收**：
-1. fixture 仓库提 PR，2 分钟内收到 inline comment；位置非法的 finding 出现在 Summary 而非导致 422；
+1. fixture 仓库提 PR，2 分钟内收到 inline comment + **Summary issue comment（文末含 DONE 标记）**；位置非法的 finding 出现在 Summary 而非导致 422；
 2. `--dry-run` 全程零写操作（单测断言）；
-3. 同一 commit 重复触发（含 CI 重跑）不产生重复 comment（**commit 级闸**生效——指纹级属 M1）；
+3. 同一 commit 重复触发（含 CI 重跑）不产生重复 comment（DONE 闸生效）；**人为掐断发布中途的 run（无 DONE）→ 重跑补发缺失条目、已发布不重发**（v1.2.1 新增用例，防"其余 finding 永久静默"）；
 4. trace artifact 可下载且含 brief 全文；
 5. LLM 重试与 GitHub 退避单测通过；CI 全绿。
 
@@ -56,13 +57,13 @@
 - [ ] **T1.9 整仓 fixture 规格与工具链（v1.2 新增）**：快照裁剪打包、加载器（构造 ReviewRequest 跑流水线）、断言器（位置 ±5 行 + 类别 + 断言关键词）、`cra-eval annotate` 半自动标注——这是子系统级工程，M2/M3 全部召回验收的数据前提。
 
 **验收**：
-1. 连续 push 两次：第二次只评审增量、无重复 comment；**上方插入 10 行后同 bug 不因行漂移重发**（代码内容锚生效）；
+1. 连续 push 两次：第二次只评审增量、无重复 comment；漂移用例三连：**上方插 10 行**（锚行内容不变 → 抑制）、**改锚行 ±2 行内非锚行内容**（滑窗 ±5 命中 → 抑制）、**改锚行本身**（内容已变 → 判新问题，符合语义）；
 2. 账本污染测试：构造含伪造 `<!-- cra:… -->` 代码注释的 PR，解析器忽略正文标记（05§1.3 规则 1/2 生效，单测+集成各一）；
-3. 过期收尾：第二次 push 后上一轮 Summary 带 `[已被 run_xxx 取代]` 前缀，inline 未被删除（处置采集依赖仍在）；
+3. 过期收尾：第二次 push 后上一轮 **Summary issue comment** 带 `[已被 run_xxx 取代]` 前缀（PATCH /issues 端点），inline 未被删除（处置采集依赖仍在）；
 4. 2000+ 行 diff 正常完成且降档、截断计数、覆盖范围在 Summary 如实声明；
 5. 在 PR 中修改 REVIEW.md 加 `Skip paths: src/**`，评审不受影响且 Summary 出现策略变更警告；
 6. 对抗集注入用例 3 次运行零行为改变；
-7. T1.8/T1.9 就位，`cra-eval run` 出首份聚合指标报告（检出率 + Wilson 区间）。
+7. T1.8/T1.9 就位（含测试 hunk 过滤与 recheck 通道，06§3），`cra-eval run` 出首份聚合指标报告（检出率 + Wilson 区间，**数值用正确 Wilson 公式**）。
 
 ## 3. M2：隔离审查 + 独立复核 + pre-PR（核心）
 
@@ -82,11 +83,11 @@
 
 **验收（L3 全量口径：k=3、聚合 Wilson CI 判定，06§1.2；数据集 = T1.8）**：
 1. 对抗集幻觉用例：聚合拒绝率 ≥80%；
-2. **召回下限（聚合）**：bad 12 种子检出率 Wilson 95% 下界 ≥0.60；**零发布护栏**：任一种子样本 3 次运行全零 confirmed = 验收失败；
+2. **召回下限（聚合）**：bad 12 种子检出率 Wilson 95% 下界 ≥0.60（L3 standard 档阈值，quick 档另维护基线，06§1.2）；**零发布护栏（聚合）**：全部 样本×运行 观测零 confirmed 占比 ≤1/12；
 3. 反锚定质控链路：trace 中 PASS/FAIL 可查、周报可聚合；**单行 off-by-one 类种子样本不因 FAIL 被拒**（FAIL 不阻断的直接验证）；
 4. 注入防御回归：M1 验收 5/6 持续通过；
 5. 单 reviewer 注入超时 → run DEGRADED 完成并声明；验证不可得 → UNVERIFIED 计数出现在 Summary；预算截断 → `suppressed_by_truncation` 进 Summary；
-6. Standard 档（≤2k 行、≤10 文件）p95 ≤5min；**成本实测对照 04§2.2 算术（≈330k），偏差 >30% 必须回改文档**；
+6. Standard 档（≤2k 行、≤10 文件）p95 ≤5min；**成本实测对照 04§2.2 算术（≈330k / 500k 预算 = 66%，不得触发 70% 降档）**，偏差 >30% 必须回改文档；
 7. clean 8（真实代码样本）误报均值对比 M1 单 reviewer 基线下降 ≥30%（分母为真实代码 diff，可判定）；
 8. `cra review --local` 在一个注入了会挂测试的分支上：报告**如实展示测试失败输出**且退出码非零；在正常分支输出建议清单——pre-PR 不是空壳的直接证据。
 
@@ -108,11 +109,12 @@
 
 ## 5. M4：可选池（按需排期，互不依赖）
 
-- **M4a 风险分级建议**：Low/Medium/High 建议（只建议不审批）；
-- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；
+- **M4a 风险分级建议**：Low/Medium/High 建议（只建议不审批——三功能框架中的"担责"侧辅助：帮人决定谁签字/几个人签，01§3.4）；
+- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；
 - **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）；
 - **M4d 夜间存量评审**：产出 issue 而非 PR comment；
-- **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**。
+- **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**；
+- **M4f CrossChecker（v1.2.1 新增，三功能框架的 cross check 落地，01§3.4/03§0）**：对齐上下文的主动 cross check 角色——**输入不含 diff**：上下游近期变更史（依赖该模块的调用方、被调服务最近 commit）、产品事件史（事故复盘/工单）、数值与配置参照系（超时/重试/限额类参数的合理区间）；输出"代码本身正确但与上下文假设矛盾"类 finding（数量级不对、与下游默认值冲突——会话超时事故类型的针对性防线）；实现前置条件：变更史与事件史的采集管道（依赖 M4b 服务化的定时任务）。
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 
