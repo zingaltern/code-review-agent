@@ -1,9 +1,10 @@
 # 05 · 数据模型与集成设计
 
-> 文档版本：v1.2.1（2026-10-25，响应第三轮评审缺陷 ①②⑤）
+> 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
 > **v1.2**：指纹 v2 + 解析器规则 + 发布侧转义剥离；replies 双端点；workflow draft 过滤与 cli 分发。
-> **v1.2.1**：§1.3 增加 **run 完成标记（status=DONE）**——commit 级幂等闸的"完整发布"判定依据（缺陷 ①）；§2.2/§2.3 **Summary 载体改为 issue comment**（`PATCH /pulls/comments/{id}` 只能编辑 inline 评论，已提交 review 的 body 在 REST v3 不可编辑——缺陷 ②，经官方文档钉死）；指纹标记含锚行上下文哈希（滑窗容错见 02§4.1）。
+> **v1.2.1**：run 完成标记（status=DONE）；Summary 载体改 issue comment；滑窗容错（02§4.1）。
+> **v1.3.1**：§1.1 Finding 枚举补 **`context`**（v1.3 新增 CrossChecker 的输出类别未传播到 schema，其全部输出会被 schema 校验拒收——四轮里第三次同类病）；§4 补回滚职责注（修复 01§3.4 悬空引用）；§5 补 CrossChecker 配置项。
 
 ---
 
@@ -15,7 +16,7 @@
 {
   "id": "f_01hxy…",
   "run_id": "run_01hxy…",
-  "category": "bug|security|test|convention|performance",
+  "category": "bug|security|test|convention|performance|context",   // v1.3.1 增 context（CrossChecker，03§3.1）；context 类默认 important 档（业务/产品矛盾不产 nit）
   "title": "Offset 计算在空列表时越界",
   "description": "当 items 为空时 size()-1 返回 -1，导致 get(-1) 抛 IndexOutOfBoundsException",
   "failure_mode": "触发条件：items 为空列表；错误结果：IndexOutOfBoundsException",
@@ -194,6 +195,8 @@ cra-eval report --repo zingaltern/code-review-agent --since 7d
 
 **已知平台限制（显式声明，见 02§5 触发边界表）**：冲突 PR（mergeable=conflicting）的 `pull_request` workflow **不触发**（GitHub 官方行为）——该场景静默无评审，冲突解决后的 synchronize 会正常触发；fork PR 无 secrets 访问（当前个人仓库无碍，多协作者时引入 App token）。
 
+**回滚兜底职责（v1.3.1 补注，兑现 01§3.4"先兜底再减负"约束的引用）**：快速回滚能力属**部署侧**而非本组件——启用本评审组件削减人工逐行审查的仓库，应同时配置：分支保护 + 按风险分级的人工审批（M4a 建议输出）、合并队列、必要时特性开关；本组件不提供也不假装提供回滚能力。
+
 ```yaml
 name: code-review-agent
 on:
@@ -245,7 +248,11 @@ cra:
     fallback-chain: [standard, light]
     max-concurrency: 8              # v1.1：LLM 并发信号量
     per-model-rpm: { standard: 60, strong: 30, light: 60 }
-  agents:
+  agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）
+    crosschecker:
+      enabled: false             # M4f-lite 起可开
+      mode: [assumption, sniff]  # 模式 A/B 开关（03§3.1）
+      history-weeks: 8           # 上下游变更史回溯窗口
     verifier:
       mode: single                  # M2: single | M3: dual-vote
       dual-vote:

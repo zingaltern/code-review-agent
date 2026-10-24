@@ -1,10 +1,14 @@
 # 07 · 实施路线图与任务拆解
 
-> 文档版本：v1.3（2026-10-25，整合博主视频设计指导）
-> **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项；数字与端点纪律。
-> **v1.3**：T1.4 解析器支持新段落类型（Product context / Known incidents / Sniff tests）；M4a 吸收**三条签字规矩与风险分级表**（01§3.4 担责）；M4f 拆为 **f-lite（零服务依赖）与 f-full（依赖 M4b）两阶段**（03§3.1 CrossChecker 详设的落地排期）。
+> 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ⑥及终审建议）
+> **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项。
+> **v1.3**：T1.4 新段落解析；M4a 签字规矩；M4f 拆 f-lite/f-full。
+> **v1.3.1**：M1 验收 6 与 04§2.4 口径统一（**负向不变量断言**，seed best-effort 局限）；M4f-lite 验收关联对抗集第 4 类；T3.2 对抗集扩充含 context 用例。
 > 面向后续开发 agent：按里程碑顺序执行，**未达验收标准不进入下一阶段**。
-> **数字与端点纪律（三轮评审的教训成文）**：任何写入任务/验收的数字（阈值、预算、概率、百分比）与任何点名的 API 端点，提交前必须独立推演或对照官方文档核查一遍——三轮 24 项缺陷无一出在思路，几乎全部出在这两类细节。
+> **提交前核查纪律（三条腿，四轮 34 项缺陷的教训成文）**：
+> 1. **数字**：任何写入任务/验收的阈值、预算、概率、百分比——独立推演一遍（第三轮 6 项缺陷的来源）；
+> 2. **端点**：任何点名的 API 端点/平台行为——对照官方文档核查一遍（第三轮另一来源）；
+> 3. **跨文档传播**：任何新增角色/类别/段落/标记——对全部文档 grep 一遍，核对 schema（05）、算术与速查表（04§2、03§6）、验证与上下文模型（03§4、04§1）、评测与验收（06、07）、workflow 与配置（05§4-5）**全部接上**（第四轮 6 项缺陷中 4 项的来源——v1.3 造了发动机没接变速箱）。
 
 ---
 
@@ -63,7 +67,7 @@
 3. 过期收尾：第二次 push 后上一轮 **Summary issue comment** 带 `[已被 run_xxx 取代]` 前缀（PATCH /issues 端点），inline 未被删除（处置采集依赖仍在）；
 4. 2000+ 行 diff 正常完成且降档、截断计数、覆盖范围在 Summary 如实声明；
 5. 在 PR 中修改 REVIEW.md 加 `Skip paths: src/**`，评审不受影响且 Summary 出现策略变更警告；
-6. 对抗集注入用例 3 次运行零行为改变；
+6. 对抗集注入用例：以**负向不变量断言**判定（04§2.4——断言输出与发布集合不出现注入目标行为，天然抗抖动；seed 是 best-effort 不可依赖），3 次运行零目标行为；
 7. T1.8/T1.9 就位（含测试 hunk 过滤与 recheck 通道，06§3），`cra-eval run` 出首份聚合指标报告（检出率 + Wilson 区间，**数值用正确 Wilson 公式**）。
 
 ## 3. M2：隔离审查 + 独立复核 + pre-PR（核心）
@@ -97,7 +101,7 @@
 **任务**：
 
 - [ ] T3.1 评测框架完善：k 次运行调度、**聚合 Wilson CI 判定**、容差带、指标报告（06§1.2）；
-- [ ] T3.2 bad 扩到 ≥30 + clean ≥20（Defects4J 双侧流水线批量生成 + `cra-eval annotate`）+ 对抗集扩充；
+- [ ] T3.2 bad 扩到 ≥30 + clean ≥20（Defects4J 双侧流水线批量生成 + `cra-eval annotate`）+ 对抗集扩充（含 context 类用例 ≥2，06§1.2 第 4 类）；
 - [ ] T3.3 回归门禁三级分级落地（04§2.4）：L1 快检进 CI（每 PR）、L2 本地跑 + CI 校验报告哈希、L3 里程碑/大改；
 - [ ] T3.4 处置采集与周报：`cra-eval report` 拉账本（双端点合并、无 resolve 信号）聚合全部指标含漏斗与截断率（06§1.1）；
 - [ ] T3.5 badcase 固化命令与流程（06§2）；
@@ -118,7 +122,7 @@
 - **M4f CrossChecker（v1.3 按 03§3.1 详设拆两阶段）**：
   - **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；
   - **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库，M4b 定时任务）——"检索矛盾事件"的完整数据面； tribal knowledge 不可见是硬边界（01§3.4），本项只覆盖已文档化部分；
-  - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源。
+  - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源；该 fixture 同步固化为对抗集第 4 类用例（06§1.2）进 L3 门禁——context 召回有持续度量，不靠单例自证。
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 

@@ -1,14 +1,15 @@
 # 03 · 核心设计：子代理隔离审查与评判
 
-> 文档版本：v1.3（2026-10-25，整合博主视频设计指导）
+> 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ②③④）
 > **v1.1**：放弃"盲评"改为独立复核；验证者多样性为硬性前提；溯源表诚实化。
 > **v1.2**：反锚定校验降级为 trace 质控信号；抽查确定性抽样。
 > **v1.2.1**：三功能框架映射（01§3.4）；CrossChecker 角色占位。
-> **v1.3**：§0 映射扩写（A/B 赛马对账 → M3 形态；人踩刹车）；**§3.1 CrossChecker 两模式详设**（隐含假设核对 + sniff test set，输入非代码）；§5 轮次上限语义强化（三轮不收敛 = 打回重新设计）。
+> **v1.3**：§3.1 CrossChecker 两模式详设；A/B 赛马映射；轮次打回语义。
+> **v1.3.1**：§3.1 修正"输入不含 diff"的自我矛盾表述（diff 参与假设推导，本质区别是**额外上下文输入 + 检查对象不同**）+ 局限声明（切片启发式，召回无保证）；**§4.2 verifier/judge brief 按 category 分型组装**（context 类注入 cited commit diff 节选与 REVIEW.md 条目——否则验证层对 context 证据失明，必然 INSUFFICIENT→拒杀）；§6 补 CrossChecker 预算行。
 
 ## 0. 三功能框架映射（框架与案例见 01§3.4）
 
-评审的三个功能在本设计中的载体：**挑错 = 本文档全部机制**——隔离并行发现（§3）+ 独立复核 double check（§4，"全新上下文的子 agent 独立复查"，财务与审计分开，不让刚写完代码的 agent 审自己）+ 仲裁；**对齐上下文 = §3.1 CrossChecker**（cross check：从与代码无关的角度核对——输入不含 diff）；**担责 = 明确出界**：所有子代理只产出 finding 建议，approval 签字永远是人（01§2.5）。
+评审的三个功能在本设计中的载体：**挑错 = 本文档全部机制**——隔离并行发现（§3）+ 独立复核 double check（§4，"全新上下文的子 agent 独立复查"，财务与审计分开，不让刚写完代码的 agent 审自己）+ 仲裁；**对齐上下文 = §3.1 CrossChecker**（cross check：检查隐含假设与外部证据的矛盾，额外上下文输入 = 变更史/产品段落，diff 仍参与假设推导）；**担责 = 明确出界**：所有子代理只产出 finding 建议，approval 签字永远是人（01§2.5）。
 
 方法级映射（v1.3 补）：
 
@@ -82,7 +83,7 @@ interface SubAgent<I, O> {
 | TestReviewer | 逻辑文件变更且测试变更比例低 | diff + 测试目录结构 | 测试缺口类 |
 | ConventionReviewer | REVIEW.md 定义约定时 | diff + REVIEW.md 约定段 | 约定违反（多为 nit） |
 | PerfReviewer | Deep 或命中 perf 路径 | diff + 热点标注 | 性能风险类 |
-| **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full（03§3.1） | **非 diff**（见 §3.1） | "代码本身正确但与上下文假设矛盾"类 finding |
+| **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full | **diff（假设推导用）+ 额外上下文输入**：上下游变更史、产品背景段（见 §3.1） | "代码本身正确但与上下文假设矛盾"类 finding（category=context） |
 
 Reviewer prompt 原则（模板见 04）：
 
@@ -91,35 +92,37 @@ Reviewer prompt 原则（模板见 04）：
 3. pre-existing 嫌疑置 `pre_existing_suspect=true`，由编排器用本地 jgit blame 复核（05§2）；
 4. brief 注入剩余 nit 配额。
 
-### 3.1 CrossChecker 详设（v1.3 新增——cross check 的工程化，对齐上下文功能）
+### 3.1 CrossChecker 详设（v1.3 新增，v1.3.1 修正表述与接缝）
 
-**定位**：double check 永远查不出的一类问题——破坏改动的上下文**不在 diff 里**（01§3.4 会话超时案例：代码隐含假设"后台任务都在常规会话内跑完"，六周前的企业定制恰好破坏它，CI/AI/人都看不见）。CrossChecker 与其他 reviewer 的本质区别：**输入不含 diff 本身**。
+**定位**：double check 查不出的一类问题——破坏改动的上下文**不在 diff 里**（01§3.4 会话超时案例：代码隐含假设"后台任务都在常规会话内跑完"，六周前的企业定制恰好破坏它，CI/AI/人都看不见）。**与其他 reviewer 的本质区别（v1.3.1 修正表述）：检查对象与证据来源不同**——它检查的是"变更的隐含假设 vs 外部证据（变更史/产品背景）的矛盾"，证据主体在代码之外；**diff 仍参与**（用于推导隐含假设，不给 diff 推导立即崩坏），并额外注入变更史与产品段两类上下文。它不是"纯度更高的 reviewer"，是**带额外上下文输入与不同检查对象的 reviewer**。
 
 **模式 A：隐含假设核对（assumption check）**
 
 ```
-输入（均为已文档化信息——tribal knowledge 不可见，01§3.4 规律）：
-  a. 本次变更 diff（仅用于推导隐含假设，不是审查对象）
+输入：
+  a. 本次变更 diff 的精简视图（hunk 头 + 增删行，用于推导隐含假设）
   b. 上下游路径近期变更史：jgit log 近 N 周（默认 8）内，
      调用方/被调方路径（依赖切片同源的路径集）的 commit 摘要
   c. REVIEW.md 产品背景段（04§3.1：Product context / Known incidents）
 
-流程：从 diff 推导隐含假设清单（超时/容量/并发/顺序/环境类）
+流程：从 a 推导隐含假设清单（超时/容量/并发/顺序/环境类）
   → 对每个假设检索 b/c 中近期的矛盾事件
-  → 命中即产出 finding（category=context，引用矛盾事件的具体来源：
-     commit sha 或 REVIEW.md 条目——证据规则与 §3 相同）
+  → 命中即产出 finding（category=context，默认 important 档，引用矛盾事件
+     的具体来源：commit sha 或 REVIEW.md 条目——证据规则与 §3 相同）
 ```
 
 **模式 B：嗅探检查集执行（sniff test set）**
 
-owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口径/常见 pattern，如"超时类参数不得超过 X""报表两张表的口径必须一致"），CrossChecker 逐条对照变更——**人的 cross check 写下来即外推为机器的 double check**（01§3.4 规律的执行端）；ConventionReviewer 处理代码约定，CrossChecker 处理业务/数值类嗅探，二者输入与检查性质不同。
+owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口径/常见 pattern，如"超时类参数不得超过 X""报表两张表的口径必须一致"），CrossChecker 逐条对照变更——**人的 cross check 写下来即外推为机器的 double check**（01§3.4 规律的执行端）；ConventionReviewer 处理代码约定，CrossChecker 处理业务/数值类嗅探，二者检查性质不同。
+
+**局限声明（v1.3.1 新增，诚实边界）**：模式 A 的"上下游路径集"来自 grep 一跳切片——**会话超时案例中"六周前的企业定制"是否落入切片路径集是启发式的，context 类召回无结构性保证**；度量上不依赖单一 fixture 自证：对抗集设第 4 类 context 用例（06§1.2），context 检出率进 L3 门禁指标。
 
 **分阶段落地（07 M4f）**：
 
 - **M4f-lite**：模式 A 的 b（git 变更史）+ c（REVIEW.md 段落）+ 模式 B——**零服务依赖**（jgit 在 CI checkout 已有，REVIEW.md 在仓库内），与现有流水线同构；
 - **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库）依赖 M4b 服务化定时任务，覆盖"检索矛盾事件"的完整数据面。
 
-**信任与隔离**：REVIEW.md 产品背景段沿用 base 分支读取 + owner 审批信任模型（04§3.2）；上下游 commit message 属不可信输入，UNTRUSTED 定界（04§3.3）；CrossChecker 产出的 finding 走与其他角色相同的验证晋升管线（§4）——cross check 的发现同样要过 double check，不享有免检。
+**信任与隔离**：REVIEW.md 产品背景段沿用 base 分支读取 + owner 审批信任模型（04§3.2）；上下游 commit message 属不可信输入，UNTRUSTED 定界（04§3.3）；CrossChecker 产出的 finding 走与其他角色相同的验证晋升管线（§4，**brief 按 category 分型组装见 §4.2**）——cross check 的发现同样要过 double check，不享有免检。
 
 ## 4. 评判层：独立复核 Verifier 与仲裁 Judge（v1.1 重写）
 
@@ -133,7 +136,10 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 
 **批处理单元**：同一文件的候选 finding 合并为一个验证 brief（上下文按文件组织，天然省 token，见 04§2 算术）。
 
-**输入**：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段。
+**输入（v1.3.1：按 category 分型组装）**：
+
+- **代码类**（bug/security/test/convention/performance）：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段；
+- **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
 
 **指令核心（平衡式复核）**：
 
@@ -226,8 +232,9 @@ for (var e : byFile.entrySet()) {
 | TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤1k | 2 |
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
-| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次 | ≤1.5k | 2 |
-| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/**案件** | ≤1k | 2 |
+| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |
+| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier） | ≤1k | 2 |
+| **CrossChecker**（v1.3.1 补行） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k） | ≤1.5k | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。
 

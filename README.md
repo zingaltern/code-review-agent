@@ -5,7 +5,7 @@
 本项目是 [openai-code-review](https://github.com/zingaltern/openai-code-review)（2025）的继任者：继承其"挂在 Git 平台 CI 上的评审组件"定位，按 [Anthropic《Solving Code Review at Anthropic》](https://claude.dev/blog/solving-code-review-at-anthropic/)（2026）的最佳实践重新设计架构。差异化核心：**子代理隔离审查 + 独立复核评判**（验证层具体构造为自主设计，以评测数据为唯一裁判，见 docs/03 §7 诚实溯源）。
 
 > ⚠️ 仓库纪律：本仓库为全新独立仓库，**严禁向原 openai-code-review 仓库推送任何内容**；远端操作规范见 [docs/00](docs/00-branching-and-workflow.md) §8。
-> 📌 当前版本：**技术方案 v1.3**（2026-10-25；三轮评审 24 项缺陷闭环 + 评审三功能框架按视频设计指导完整整合，对照表见 [docs/01 §8](docs/01-background-and-research.md)）。
+> 📌 当前版本：**技术方案 v1.3.1**（2026-10-25；四轮评审 34 项缺陷闭环 + 三功能框架整合（含跨文档传播修复），对照表见 [docs/01 §8](docs/01-background-and-research.md)）。
 
 ## 核心理念
 
@@ -36,7 +36,8 @@ PR 事件 ─→ 幂等检查(GitHub评论账本) ─→ 上下文组装(窗口/
 | [04 上下文与提示词](docs/04-context-and-prompt-design.md) | 条件注入分层、全角色预算算术 + 评测门禁三级分级、REVIEW.md（**含产品背景/事件/嗅探段**）与注入防御 | 开发必读 |
 | [05 数据模型与集成](docs/05-data-and-integration.md) | Finding/账本指纹与**解析器防污染规则**、SPI（jgit blame/锚定降级）、CLI、workflow（draft 过滤）、安全检查单 | 开发必读 |
 | [06 评测与反馈闭环](docs/06-eval-and-feedback.md) | **聚合 Wilson CI 门禁 + 三级分级**、Defects4J 双侧数据集、整仓 fixture 规格、转化漏斗护栏 | 开发必读 |
-| [07 路线图](docs/07-roadmap.md) | M0–M4（pre-PR 实跑验证进 M2、投票降 M3）、任务拆解、验收标准、工程纪律 | 开发执行入口 |
+| [07 路线图](docs/07-roadmap.md) | M0–M4（pre-PR 实跑验证进 M2、投票降 M3）、任务拆解、验收标准、工程纪律（**提交前三条腿核查**） | 开发执行入口 |
+| [99 视频指导存档](docs/99-video-guide-reference.md) | 三功能框架整理稿（含**来源与证据等级声明**：单一博主、AI 生成内容，低于生产实践与学术引用） | 附录参考 |
 
 ## 技术栈
 
