@@ -1,13 +1,21 @@
 # 03 · 核心设计：子代理隔离审查与评判
 
-> 文档版本：v1.2.1（2026-10-25，写入评审三功能框架映射）
+> 文档版本：v1.3（2026-10-25，整合博主视频设计指导）
 > **v1.1**：放弃"盲评"改为独立复核；验证者多样性为硬性前提；溯源表诚实化。
 > **v1.2**：反锚定校验降级为 trace 质控信号；抽查确定性抽样。
-> **v1.2.1**：与 01§3.4 三功能框架建立命名映射——本项目验证层 = **double check**（挑错）的工程化；评审层新增 **CrossChecker** 角色占位（对齐上下文的 cross check，输入非代码，M4f 落地）。
+> **v1.2.1**：三功能框架映射（01§3.4）；CrossChecker 角色占位。
+> **v1.3**：§0 映射扩写（A/B 赛马对账 → M3 形态；人踩刹车）；**§3.1 CrossChecker 两模式详设**（隐含假设核对 + sniff test set，输入非代码）；§5 轮次上限语义强化（三轮不收敛 = 打回重新设计）。
 
-## 0. 三功能框架映射（v1.2.1 新增，框架见 01§3.4）
+## 0. 三功能框架映射（框架与案例见 01§3.4）
 
-评审的三个功能（挑错 / 对齐上下文 / 担责）在本设计中的载体：**挑错 = 本文档全部机制**——隔离并行发现（§3）+ 独立复核 double check（§4，"全新上下文的子 agent 独立复查"）+ 仲裁；**对齐上下文 = 被动承担**（Summary 概述 + explainer），主动 cross check 由 §3 表中 CrossChecker（M4f）承接——它与其他 reviewer 的本质区别是**输入不含 diff**：看的是上下游变更史、产品事件史、数值参照系，防"表面正确的代码 + 错误的上下文假设"（如会话超时值与下游默认值矛盾这类读代码读不出来的问题）；**担责 = 明确出界**：所有子代理只产出 finding 建议，approval 签字永远是人（01§2.5）。
+评审的三个功能在本设计中的载体：**挑错 = 本文档全部机制**——隔离并行发现（§3）+ 独立复核 double check（§4，"全新上下文的子 agent 独立复查"，财务与审计分开，不让刚写完代码的 agent 审自己）+ 仲裁；**对齐上下文 = §3.1 CrossChecker**（cross check：从与代码无关的角度核对——输入不含 diff）；**担责 = 明确出界**：所有子代理只产出 finding 建议，approval 签字永远是人（01§2.5）。
+
+方法级映射（v1.3 补）：
+
+- **多视角并行 + 交叉投票**（指导 2.2-3）→ §3 角色化并行 + M3 双异构验证者投票；
+- **A/B 赛马对账**（指导 2.2-2，两个独立结果 + 第三方找差异）→ 本项目对应形态即 M3 双异构验证者（两个独立判定）+ Judge（找差异终裁）；对代码评审**不新增**独立的赛马机制（成本翻倍，与并行多视角收益重叠）；
+- **收敛上限 + 人踩刹车**（指导 2.2-4/5）→ §5 轮次上限 3，人的职责是对不收敛说"停"；
+- **fresh context 独立复查**（指导 2.2-1）→ §2.1 上下文隔离是全设计地基。
 
 ---
 
@@ -74,7 +82,7 @@ interface SubAgent<I, O> {
 | TestReviewer | 逻辑文件变更且测试变更比例低 | diff + 测试目录结构 | 测试缺口类 |
 | ConventionReviewer | REVIEW.md 定义约定时 | diff + REVIEW.md 约定段 | 约定违反（多为 nit） |
 | PerfReviewer | Deep 或命中 perf 路径 | diff + 热点标注 | 性能风险类 |
-| **CrossChecker**（M4f 占位，v1.2.1 新增） | M4f（对齐上下文的 cross check，01§3.4） | **非 diff**：上下游近期变更史（调用方/被调方 commit）、产品事件史（事故/工单）、数值与配置参照系 | "代码本身正确但与上下文假设矛盾"类 finding（数量级不对、与下游默认值冲突） |
+| **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full（03§3.1） | **非 diff**（见 §3.1） | "代码本身正确但与上下文假设矛盾"类 finding |
 
 Reviewer prompt 原则（模板见 04）：
 
@@ -82,6 +90,36 @@ Reviewer prompt 原则（模板见 04）：
 2. **空结果合法且被鼓励**——但注意：召回护栏（01§4.4）在系统层面防"鼓励空结果"退化为"全部空结果"；
 3. pre-existing 嫌疑置 `pre_existing_suspect=true`，由编排器用本地 jgit blame 复核（05§2）；
 4. brief 注入剩余 nit 配额。
+
+### 3.1 CrossChecker 详设（v1.3 新增——cross check 的工程化，对齐上下文功能）
+
+**定位**：double check 永远查不出的一类问题——破坏改动的上下文**不在 diff 里**（01§3.4 会话超时案例：代码隐含假设"后台任务都在常规会话内跑完"，六周前的企业定制恰好破坏它，CI/AI/人都看不见）。CrossChecker 与其他 reviewer 的本质区别：**输入不含 diff 本身**。
+
+**模式 A：隐含假设核对（assumption check）**
+
+```
+输入（均为已文档化信息——tribal knowledge 不可见，01§3.4 规律）：
+  a. 本次变更 diff（仅用于推导隐含假设，不是审查对象）
+  b. 上下游路径近期变更史：jgit log 近 N 周（默认 8）内，
+     调用方/被调方路径（依赖切片同源的路径集）的 commit 摘要
+  c. REVIEW.md 产品背景段（04§3.1：Product context / Known incidents）
+
+流程：从 diff 推导隐含假设清单（超时/容量/并发/顺序/环境类）
+  → 对每个假设检索 b/c 中近期的矛盾事件
+  → 命中即产出 finding（category=context，引用矛盾事件的具体来源：
+     commit sha 或 REVIEW.md 条目——证据规则与 §3 相同）
+```
+
+**模式 B：嗅探检查集执行（sniff test set）**
+
+owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口径/常见 pattern，如"超时类参数不得超过 X""报表两张表的口径必须一致"），CrossChecker 逐条对照变更——**人的 cross check 写下来即外推为机器的 double check**（01§3.4 规律的执行端）；ConventionReviewer 处理代码约定，CrossChecker 处理业务/数值类嗅探，二者输入与检查性质不同。
+
+**分阶段落地（07 M4f）**：
+
+- **M4f-lite**：模式 A 的 b（git 变更史）+ c（REVIEW.md 段落）+ 模式 B——**零服务依赖**（jgit 在 CI checkout 已有，REVIEW.md 在仓库内），与现有流水线同构；
+- **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库）依赖 M4b 服务化定时任务，覆盖"检索矛盾事件"的完整数据面。
+
+**信任与隔离**：REVIEW.md 产品背景段沿用 base 分支读取 + owner 审批信任模型（04§3.2）；上下游 commit message 属不可信输入，UNTRUSTED 定界（04§3.3）；CrossChecker 产出的 finding 走与其他角色相同的验证晋升管线（§4）——cross check 的发现同样要过 double check，不享有免检。
 
 ## 4. 评判层：独立复核 Verifier 与仲裁 Judge（v1.1 重写）
 
@@ -174,7 +212,7 @@ for (var e : byFile.entrySet()) {
 
 ## 5. 收敛控制（ConvergenceGuard）
 
-1. **轮次上限**：同一 PR 验证-复审循环最多 3 轮，之后停止新 finding，Summary 提示"建议重新考虑实现方案"；
+1. **轮次上限（v1.3 语义强化）**：同一 PR 验证-复审循环最多 3 轮——机器互相挑刺天然不收敛（scope expansion：不停挑 edge case、加 guardrail、扩 scope），**三轮仍不收敛 = 设计问题，不是修改问题**：停止一切新 finding，Summary 明确建议作者**打回重新设计而非继续改**；人在这一关的职责是踩刹车（01§3.4 反模式 3）；
 2. **diff-only 复审**：PR 新 push 只评审增量 diff；已发布 finding 不重验证，除非涉及文件被后续 commit 修改；指纹从账本读取（02§5）；
 3. **finding 级去重**：该 PR 已发布 finding 指纹（账本）命中即抑制；
 4. **pre-existing 处理**：本地 jgit blame 复核（无本地仓库时降级为不标注并在 Summary 声明）；确认后标 `pre-existing` 单独列出，不占 nit 预算、不阻塞。

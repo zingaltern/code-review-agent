@@ -5,11 +5,11 @@
 本项目是 [openai-code-review](https://github.com/zingaltern/openai-code-review)（2025）的继任者：继承其"挂在 Git 平台 CI 上的评审组件"定位，按 [Anthropic《Solving Code Review at Anthropic》](https://claude.dev/blog/solving-code-review-at-anthropic/)（2026）的最佳实践重新设计架构。差异化核心：**子代理隔离审查 + 独立复核评判**（验证层具体构造为自主设计，以评测数据为唯一裁判，见 docs/03 §7 诚实溯源）。
 
 > ⚠️ 仓库纪律：本仓库为全新独立仓库，**严禁向原 openai-code-review 仓库推送任何内容**；远端操作规范见 [docs/00](docs/00-branching-and-workflow.md) §8。
-> 📌 当前版本：**技术方案 v1.2.1**（2026-10-25；三轮对抗式评审 24 项缺陷闭环 + 评审三功能框架写入，对照表见 [docs/01 §8](docs/01-background-and-research.md)）。
+> 📌 当前版本：**技术方案 v1.3**（2026-10-25；三轮评审 24 项缺陷闭环 + 评审三功能框架按视频设计指导完整整合，对照表见 [docs/01 §8](docs/01-background-and-research.md)）。
 
 ## 核心理念
 
-**评审三功能框架（docs/01 §3.4）**：AI 把"读代码"捆绑的三件事拆散——**挑错**交给机器 double check（全新上下文子代理独立复查）；**对齐上下文**靠 cross check 从非代码角度核对（CrossChecker，M4f）；**担责**的 approve 签字永远是人。在此框架下：
+**评审三功能框架（docs/01 §3.4，按博主视频设计指导整合）**：AI 把"读代码"捆绑的三件事拆散——**挑错**交给机器 double check（全新上下文子代理独立复查）；**对齐上下文**靠 cross check 从非代码角度核对（CrossChecker 两模式，03§3.1：隐含假设核对 + sniff test set）；**担责**的 approve 签字永远是人（签字 = 核实意图/假设/设计，非逐行读过）。**"写下来→边界外推"**：人的 cross check 经验写入 REVIEW.md 产品背景/嗅探段，即外推为机器的 double check。在此框架下：
 
 1. **精确率优先，但有召回护栏**——每条 finding 必须经独立复核存活才发布；聚合召回下限（Wilson CI 判定）、零发布护栏与梯度沉默护栏（截断丢弃可见）防止系统被优化成沉默；
 2. **隔离产生多样性，多样性产生精确率**——评审子代理三重隔离并行；验证者多样性是投票成立的前提，不满足则退化为单验证者 + 仲裁；
@@ -30,10 +30,10 @@ PR 事件 ─→ 幂等检查(GitHub评论账本) ─→ 上下文组装(窗口/
 | 文档 | 内容 | 读者 |
 |---|---|---|
 | [00 分支管理与工作流](docs/00-branching-and-workflow.md) | trunk-based 分支模型、命名/提交/PR 规范、agent 红线、大厂流程取舍 | **开发执行前必读**（另见根目录 AGENTS.md） |
-| [01 背景与调研](docs/01-background-and-research.md) | 原项目分析、Anthropic 实践提炼（含诚实归属）、需求定义与召回护栏、**两轮修订对照表** | 所有人必读 |
-| [02 总体架构](docs/02-architecture-design.md) | 分层架构、数据流、部署形态与状态归属（**指纹 v2 账本**）、幂等/降级/并发预算、触发边界 | 开发必读 |
-| [03 多代理核心设计](docs/03-multi-agent-design.md) | 三重隔离、角色 reviewer、独立复核 verifier + 仲裁 judge（M2/M3 分期）、收敛控制、诚实溯源表 | 开发必读（核心） |
-| [04 上下文与提示词](docs/04-context-and-prompt-design.md) | 条件注入分层、**全角色预算算术 + 评测门禁成本分级**、REVIEW.md base 读取与注入防御 | 开发必读 |
+| [01 背景与调研](docs/01-background-and-research.md) | 原项目分析、Anthropic 实践提炼、**三功能框架与反模式清单（§3.4）**、需求定义、三轮修订对照表 | 所有人必读 |
+| [02 总体架构](docs/02-architecture-design.md) | 分层架构、数据流、部署形态与状态归属（指纹 v2 + DONE 账本）、幂等/降级/并发预算、触发边界 | 开发必读 |
+| [03 多代理核心设计](docs/03-multi-agent-design.md) | 三重隔离、角色 reviewer、**CrossChecker 两模式详设（§3.1）**、独立复核 + 仲裁、收敛控制、诚实溯源表 | 开发必读（核心） |
+| [04 上下文与提示词](docs/04-context-and-prompt-design.md) | 条件注入分层、全角色预算算术 + 评测门禁三级分级、REVIEW.md（**含产品背景/事件/嗅探段**）与注入防御 | 开发必读 |
 | [05 数据模型与集成](docs/05-data-and-integration.md) | Finding/账本指纹与**解析器防污染规则**、SPI（jgit blame/锚定降级）、CLI、workflow（draft 过滤）、安全检查单 | 开发必读 |
 | [06 评测与反馈闭环](docs/06-eval-and-feedback.md) | **聚合 Wilson CI 门禁 + 三级分级**、Defects4J 双侧数据集、整仓 fixture 规格、转化漏斗护栏 | 开发必读 |
 | [07 路线图](docs/07-roadmap.md) | M0–M4（pre-PR 实跑验证进 M2、投票降 M3）、任务拆解、验收标准、工程纪律 | 开发执行入口 |
@@ -55,12 +55,12 @@ cra review --local --base main --depth standard --dry-run=true
 ## 状态
 
 - [x] 调研与需求定义（2026-10）
-- [x] 技术方案 v1.0 → v1.1 → v1.2 → **v1.2.1**（三轮评审 24 项缺陷闭环；v1.2.1：DONE 完整标记、Summary issue comment 载体、预算重校 500k、L1 升级语义、滑窗容错、Wilson 公式修正、Defects4J 净化；三功能框架与 CrossChecker M4f 写入）
+- [x] 技术方案 v1.0 → v1.1 → v1.2 → v1.2.1 → **v1.3**（三轮评审 24 项缺陷闭环；v1.3 整合视频设计指导：CrossChecker 两模式详设、REVIEW.md 产品背景/事件/嗅探段、M4a 三条签字规矩与风险分级、三功能反模式清单、轮次打回语义）
 - [ ] M0 骨架与最小闭环
-- [ ] M1 工程化与账本（含最小评测集与 fixture 规格）
+- [ ] M1 工程化与账本（含最小评测集与 fixture 规格、REVIEW.md 新段落解析）
 - [ ] M2 隔离审查 + 独立复核 + pre-PR 实跑（核心）
 - [ ] M3 评测闭环 + 双验证者投票（最小样本量 + 数据门禁）
-- [ ] M4 服务化与扩展（a 风险分级 / b 服务化 / c push / d 夜间 / e 多平台 / **f CrossChecker**）
+- [ ] M4 服务化与扩展（a 风险分级+签字规矩 / b 服务化 / c push / d 夜间 / e 多平台 / **f CrossChecker（lite/full 两阶段）**）
 
 ### 已知平台限制（02§5）
 

@@ -1,7 +1,8 @@
 # 07 · 实施路线图与任务拆解
 
-> 文档版本：v1.2.1（2026-10-25，响应第三轮评审 7 项缺陷 + 三功能框架写入）
-> **v1.2.1 修订**：T0.5/T1.2 验收依赖 **DONE 完整发布标记**（05§1.3）与 **Summary issue comment 载体**（05§2.2，两个 API 事实修正的前置）；M1 验收 1 增锚行漂移用例（滑窗容错）；M2 验收 2/6 对齐聚合 Wilson 口径与 500k 预算；**新增 M4f CrossChecker**（三功能框架的 cross check 落地，01§3.4/03§0）。
+> 文档版本：v1.3（2026-10-25，整合博主视频设计指导）
+> **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项；数字与端点纪律。
+> **v1.3**：T1.4 解析器支持新段落类型（Product context / Known incidents / Sniff tests）；M4a 吸收**三条签字规矩与风险分级表**（01§3.4 担责）；M4f 拆为 **f-lite（零服务依赖）与 f-full（依赖 M4b）两阶段**（03§3.1 CrossChecker 详设的落地排期）。
 > 面向后续开发 agent：按里程碑顺序执行，**未达验收标准不进入下一阶段**。
 > **数字与端点纪律（三轮评审的教训成文）**：任何写入任务/验收的数字（阈值、预算、概率、百分比）与任何点名的 API 端点，提交前必须独立推演或对照官方文档核查一遍——三轮 24 项缺陷无一出在思路，几乎全部出在这两类细节。
 
@@ -49,7 +50,7 @@
 - [ ] T1.1 Finding/ReviewRun/Trace 完整模型（05§1）+ `ReviewLedger` SPI + GitHub 账本实现（**指纹 v2 标记 + 解析器规则**，05§1.3）；本地 SQLite 实现；
 - [ ] T1.2 幂等与收敛账本化：指纹 v2 键（**代码内容锚，不含 LLM 文本与绝对行号**，02§4.1）；解析兜底退 commit 闸；**过期评论收尾**（新 run 后 PATCH 上一轮 Summary 加 `[已被 run_xxx 取代]` 前缀，02§5）；
 - [ ] T1.3 ContextAssembler：L0/L1 分层（窗口默认 ±30 + 条件全文）+ token 估算裁剪 + 覆盖声明进 Summary；
-- [ ] T1.4 REVIEW.md：base SHA 读取 + PR 内变更检测警告 + 解析容错（04§3）；
+- [ ] T1.4 REVIEW.md：base SHA 读取 + PR 内变更检测警告 + 解析容错（04§3）；**v1.3：解析器支持新段落类型**（Product context / Known incidents / Sniff tests——M4f-lite 的数据前提，段落缺失时 CrossChecker 相关检查优雅跳过）；
 - [ ] T1.5 深度档位 quick/standard/deep 参数化（此阶段 reviewer 仍单角色）；
 - [ ] T1.6 大 diff 分 chunk + 降档阶梯 + **截断丢弃计数进 stats/Summary**（02§4.4）；
 - [ ] T1.7 nit 预算、severity 排序、pre-existing 的 jgit blame 复核 + 无本地仓库降级声明（05§2）；
@@ -109,12 +110,15 @@
 
 ## 5. M4：可选池（按需排期，互不依赖）
 
-- **M4a 风险分级建议**：Low/Medium/High 建议（只建议不审批——三功能框架中的"担责"侧辅助：帮人决定谁签字/几个人签，01§3.4）；
-- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；
+- **M4a 风险分级建议（v1.3 吸收三条签字规矩与分级表，01§3.4 担责）**：输出 Low/Medium/High 建议（只建议不审批——**agent 永远不算 approver**）；三条规矩入设计：① agent 赞成票不计为审批（已有原则）；② **approve 只对特定 commit 有效，新 commit 必须重审**——与账本 DONE/指纹的 commit 绑定语义同源（05§1.3），建议输出绑定 commit_sha；③ **指挥 agent 写代码的人必须在签字名单上**（PR 模板提示项）；分级参考（Anthropic 形态）：低风险（纯文档/功能开关，测试全过 + 可信作者 → 建议 0 人签）/ 中风险（常规业务逻辑、系统提示词 → 1 人）/ 高风险（核心高危路径、难恢复的关键配置 → 2 人）；签字语义 = 核实**意图/假设/设计**而非逐行读过（01§3.4）；
+- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；承担 M4f-full 的事件史采集定时任务；
 - **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）；
 - **M4d 夜间存量评审**：产出 issue 而非 PR comment；
 - **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**；
-- **M4f CrossChecker（v1.2.1 新增，三功能框架的 cross check 落地，01§3.4/03§0）**：对齐上下文的主动 cross check 角色——**输入不含 diff**：上下游近期变更史（依赖该模块的调用方、被调服务最近 commit）、产品事件史（事故复盘/工单）、数值与配置参照系（超时/重试/限额类参数的合理区间）；输出"代码本身正确但与上下文假设矛盾"类 finding（数量级不对、与下游默认值冲突——会话超时事故类型的针对性防线）；实现前置条件：变更史与事件史的采集管道（依赖 M4b 服务化的定时任务）。
+- **M4f CrossChecker（v1.3 按 03§3.1 详设拆两阶段）**：
+  - **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；
+  - **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库，M4b 定时任务）——"检索矛盾事件"的完整数据面； tribal knowledge 不可见是硬边界（01§3.4），本项只覆盖已文档化部分；
+  - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源。
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 
