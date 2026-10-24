@@ -1,7 +1,8 @@
 # 05 · 数据模型与集成设计
 
-> 文档版本：v1.1（2026-10-25，响应方案评审缺陷 ①⑥⑦）
-> **v1.1 修订要点**：SPI 增加本地 jgit blame（GitHub API 无行级 blame 端点）；账本指纹规范（HTML 注释内嵌）；inline 锚定校验与逐条降级（防整包 422 零回帖）；workflow 收窄为仅 PR 触发并增加 artifact 上传；安全检查单补注入防御项。
+> 文档版本：v1.2（2026-10-25，响应第二轮评审缺陷 ①②③及遗漏细节）
+> **v1.1 修订**：SPI 增加本地 jgit blame；账本指纹规范；inline 锚定校验与逐条降级；workflow 仅 PR 触发 + artifact；安全检查单扩充。
+> **v1.2 修订**：§1.3 指纹 v2 + **解析器规则**（v1.1 未定义，账本可被评论正文引用的伪造标记污染）+ 发布侧转义剥离；§2.3 补 replies 双端点；§4 补 draft 过滤/ready_for_review/cli 分发方案与冲突、fork 限制声明。
 
 ---
 
@@ -36,8 +37,8 @@
     "status": "CONFIRMED|REJECTED|UNVERIFIED"
   },
   "final_severity": "important|nit|pre-existing",
-  "anchor_status": "INLINE|SUMMARY_FALLBACK",       // v1.1：锚定校验结果
-  "dedup_key": "sha256(file|line_bucket|category|assertion_normalized)",
+  "anchor_status": "INLINE|SUMMARY_FALLBACK",       // 锚定校验结果
+  "dedup_key": "sha256(file | category | anchor_line_content_hash | anchor_context_hash)",  // 指纹 v2，见 02§4.1——不含 LLM 文本与绝对行号
   "github_comment_id": 123456789,
   "human_disposition": null                           // fixed|wrong|intentional|ignored
 }
@@ -68,17 +69,27 @@
 }
 ```
 
-### 1.3 账本指纹规范（GitHub 评论账本的存储格式，v1.1 新增）
+### 1.3 账本指纹规范（v1.2：指纹 v2 + 解析器规则）
 
-每条 bot 评论体末尾内嵌 HTML 注释（渲染不可见，API 可解析）：
+**发布格式**：每条 bot 评论体末尾内嵌 HTML 注释（渲染不可见）：
 
 ```markdown
 **[Important] Offset 计算在空列表时越界** — `src/…/Foo.java:87`
 …(转义后的 finding 正文)…
-<!-- cra:fp=9f2a…c4 | id=f_01hxy… | run=run_01hxy… | commit=abc1234 | v=1 -->
+<!-- cra:v=2 | fp=<anchor_line_content_hash|anchor_context_hash 截断十六进制>
+     | file=src/…/Foo.java | cat=bug | id=f_01hxy… | run=run_01hxy…
+     | commit=abc1234 | line=87 -->
 ```
 
-账本解析器（cra-git-github）：拉取 bot 用户在该 PR 的全部评论 → 提取 `cra:` 标记 → 得到已发布指纹集、run 历史、处置锚点。此为 CI 形态下幂等与收敛控制的事实源（02§5）。
+指纹键构成（完整定义见 02§4.1）：`file_path | category | 代码行内容哈希 | ±2 行上下文哈希`——**不含任何 LLM 生成文本与绝对行号**（assertion 措辞漂移、跨 push 行漂移均不影响）；`line=` 字段仅作展示辅助，不参与键。
+
+**解析器规则（v1.2 补齐——账本是被评审代码可达的输入，必须防污染）**：
+
+1. **仅认末位**：只解析评论 body 的**最后一行**之后（即 body 末尾）且**位于任何代码围栏之外**的 `cra:` 标记；正文中间、代码块内的同类标记一律忽略；
+2. **严格格式校验**：`v=` 必须为已知版本、字段集合与顺序合法、哈希为规整十六进制；任一不满足 → 忽略该标记 + trace 记 `LEDGER_SUSPECT`（同一 PR 出现 ≥3 次可疑标记时 Summary 警告，疑似注入尝试）；
+3. **发布侧双向防护**：finding 正文转义时将 `<!--` 替换为 `&lt;!--`（正文永远不可能再产生未转义 HTML 注释）；指纹行由发布器在全部正文之后追加；
+4. **一致性校验**：标记内 `commit` 与该 PR 评论所在 run 记录不符 → 忽略该标记；标记 `file` 与评论正文 file:line 不一致 → 忽略并告警；
+5. **兜底分层**（对应 02§4.1）：解析不到任何有效标记 → 退回 **commit 级幂等闸**（同 sha 仍跳过，防重复回帖），仅指纹级去重失效；**永不**退到"空账本全量重发"。
 
 ### 1.4 Trace 格式（NDJSON）
 
@@ -87,7 +98,8 @@
 {"ts":"…","event":"agent_output","agent":"…","findings":3,"tokens":{…},"latency_ms":8200}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{…}}
 {"ts":"…","event":"anchor_check","finding_id":"f_…","status":"SUMMARY_FALLBACK"}
-{"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"ledger_writes":5}
+{"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
+{"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"suppressed_by_truncation":0}
 ```
 
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
@@ -131,6 +143,8 @@ public interface LocalRepoContext {                                            /
 
 认证 `GITHUB_TOKEN`；读 `X-RateLimit-Remaining` 主动节流 + 指数退避（≤3 次）；inline comment 走 PR Review API（`commit_id` 绑定 head sha, event=COMMENT）；bot 身份识别按 token 对应 login（CI 内为 `github-actions[bot]`）。
 
+**账本与处置采集的端点覆盖（v1.2 补）**：bot 的 inline 评论与 review replies 分属两类端点（`pulls/comments` 与 review replies 线索）——`fetchBotComments` 须同时轮询 pulls 评论端点与 review 评论端点并合并去重；**resolve 状态为 GraphQL-only**，本项目锁 REST v3，处置采集不使用 resolve 信号（06§1.1）。上一轮 Summary 的 PATCH 收尾（02§5 评论生命周期）用 `PATCH /repos/{o}/{r}/pulls/comments/{id}`（bot 自己的评论可改）。
+
 ## 3. CLI 契约（cra-runner-cli）
 
 ```bash
@@ -147,15 +161,15 @@ cra-eval report --repo zingaltern/code-review-agent --since 7d
 
 退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）。
 
-## 4. GitHub Actions 集成（v1.1：仅 PR 触发 + artifact）
+## 4. GitHub Actions 集成（v1.2：draft 过滤 + 分发方案 + 限制声明）
+
+**已知平台限制（显式声明，见 02§5 触发边界表）**：冲突 PR（mergeable=conflicting）的 `pull_request` workflow **不触发**（GitHub 官方行为）——该场景静默无评审，冲突解决后的 synchronize 会正常触发；fork PR 无 secrets 访问（当前个人仓库无碍，多协作者时引入 App token）。
 
 ```yaml
 name: code-review-agent
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-  # v1.0 曾含 push 触发：postReview 依赖 PR 号与 PR diff，push 直推在本设计下是
-  # 未定义行为，已移除；push 场景（commit-comment 模式）排入 M4。
+    types: [opened, synchronize, reopened, ready_for_review]   # v1.2：ready_for_review 补 draft 转正场景
 permissions:
   contents: read
   pull-requests: write
@@ -165,18 +179,23 @@ concurrency:
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false                # v1.2：draft PR 不评审（省成本降噪声）
     steps:
       - uses: actions/checkout@v4        # 供 jgit blame 与 base 分支 REVIEW.md 读取
         with: { fetch-depth: 0 }         # blame 需要历史
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - run: curl -fsSL …/cra-cli -o cra && chmod +x cra    # 发行方式 M0 定
-      - run: ./cra review …
+      # cli 分发（v1.2 定案）：M0 自举期 = 仓库内 maven 构建缓存（actions/cache 缓存 ~/.m2 与
+      # cra-runner-cli shaded jar，改动少时秒级命中）；M2 起改 GitHub Release 二进制
+      # （jlink 最小运行时 zip），workflow 改为 curl 下载固定版本号——可复现、可回滚。
+      - name: Build or restore CLI
+        run: mvn -B -ntp -pl cra-runner-cli -am package -DskipTests
+      - run: java -jar cra-runner-cli/target/cra-runner-cli.jar review …
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
           CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
-      - name: persist trace              # v1.1 新增：运行器即焚，trace 必须外传
+      - name: persist trace              # 运行器即焚，trace 必须外传
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -224,6 +243,9 @@ cra:
 - [ ] **不可信内容（diff/注释/commit msg/finding/验证输出）一律 UNTRUSTED 定界**，system prompt 含指令层级声明（04§3.3）；
 - [ ] **发布前 markdown 转义**，finding 正文代码块包裹；
 - [ ] **注入对抗集在 CI 门禁中运行**，行为改变即失败（06§1.2）；
+- [ ] **账本解析只认末位/代码块外/版本合法的标记**；正文 `<!--` 全量转义；解析兜底退 commit 级闸、永不全量重发（05§1.3）；
+- [ ] **pre-PR 本地模式实跑构建/测试并展示真实输出**，不以"声称完成"代替（07 T2.10）；
+- [ ] 处置采集不依赖 GraphQL-only 的 resolve 状态（05§2.3、06§1.1）；
 - [ ] GitHub token 最小权限（contents:read + pull-requests:write）；
 - [ ] dry-run 模式全程零写操作（单测断言零写调用）；
 - [ ] diff/文件内容只发往配置的 LLM 端点，不落第三方。

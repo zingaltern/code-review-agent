@@ -1,8 +1,9 @@
 # 02 · 总体架构设计
 
-> 文档版本：v1.1（2026-10-25，响应方案评审缺陷 ①④⑥⑧）
+> 文档版本：v1.2（2026-10-25，响应第二轮评审缺陷 ①③⑧）
 > 前置阅读：`01-background-and-research.md`
-> **v1.1 修订要点**：新增 §5"部署形态与状态归属"（v1.0"状态由 Actions 持有"的说法是错误的，GitHub Actions 运行器用后即焚）；触发范围收窄为仅 PR；LLM 并发与降级语义补全。
+> **v1.1 修订**：新增 §5 部署形态与状态归属；触发收窄为仅 PR；LLM 并发与降级语义补全。
+> **v1.2 修订**：§4.1 指纹 v2——幂等键剔除 LLM 自由文本（assertion 措辞漂移会使 v1.1 键不稳定），改为 commit 级第一道闸 + 代码内容锚；§4.4 截断丢弃进指标（梯度沉默护栏）；§5 增触发边界与已知限制（冲突 PR / draft / fork）。
 
 ---
 
@@ -88,12 +89,22 @@ code-review-agent/
 
 ## 4. 关键机制设计
 
-### 4.1 幂等与重放
+### 4.1 幂等与重放（v1.2：指纹 v2）
 
-- 幂等事实源是**账本**（§5），不是进程内存：发布前检查该 PR 上 bot 已发布 finding 指纹，命中即跳过；
-- 指纹 = `sha256(file | line_bucket | category | assertion_normalized)`，以 HTML 注释内嵌于每条 bot 评论（格式见 05§2），对读者不可见、对 API 可解析；
-- 同一 commit 重复触发：全部命中 → 仅更新 Summary；部分命中 → 只补发缺失；
-- trace 支持 dry-run 离线重放（不真实回帖）。
+- **第一道闸（commit 级幂等，防"同 commit 重跑"主场景）**：账本中该 PR 的 bot 评论标记含 `commit=` 字段；当前 commit_sha 已有成功发布的 run → 全量跳过（只更新 Summary）。CI 重跑、重复触发均止步于此，措辞漂移无从引发重复；
+- **第二道闸（指纹级，防跨 push 重复）**：新 push 后的 diff-only 复审中，用于抑制"上一轮已发布过的同一问题"。指纹 v2 键**只含确定性成分，不含任何 LLM 生成文本**：
+
+```
+fingerprint = sha256( file_path | category | anchor_line_content_hash | anchor_context_hash )
+
+anchor_line_content_hash : finding 所指代码行内容（去首尾空白）的哈希——
+                           行号上方插入代码不改变行内容，跨 push 行漂移稳定；
+anchor_context_hash      : 所指行 ±2 行内容的联合哈希——区分同文件同类别的不同问题
+```
+
+  绝对行号**不进键**，仅用于展示锚定。代码行内容取自已发布评论生成时刻的 head 文件（生成时落盘进账本标记，不依赖事后重算）；
+- 解析失败/无有效标记的兜底分层（05§1.3）：退回第一道闸（commit 级），**不退到"空账本全量重发"**——重复回帖是本项目立项要治的病，宁可漏抑制；
+- trace 支持 dry-run 离线重放。
 
 ### 4.2 失败隔离与降级
 
@@ -115,7 +126,8 @@ code-review-agent/
 ### 4.4 成本与预算
 
 - 预算三层：子代理级（token/轮次/时间）→ chunk 级 → run 级；LlmGateway 硬性执行，超限杀代理记 `BUDGET_EXCEEDED`；
-- **run 级降档阶梯**（v1.1 新增，替代 v1.0 的一次性失败）：消耗 <60% 正常；≥60% → 砍 light 角色与 1 个视角；≥80% → 候选 finding 按severity 排序只验证 top-10；100% → 终止剩余代理，DEGRADED 收尾；
+- **run 级降档阶梯**：消耗 <60% 正常；≥60% → 砍 light 角色与 1 个视角；≥80% → 候选 finding 按 severity 排序只验证 top-10；100% → 终止剩余代理，DEGRADED 收尾；
+- **截断必须可见（v1.2，梯度沉默护栏）**：top-10 截断与预算终止产生的**丢弃候选数**计入 run stats（`suppressed_by_truncation`）并在 Summary 中逐条声明"因预算截断未验证 N 条候选"；该计数进入 L3 健康度（06§1.3）与门禁趋势监控——"发 1 条丢 9 条"不允许对护栏 invisible；
 - 大 diff 策略：>2k 行自动降为 Quick 质量；>8k 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围。
 
 ### 4.5 LLM 并发与限流（v1.1 新增）
@@ -136,9 +148,18 @@ code-review-agent/
 
 **GitHub 评论账本语义**（CI 形态的承重设计）：
 
-1. **可重建状态**：已发布 finding 及其指纹（解析 bot 历史评论中的 HTML 注释标记）、处置信号（对这些评论的 reply/reaction/resolve 事件，06§1.1 采集）、PR 级收敛历史（哪些 finding 已在早前 run 发布过）；
+1. **可重建状态**：已发布 finding 及其指纹（解析 bot 历史评论中的 HTML 注释标记，解析规则见 05§1.3）、处置信号（对这些评论的 reply/reaction 事件，06§1.1 采集）、PR 级收敛历史（哪些 finding 已在早前 run 发布过）；
 2. **放弃的状态**：未发布候选、子代理中间输出、跨 run 的 trace 查询——接受随 artifact 保留期丢失；评价：这些是调试便利而非机制依赖，机制（幂等/收敛/处置）全部只依赖可重建部分；
-3. **回灌**：workflow 末尾上传 trace artifact；`cra-eval report` 从 GitHub API 拉账本聚合周报，**无需任何常驻服务**。
+3. **回灌**：workflow 末尾上传 trace artifact；`cra-eval report` 从 GitHub API 拉账本聚合周报，**无需任何常驻服务**；
+4. **评论生命周期收尾（v1.2 新增）**：新 run 发布成功后，对同 PR 上一轮（旧 head_sha）的 bot 顶级 Summary 评论 PATCH 加前缀 `[已被 run_xxx 取代]`；上一轮的 inline 评论由 GitHub 自动标 outdated（保持可见，不删除——处置采集依赖其存在；resolve 状态为 GraphQL-only，本项目锁 REST v3，不操作 resolve）。
+
+**触发边界与已知限制（v1.2 新增，均为 GitHub 平台行为，显式声明而非假装支持）**：
+
+| 场景 | 行为 | 处置 |
+|---|---|---|
+| 冲突 PR（mergeable=conflicting） | `pull_request` workflow **不触发**（merge ref 无法创建，官方行为）——最需要反馈的 PR 会静默无评审 | 无法在触发层解决；owner 解决冲突后的 synchronize 会正常触发；限制写入 README 与部署文档 |
+| draft PR | 照常触发（浪费成本与噪声） | workflow 加 `draft == false` 条件 + `ready_for_review` 类型触发（05§4） |
+| fork PR | `GITHUB_TOKEN` secrets 不可用（pull_request_target 语义另论） | 当前个人仓库无碍；多协作者时代再引入 App token，写入限制声明 |
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
