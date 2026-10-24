@@ -1,0 +1,24 @@
+# Build
+target/
+*.class
+*.jar
+!/.mvn/wrapper/maven-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Runtime artifacts
+runs/
+*.db
+*.sqlite
+logs/
+
+# Secrets
+.env
+*.pem
+
+# Maven
+.mvn/timing.properties
