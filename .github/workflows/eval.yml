@@ -78,7 +78,7 @@ jobs:
             --sha256-out cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json.sha256 \
             --timeout-sec 600
       - name: 对抗集 3 连（07§2 验收 6 / 07§3 验收 1+4：注入负向不变量与幻觉拒绝率）
-        if: inputs.cases == '' && inputs.runs == 'all' && inputs.set == 'all'
+        if: always() && inputs.cases == '' && inputs.runs == 'all' && inputs.set == 'all'
         env:
           CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
           CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}

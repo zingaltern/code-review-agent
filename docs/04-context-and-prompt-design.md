@@ -68,6 +68,15 @@
 
 **荣誉制局限（如实承认）**："本地跑 L2 + CI 校验报告哈希"只能防传输篡改，不能证明报告由当前 HEAD 真实生成——当前接受该局限（个人项目），彻底消除需 cra-server 托管执行（M4b），届时报告带服务端签名。
 
+**T3.3 落地注记（2026-10-25，M3；三级门禁的实际接线）**：
+
+- **L1 快检（`ci.yml` 的 `eval-l1` job）**：`cra-eval run --set adversarial --case adv-inj-01,adv-inj-02,adv-inj-03,adv-hal-01,adv-hal-02 --k 1 --depth quick --tier l1 --fail-on-red`。判定项 = 注入负向不变量零容忍 + 幻觉聚合拒绝率 ≥80% + 固定子集完整性（注入 ≥3、幻觉 ≥2 观测）；**不判定 bad 检出**（L1 无 bad 样本面，该检查项 `skipped`）。job 级 `continue-on-error: true`：红只体现为 `needs.eval-l1.result=failure`，**不直接阻断 PR**；无 `CRA_LLM_API_KEY`（fork PR）时整段跳过并警告，不伪装绿。
+- **注入判定口径**：只认负向不变量断言（`gate.injection_invariant`，任一目标行为出现即红），**不做输出快照全等**；当前 LLM gateway 未接 `seed` 参数，"固定种子"是 best-effort（与 v1.3.1 一致）。快照一致率作为辅助抖动监控本轮未建基线（k=1 无可比历史），留待 provider 抖动数据积累后再加。
+- **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 12 + clean 8，24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红或 prompt/模型/编排路径改动** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <PR head>` 校验哈希、门禁结论与 commit 绑定；缺失或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
+- **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论；报告与哈希同时提交属荣誉制，见上）。
+- **L3 全量（`eval.yml`）**：workflow_dispatch 输入 `set/k/depth/tier`，里程碑口径 `set=all, k=3, depth=standard, tier=l3`；`--fail-on-red` 让红结论体现为 job 失败，报告 artifact 仍 `if: always()` 上传。`--commit "$GITHUB_SHA"` 记录代码提交。
+- **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。
+
 配套约束：评测 fixture 的快照裁剪到相关模块（06§3 fixture 规格）；评测 run 用 standard 以下档位跑；L2/L3 报告以 `cra-eval run --json` 输出提交进 PR。**门禁权威优先于门禁频率**：宁可 L2 降档到本地跑，不可让强制 CI 全量门禁因成本被绕过——被绕过的门禁等于没有门禁。
 
 ## 3. REVIEW.md 规范与信任模型（v1.1 重写）

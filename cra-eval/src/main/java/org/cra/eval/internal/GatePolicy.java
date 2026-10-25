@@ -8,10 +8,12 @@ package org.cra.eval.internal;
  * <ul>
  *   <li><b>L3 standard 检出下界 0.70</b>：06§1.2 明示的 M3 阈值（M2 为 0.60）。参照：M2 校准后拼合实测 32/36 → Wilson 95%
  *       下界 0.747（仅 standard 档参照值，禁止用作 quick 档基线）。
- *   <li><b>L2 quick 检出下界 0.55</b>：M3 首跑实测冻结。M2 只有 standard k=3 实测，无 quick 档基线；M3 在未改 prompt 的代码上实跑
- *       L2 口径（eval run 40207399714，bad 12 × k=2 = 24 观测，19/24 检出，Wilson 95% 下界 0.595）， 按"实测下界向下取整到
- *       0.05"冻结为 0.55（保留 ~1–2 个观测的抖动余量）。quick 档只派发 1 个 BugHunter 视角（04§2.2 档位路由），检出天然低于 standard，按
- *       06§1.2 "各档维护独立基线"单列、禁止跨档比较。
+ *   <li><b>L2 quick 检出下界 0.40</b>：M3 两轮 clean 实测冻结。M2 只有 standard k=3 实测，无 quick 档基线；M3 在未改 prompt
+ *       的代码上实跑 L2 口径两次（bad 12 × k=2 = 24 观测）：19/24 检出、Wilson 下界 0.595（eval run 40207399714）与
+ *       17/24、下界 0.508（eval run 40209488028），说明 quick 档正常运行间抖动 ≈±2 观测。 取 15/24 的下界 0.427 向下取整为
+ *       0.40：p≈0.73 下假红率 ≈8%（与 06§1.2 标准档"合格系统随机挂验收 <8%"同量级），破损 prompt 实测 4/24（下界
+ *       0.067）仍远低于门禁。quick 档只派发 1 个 BugHunter 视角（04§2.2 档位路由），检出天然低于 standard，按 06§1.2
+ *       "各档维护独立基线"单列、禁止跨档比较。
  *   <li><b>clean 误报基线 1.0 条/run + 容差 0.5</b>：06§1.2 只规定容差形式（基线 + 0.5），基线值 M3 首设； 报告逐次声明实际分母（clean
  *       观测数）。
  *   <li><b>幻觉拒绝率 ≥ 0.80</b>：06§1.2 对抗集 ①（聚合拒绝率，不用 Wilson 下界）。
@@ -48,8 +50,8 @@ record GatePolicy(
   /** L3 standard 档检出下界（06§1.2 M3：0.70）。 */
   static final double L3_BAD_DETECTION_WILSON_LOW = 0.70;
 
-  /** L2 quick 档检出下界（M3 首跑实测 19/24 → Wilson 下界 0.595，向下取整 0.55；06§1.2 分档基线）。 */
-  static final double L2_BAD_DETECTION_WILSON_LOW = 0.55;
+  /** L2 quick 档检出下界（M3 两轮实测 19/24 与 17/24；取下界 0.40 控制假红率，06§1.2 分档基线）。 */
+  static final double L2_BAD_DETECTION_WILSON_LOW = 0.40;
 
   /** clean 误报基线（条/run；M3 首设，报告随分母声明）。 */
   static final double CLEAN_FALSE_POSITIVE_BASELINE = 1.0;

@@ -5,6 +5,7 @@ import java.util.Map;
 import org.cra.common.exception.CraException;
 import org.cra.eval.internal.AnnotateCommand;
 import org.cra.eval.internal.EvalCliArgs;
+import org.cra.eval.internal.GateCommand;
 import org.cra.eval.internal.RunCommand;
 import org.cra.eval.internal.VerifyCommand;
 
@@ -16,6 +17,7 @@ import org.cra.eval.internal.VerifyCommand;
  *             [--commit SHA] [--fail-on-red] [--sha256-out PATH] [--crosschecker-enabled] [--json PATH]
  * cra-eval annotate --fixture &lt;caseDir&gt; [--action prefill|confirm|relabel] ...
  * cra-eval verify --report &lt;json&gt; [--sha256 &lt;hex&gt;|--sha256-file &lt;path&gt;] [--tier l1|l2|l3] [--expect-commit SHA]
+ * cra-eval gate --report &lt;json&gt; [--tier l1|l2|l3] [--json-out PATH] [--sha256-out PATH]
  * </pre>
  *
  * <p>退出码（05§3）：0 正常完成（门禁红绿在报告中呈现，不改变退出码语义）；2 自身故障（参数/数据集/被测对象启动失败）； 5 门禁红（{@code --fail-on-red}
@@ -59,6 +61,9 @@ public final class EvalCli {
       }
       if (parsed instanceof EvalCliArgs.VerifyArgs verifyArgs) {
         return VerifyCommand.execute(verifyArgs);
+      }
+      if (parsed instanceof EvalCliArgs.GateArgs gateArgs) {
+        return GateCommand.execute(gateArgs);
       }
       return 2;
     } catch (CraException e) {

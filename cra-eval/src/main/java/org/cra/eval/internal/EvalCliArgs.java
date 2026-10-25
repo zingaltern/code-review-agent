@@ -68,6 +68,18 @@ public final class EvalCliArgs {
   public record VerifyArgs(
       Path report, String sha256, Path sha256File, String tier, String expectCommit) {}
 
+  /**
+   * gate 命令参数（T3.1：对已有报告离线重判，不重跑 LLM）。
+   *
+   * @param report 报告 JSON 路径
+   * @param tier 档位（可空 = 沿用报告 tier，再退化为按 k/depth 推导）
+   * @param jsonOut 重判报告输出路径（可空）
+   * @param sha256Out 重判报告哈希输出路径（可空）
+   * @param crosscheckerEnabled M4f 是否启用（context 类是否计入判定）
+   */
+  public record GateArgs(
+      Path report, String tier, Path jsonOut, Path sha256Out, boolean crosscheckerEnabled) {}
+
   private EvalCliArgs() {}
 
   /**
@@ -103,6 +115,7 @@ public final class EvalCliArgs {
       case "run" -> parseRun(named, env);
       case "annotate" -> parseAnnotate(named, positional);
       case "verify" -> parseVerify(named);
+      case "gate" -> parseGate(named);
       case "report" ->
           throw new CraConfigException(
               "cra-eval report 随 M3 处置采集落地（T3.4，06§1.1）；当前支持: run | annotate | verify");
@@ -179,6 +192,25 @@ public final class EvalCliArgs {
         sha256File == null ? null : Path.of(sha256File),
         tier,
         named.get("--expect-commit"));
+  }
+
+  private static GateArgs parseGate(Map<String, String> named) {
+    String report = named.get("--report");
+    if (report == null || report.isBlank()) {
+      throw new CraConfigException("缺参数: --report <json>（gate 对已有报告离线重判，T3.1）");
+    }
+    String tier = named.get("--tier");
+    if (tier != null && !"l1".equals(tier) && !"l2".equals(tier) && !"l3".equals(tier)) {
+      throw new CraConfigException("gate --tier 非法: " + tier + "（l1|l2|l3）");
+    }
+    String jsonOut = named.get("--json-out");
+    String sha256Out = named.get("--sha256-out");
+    return new GateArgs(
+        Path.of(report),
+        tier,
+        jsonOut == null ? null : Path.of(jsonOut),
+        sha256Out == null ? null : Path.of(sha256Out),
+        "true".equals(named.get("--crosschecker-enabled")));
   }
 
   private static AnnotateArgs parseAnnotate(Map<String, String> named, List<String> positional) {
@@ -262,6 +294,8 @@ public final class EvalCliArgs {
           cra-eval annotate --fixture <caseDir> [--action prefill|confirm|relabel] [--to-set bad|clean]
               [--annotator NAME] [--reason TEXT]
           cra-eval verify --report <json> [--sha256 <hex>|--sha256-file <path>] [--tier l1|l2|l3]
-              [--expect-commit SHA]""";
+              [--expect-commit SHA]
+          cra-eval gate --report <json> [--tier l1|l2|l3] [--json-out PATH] [--sha256-out PATH]
+              [--crosschecker-enabled]""";
   }
 }

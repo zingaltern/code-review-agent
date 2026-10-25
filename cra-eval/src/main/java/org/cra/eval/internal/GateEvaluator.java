@@ -139,7 +139,8 @@ public final class GateEvaluator {
   private static String thresholdNote(GateTier tier) {
     return switch (tier) {
       case L1 -> "L1 快检不含 bad 集";
-      case L2 -> "L2 quick 档 M3 首跑实测冻结（19/24 → Wilson 下界 0.595，阈值取 0.55）；禁止与 standard 档比较";
+      case L2 ->
+          "L2 quick 档 M3 两轮实测冻结（19/24 与 17/24 → 下界 0.595/0.508；取 0.40 控制假红率）；禁止与 standard 档比较";
       case L3 -> "L3 standard 档 M3 阈值 0.70（M2 为 0.60；M2 实测 32/36 下界 0.747）";
     };
   }

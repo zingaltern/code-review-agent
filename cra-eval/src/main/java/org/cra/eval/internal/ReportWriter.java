@@ -157,7 +157,7 @@ public final class ReportWriter {
     return "集合 " + s.set() + "/" + s.subtype();
   }
 
-  private static void renderGate(EvalReport.Gate gate) {
+  static void renderGate(EvalReport.Gate gate) {
     OUT.println();
     OUT.println("门禁: " + (gate.passed() ? "绿" : "红") + "（tier=" + gate.tier() + "，06§1.2）");
     for (EvalReport.GateCheck c : gate.checks()) {
