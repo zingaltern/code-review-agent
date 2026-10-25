@@ -177,7 +177,7 @@ class SourceScanRulesTest {
                 checkRecordParams(module, path, lines, i);
               }
             }
-            if (METHOD_DECL.matcher(lines.get(i)).matches()) {
+            if (METHOD_DECL.matcher(lines.get(i)).matches() && !isInvocationLine(lines.get(i))) {
               assertClean(
                   module,
                   path,
@@ -345,6 +345,12 @@ class SourceScanRulesTest {
     return s.matches("(?:\\w+\\.)?[lL]og(?:ger)?\\.\\w+\\(.*") && !s.contains("throw");
   }
 
+  /** 方法调用语句（return new X( / 表达式续行）不是声明，跳过 Javadoc 检查。 */
+  private static boolean isInvocationLine(String line) {
+    String t = line.trim();
+    return t.startsWith("return ") || t.contains(" new ") || t.startsWith("new ");
+  }
+
   private static java.util.Optional<String> filePackage(List<String> lines) {
     return lines.stream()
         .filter(l -> l.trim().startsWith("package "))
@@ -402,24 +408,27 @@ class SourceScanRulesTest {
     StringBuilder sb = new StringBuilder();
     int depth = 0;
     boolean started = false;
+    outer:
     for (int i = declLine; i < raw.size(); i++) {
       for (char c : raw.get(i).toCharArray()) {
         if (c == '(') {
           depth++;
           started = true;
-        } else if (c == ')') {
-          depth--;
+          continue;
         }
-        if (started && !(depth == 0 && c == ')')) {
+        if (c == ')') {
+          depth--;
+          if (started && depth == 0) {
+            break outer;
+          }
+          continue;
+        }
+        if (started) {
           sb.append(c);
         }
       }
-      if (started && depth == 0) {
-        break;
-      }
     }
-    String header = sb.toString();
-    return header.substring(header.indexOf('(') + 1);
+    return sb.toString();
   }
 
   private static List<String> splitTopLevel(String s, char sep) {
