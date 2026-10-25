@@ -5,6 +5,7 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.regex.Pattern;
 import org.cra.common.git.DispositionSignal;
+import org.cra.common.text.Texts;
 
 /**
  * 处置信号解析（06§1.1）：人类 reply 标签与时间字段容错。
@@ -38,7 +39,7 @@ final class GitHubDispositionSupport {
 
   static String excerpt(String body) {
     String oneLine = body.replaceAll("\\s+", " ").strip();
-    return oneLine.length() <= 200 ? oneLine : oneLine.substring(0, 200) + "…";
+    return Texts.truncate(oneLine, 200);
   }
 
   static Instant instantOrNull(JsonNode node) {

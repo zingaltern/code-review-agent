@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -20,7 +19,6 @@ import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
-import org.cra.common.run.Coverage;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
@@ -64,7 +62,7 @@ import org.cra.store.api.ReviewLedger;
  * FindingPromoter}， 发布/账本见 {@link ReviewPublisher}，正文渲染见 {@link ReviewBodyRenderer}，覆盖声明见 {@link
  * CoverageReportBuilder}，收尾见 {@link ReviewRunFinisher}。本类只保留阶段编排。
  *
- * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker，run 内单实例）；扇出线程池由 ReviewStage 持有（09§6）。
+ * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker，run 内单实例）；扇出线程池由 ReviewAgentDispatcher 持有（09§6）。
  */
 public final class ReviewPipeline implements Orchestrator {
 
@@ -236,45 +234,8 @@ public final class ReviewPipeline implements Orchestrator {
       // T2.7 轮次超限（03§5 v1.3 语义强化）：三轮不收敛 = 设计问题——停止一切新 finding，
       // Summary 明确建议打回重新设计；不再执行评审与验证（人的职责是踩刹车）
       if (roundPlan.breached()) {
-        List<String> breachCoverage =
-            new ArrayList<>(List.of("第 " + roundPlan.round() + " 轮：验证-复审循环已超上限，本轮停止评审"));
-        publisher.publish(
-            request,
-            runId,
-            trace,
-            List.of(),
-            0,
-            0,
-            new ArrayList<>(List.of("convergence-round-limit")),
-            false,
-            suspectWarning,
-            breachCoverage,
-            ConvergenceGuard.breachAdvice(),
-            Set.of(),
-            0,
-            Map.of());
-        return ReviewRunFinisher.finish(
-            trace,
-            runId,
-            request,
-            RunStatus.SUCCESS,
-            new ReviewStats(
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                System.currentTimeMillis() - start,
-                List.of("convergence-round-limit"),
-                0,
-                new Coverage(diff.files().size(), 0, "轮次超限，停止评审")),
-            "run=" + runId + " 轮次超限（第 " + roundPlan.round() + " 轮），停止评审并建议打回重新设计");
+        return ConvergenceBreachHandler.handle(
+            request, runId, trace, publisher, diff, suspectWarning, roundPlan, start);
       }
 
       // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2；T2.7 diff-only：非首轮按增量）

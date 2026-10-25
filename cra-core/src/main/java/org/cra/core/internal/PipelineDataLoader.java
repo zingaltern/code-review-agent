@@ -31,7 +31,7 @@ import org.cra.git.api.LocalRepoContext;
 /**
  * 流水线数据面（T1.4/T2.7，04§3.2/03§5.2）：REVIEW.md 策略加载、head 全文预取、增量 diff、文件内容缓存与锚定判定。
  *
- * <p>从 {@link ReviewPipeline} 拆出：平台读取与纯判定集中在此，编排器只消费结果；所有不可得都按既有口径降级，不抛穿。
+ * <p>从 {@link ReviewPipeline} 拆出：平台读取与纯判定集中在此，编排器只消费结果；单文件/策略读取失败按既有口径降级， 初始 diff 取数失败仍上抛由 run 级收口。
  */
 final class PipelineDataLoader {
 

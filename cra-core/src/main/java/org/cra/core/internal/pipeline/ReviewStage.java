@@ -13,7 +13,6 @@ import org.cra.agents.api.SubAgent;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
 import org.cra.common.finding.CandidateFinding;
-import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.context.api.ContextAssembler;
@@ -328,7 +327,7 @@ public final class ReviewStage {
                   && !policy.sniffTests().isEmpty();
           CrossCheckMaterials.Materials materials =
               CrossCheckMaterials.build(
-                  wholePrFiles(plan),
+                  ReviewAgentDispatcher.wholePrFiles(plan),
                   assumptionMode ? crossHistory.entries() : List.of(),
                   crossCheckerOptions.historyWeeks(),
                   policy,
@@ -461,12 +460,5 @@ public final class ReviewStage {
         .filter(agent -> agent.role().id().equals(expectedId))
         .findFirst()
         .orElseThrow(() -> new IllegalStateException("班组缺少视角: " + expectedId));
-  }
-
-  /** 全 PR 文件范围（CrossChecker 材料组装用）。 */
-  private static List<DiffFile> wholePrFiles(ChunkPlanner.Plan plan) {
-    List<DiffFile> files = new ArrayList<>();
-    plan.chunks().forEach(c -> files.addAll(c.files()));
-    return files;
   }
 }

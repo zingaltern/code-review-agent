@@ -109,16 +109,14 @@ final class ReviewAgentDispatcher {
       String policySection,
       String runId,
       TraceWriter trace) {
-    AgentScope scope = wholePrScope(plan);
-    Map<String, FileContent> scoped =
-        scopedFiles(new ChunkPlanner.Chunk(scope.key(), scope.files()), headFiles);
+    WholePrScope whole = wholePr(plan, headFiles);
     return pool.submit(
         () ->
             dispatch(
                 agent,
-                scope,
-                scoped,
-                wholePrContextInput(scope, agent),
+                whole.scope(),
+                whole.scoped(),
+                wholePrContextInput(whole.scope(), agent),
                 extraSection,
                 prTitle,
                 commitMessages,
@@ -140,14 +138,12 @@ final class ReviewAgentDispatcher {
       String commitMessages,
       String runId,
       TraceWriter trace) {
-    AgentScope scope = wholePrScope(plan);
-    Map<String, FileContent> scoped =
-        scopedFiles(new ChunkPlanner.Chunk(scope.key(), scope.files()), headFiles);
+    WholePrScope whole = wholePr(plan, headFiles);
     return pool.submit(
         () ->
             executeGuarded(
                 agent,
-                scope,
+                whole.scope(),
                 () -> {
                   boolean hasTools = agent.tools() != ToolWhitelist.NONE;
                   ReviewAgentInput input =
@@ -159,7 +155,7 @@ final class ReviewAgentDispatcher {
                           "",
                           materials.historyText(),
                           materials.trustedSections(),
-                          hasTools ? scoped.keySet() : EMPTY_PATHS);
+                          hasTools ? whole.scoped().keySet() : EMPTY_PATHS);
                   long estimated =
                       TokenMath.estimateTokens(
                           materials.diffDigest()
@@ -167,7 +163,7 @@ final class ReviewAgentDispatcher {
                               + materials.trustedSections());
                   return new Prepared(input, hasTools, estimated, List.of(), List.of());
                 },
-                scoped,
+                whole.scoped(),
                 runId,
                 trace));
   }
@@ -322,10 +318,23 @@ final class ReviewAgentDispatcher {
     }
   }
 
+  private record WholePrScope(AgentScope scope, Map<String, FileContent> scoped) {}
+
+  private static WholePrScope wholePr(ChunkPlanner.Plan plan, Map<String, FileContent> headFiles) {
+    AgentScope scope = wholePrScope(plan);
+    return new WholePrScope(
+        scope, scopedFiles(new ChunkPlanner.Chunk(scope.key(), scope.files()), headFiles));
+  }
+
   private static AgentScope wholePrScope(ChunkPlanner.Plan plan) {
+    return new AgentScope("whole-pr", wholePrFiles(plan));
+  }
+
+  /** 全 PR 文件展平（派发与 CrossChecker 材料组装共用，避免两处各写一遍）。 */
+  static List<DiffFile> wholePrFiles(ChunkPlanner.Plan plan) {
     List<DiffFile> files = new ArrayList<>();
     plan.chunks().forEach(c -> files.addAll(c.files()));
-    return new AgentScope("whole-pr", files);
+    return files;
   }
 
   private static Map<String, FileContent> scopedFiles(

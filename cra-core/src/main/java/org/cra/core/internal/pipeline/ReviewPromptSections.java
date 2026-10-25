@@ -9,7 +9,7 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.FileContent;
 
 /**
- * 专角色输入附加段（03§6 v1.2）：只负责把可信上下文渲染成 prompt 段落，不做派发与预算记账。
+ * 专角色输入附加段（03§6 v1.2）：只负责把上下文渲染成 prompt 段落，不做派发与预算记账； 信任属性由调用方与模板定界（04§3.3）。
  *
  * <p>从 {@link ReviewStage} 拆出：Prompt 段落属于上下文组装职责，与扇出调度解耦后 可独立演进与测试。
  */

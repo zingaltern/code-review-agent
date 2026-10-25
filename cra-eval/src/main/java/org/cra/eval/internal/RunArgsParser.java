@@ -40,9 +40,6 @@ final class RunArgsParser {
     boolean failOnRed = "true".equals(named.get("--fail-on-red"));
     boolean crosschecker = "true".equals(named.get("--crosschecker-enabled"));
     String sha256Out = named.get("--sha256-out");
-    if (!CliProcessRunner.llmConfigured(env)) {
-      // 无真实 LLM 配置：run 仍可执行（LLM 步骤如实失败），报告显著声明——不静默伪装
-    }
     return new EvalCliArgs.RunArgs(
         datasetPath,
         set,

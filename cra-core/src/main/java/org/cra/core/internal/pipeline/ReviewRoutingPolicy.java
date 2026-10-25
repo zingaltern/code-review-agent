@@ -114,14 +114,23 @@ final class ReviewRoutingPolicy {
     if (depthPlan.effectiveDepth() == Depth.QUICK) {
       return false;
     }
+    Availability data = availability(policy, history);
+    boolean assumption =
+        options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && data.assumption();
+    boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && data.sniff();
+    return assumption || sniff;
+  }
+
+  /** 两个模式各自是否有数据可查（触发判定与未触发原因共用，避免口径漂移）。 */
+  private record Availability(boolean assumption, boolean sniff) {}
+
+  private static Availability availability(ReviewPolicy policy, CrossCheckHistory history) {
     boolean assumptionData =
         !policy.productContext().isEmpty()
             || !policy.knownIncidents().isEmpty()
             || history.hasData();
     boolean sniffData = !policy.sniffTests().isEmpty();
-    boolean assumption = options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && assumptionData;
-    boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && sniffData;
-    return assumption || sniff;
+    return new Availability(assumptionData, sniffData);
   }
 
   static List<String> activeModes(boolean assumption, boolean sniff) {
@@ -144,12 +153,8 @@ final class ReviewRoutingPolicy {
     if (depthPlan.effectiveDepth() == Depth.QUICK) {
       return "quick 档不触发（02§4.3 档位联动；M4f-lite 仅 standard/deep）";
     }
-    boolean assumptionData =
-        !policy.productContext().isEmpty()
-            || !policy.knownIncidents().isEmpty()
-            || history.hasData();
-    boolean sniffData = !policy.sniffTests().isEmpty();
-    if (!assumptionData && !sniffData) {
+    Availability data = availability(policy, history);
+    if (!data.assumption() && !data.sniff()) {
       return "REVIEW.md 未配置 Product context/Known incidents/Sniff tests，且变更史为空/不可得（07 T1.4 段落缺失优雅跳过）";
     }
     return "配置的 mode 与可用数据不匹配（05§5 agents.crosschecker.mode）";

@@ -45,7 +45,7 @@ import org.slf4j.LoggerFactory;
  * 两端点合并，只认 bot 自身评论）。
  *
  * <p>传输与退避在 {@link GitHubHttpTransport}，payload 解析在 {@link GitHubPayloadSupport}，处置标签在 {@link
- * GitHubDispositionSupport}；本类只保留端口语义与响应映射。整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link
+ * GitHubDispositionSupport}；本类只保留端口语义、响应映射与发布 payload 组装。整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link
  * CraIntegrationException} 上抛。
  */
 public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
