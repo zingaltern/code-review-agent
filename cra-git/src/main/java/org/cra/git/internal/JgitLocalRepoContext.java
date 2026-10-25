@@ -60,6 +60,41 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
     }
   }
 
+  @Override
+  public Optional<String> commitFilePatch(String sha, String path) {
+    if (localRepoRoot().isEmpty()) {
+      return Optional.empty();
+    }
+    try (Repository repository = new FileRepositoryBuilder().setWorkTree(root.toFile()).build()) {
+      var commitId = repository.resolve(sha);
+      if (commitId == null) {
+        return Optional.empty();
+      }
+      org.eclipse.jgit.revwalk.RevCommit commit;
+      try (org.eclipse.jgit.revwalk.RevWalk walk =
+          new org.eclipse.jgit.revwalk.RevWalk(repository)) {
+        commit = walk.parseCommit(commitId);
+      }
+      if (commit.getParentCount() == 0) {
+        return Optional.empty();
+      }
+      java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+      try (org.eclipse.jgit.diff.DiffFormatter formatter =
+          new org.eclipse.jgit.diff.DiffFormatter(out)) {
+        formatter.setRepository(repository);
+        for (org.eclipse.jgit.diff.DiffEntry entry : formatter.scan(commit.getParent(0), commit)) {
+          if (path.equals(entry.getNewPath()) || path.equals(entry.getOldPath())) {
+            formatter.format(java.util.List.of(entry));
+            return Optional.of(out.toString(java.nio.charset.StandardCharsets.UTF_8));
+          }
+        }
+        return Optional.empty();
+      }
+    } catch (java.io.IOException e) {
+      return Optional.empty();
+    }
+  }
+
   private static String shortSha(String sha) {
     return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
   }

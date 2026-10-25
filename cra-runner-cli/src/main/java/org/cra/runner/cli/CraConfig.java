@@ -25,7 +25,10 @@ package org.cra.runner.cli;
  * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 500k）
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
- * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled）
+ * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
+ *     UNVERIFIED 标签发布的生效路径，02§4.2）
+ * @param spotCheckPercent important/security 级 REFUTED 抽查保险丝百分比（agents.verifier.
+ *     important-refuted-spotcheck 的百分数形态，默认 20，03§4.3）
  * @param local 本地 pre-PR 模式（--local；05§3）
  * @param execCommand 本地实跑命令（--exec，默认 {@code mvn -B -ntp verify}；07 T2.10）
  * @param ledgerDb 本地 SQLite 账本文件（--ledger-db，默认 ~/.cra/ledger.db；02§5 本地形态）
@@ -57,6 +60,7 @@ public record CraConfig(
     double degradeAtFirst,
     double degradeAtSecond,
     String publishUnverified,
+    int spotCheckPercent,
     boolean local,
     String execCommand,
     String ledgerDb,
@@ -91,6 +95,7 @@ public record CraConfig(
         degradeAtFirst(),
         degradeAtSecond(),
         publishUnverified(),
+        spotCheckPercent(),
         local(),
         execCommand(),
         ledgerDb(),

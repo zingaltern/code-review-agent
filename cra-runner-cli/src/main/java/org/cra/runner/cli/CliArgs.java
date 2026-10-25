@@ -68,7 +68,8 @@ final class CliArgs {
             "--model-strong",
             "--model-light",
             "--fallback-chain",
-            "--rpm" -> {
+            "--rpm",
+            "--spot-check-percent" -> {
           if (i + 1 >= args.length) {
             throw new CraConfigException("参数缺值: " + arg);
           }
@@ -167,6 +168,7 @@ final class CliArgs {
         degradeAt.first(),
         degradeAt.second(),
         publishUnverified,
+        parseIntOption(named, "--spot-check-percent", 20),
         local,
         named.getOrDefault("--exec", DEFAULT_EXEC),
         expandUserHome(named.getOrDefault("--ledger-db", "~/.cra/ledger.db")),

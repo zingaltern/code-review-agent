@@ -35,6 +35,7 @@ class LlmConfigFactoryTest {
         0.70,
         0.85,
         "never",
+        20,
         false,
         "mvn -B -ntp verify",
         "~/.cra/ledger.db",

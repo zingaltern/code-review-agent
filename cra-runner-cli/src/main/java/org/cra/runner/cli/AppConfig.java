@@ -2,7 +2,9 @@ package org.cra.runner.cli;
 
 import org.cra.agents.api.AgentsAssembly;
 import org.cra.agents.api.GeneralReviewInput;
+import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.SubAgent;
+import org.cra.agents.api.VerificationBatchInput;
 import org.cra.core.api.CoreAssembly;
 import org.cra.core.api.Orchestrator;
 import org.cra.git.api.GitPlatformAdapter;
@@ -58,6 +60,16 @@ class AppConfig {
   }
 
   @Bean
+  SubAgent<VerificationBatchInput> verifier() {
+    return AgentsAssembly.createVerifier();
+  }
+
+  @Bean
+  SubAgent<JudgeCaseInput> judge() {
+    return AgentsAssembly.createJudge();
+  }
+
+  @Bean
   org.cra.git.api.LocalRepoContext localRepoContext() {
     // 05§2.1：jgit blame 的本地仓库上下文；目录非仓库时 localRepoRoot 为空（合法降级形态）
     return org.cra.git.api.GitAssembly.createLocalRepoContext(
@@ -73,7 +85,8 @@ class AppConfig {
         config.largeDiffLines(),
         config.hardCapLines(),
         config.nitBudget(),
-        config.publishUnverified());
+        config.publishUnverified(),
+        config.spotCheckPercent());
   }
 
   @Bean
@@ -82,6 +95,8 @@ class AppConfig {
       ReviewLedger ledger,
       LlmGateway gateway,
       SubAgent<GeneralReviewInput> reviewer,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
       org.cra.git.api.LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
@@ -89,6 +104,8 @@ class AppConfig {
         ledger,
         gateway,
         reviewer,
+        verifier,
+        judge,
         java.nio.file.Path.of(config.runRoot()),
         pipelineOptions,
         localRepoContext);

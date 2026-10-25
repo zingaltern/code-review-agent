@@ -79,11 +79,11 @@
 - [ ] T2.1 SubAgent 抽象与隔离运行时（03§1）：brief 注入、工具白名单、三重预算硬限、失败隔离；
 - [ ] T2.2 BugHunter 四视角模板（03§2.2）+ 视角路由 + 并行扇出/汇聚（并发 8）；
 - [ ] T2.3 Security/Test/Convention/Perf 接入；**Security/Perf 按 chunk 扇出**（03§6 v1.2 修正——独享全量 brief 超 2 倍预算，不可行）；
-- [ ] T2.4 VerifierAgent（balanced-review 模板，04§4.2）：文件批次组织、三值判定、INSUFFICIENT 受控补查；**反锚定校验器作为质控信号实现**（输出 PASS/FAIL 入 trace，不阻断晋升；归一化与统计口径按 03§4.2 v1.2）；
-- [ ] T2.5 判定与晋升规则（03§4.3 M2 形态）：含 important 级 REFUTED 确定性抽查保险丝（sha256(run_id|finding_id) mod 100 < 20，可复现）与验证不可得 → UNVERIFIED 不发布语义；
-- [ ] T2.6 JudgeAgent：INSUFFICIENT 仲裁 + 抽查复核 + **上下文按案件界定**（≤3 文件，03§6）；
-- [ ] T2.7 ConvergenceGuard：轮次上限 3、diff-only 复审、指纹去重（03§5）；
-- [ ] T2.8 精确去重 merge；语义去重留 M3；
+- [x] T2.4 VerifierAgent（balanced-review 模板，04§4.2）：文件批次组织、三值判定、INSUFFICIENT 受控补查；**反锚定校验器作为质控信号实现**（输出 PASS/FAIL 入 trace，不阻断晋升；归一化与统计口径按 03§4.2 v1.2）；**已落地（2026-10-25）：文件合批单 brief（founder 论证+全文+diff 切片）、followup_file 受控补查一次（编排器预取注入）、LLM 不可得缩上下文重试 1 次、反锚定按 v1.2 归一化口径（FAIL=重叠率 1.0）入 trace/finding**；
+- [x] T2.5 判定与晋升规则（03§4.3 M2 形态）：含 important 级 REFUTED 确定性抽查保险丝（sha256(run_id|finding_id) mod 100 < 20，可复现）与验证不可得 → UNVERIFIED 不发布语义；**已落地：PromotionEngine 五岔（confirmed 发布/refuted 拒真统计/insufficient→Judge/security·important 抽查保险丝 `--spot-check-percent` 默认 20 同 run 可复现/unavailable→UNVERIFIED 不发布）；`publish-unverified=labeled` 生效语义落地**；
+- [x] T2.6 JudgeAgent：INSUFFICIENT 仲裁 + 抽查复核 + **上下文按案件界定**（≤3 文件，03§6）；**已落地：arbitrate 一次性终裁无第三态；judge 不可得时仲裁案回 UNVERIFIED、抽查案维持 REFUTED（均不发布）**；
+- [x] T2.7 ConvergenceGuard：轮次上限 3、diff-only 复审、指纹去重（03§5）；**已落地：轮次按账本完成标记计数（同 head 重跑不计），第 4 轮停止评审并在 Summary 建议打回；非首轮 diff-only 只评审上轮完成 head 以来增量（锚定/blame/policy 用全量 PR diff），增量取不到回退全量并记 degradation**；
+- [x] T2.8 精确去重 merge；语义去重留 M3；**已落地：run 内同 file ±3 行同 category 链式聚类、代表元确定性**；
 - [x] T2.9 LlmGateway 模型路由（standard/strong/light）+ per-model RPM + 降级链（02§4.5）；**已落地（2026-10-25）：三档端点解析 + 60s 滑窗 per-model RPM + fallback-chain 换端点（重试耗尽/排队超时/4xx 均试链上下一档），降级注记入 LlmResponse 供 stats/Summary**；
 - [x] **T2.10 pre-PR 本地模式（v1.2 补实质）**：`cra review --local` 默认**实跑 `mvn -B -ntp verify`（命令可配）并展示真实输出**（退出码 + 失败摘录置顶报告——对齐博客"必须展示输出而非声称完成"，docs/00 §4 自检即现成命令）；随后本地评审（SQLite 账本、默认 dry-run）+ 建议清单；**已落地：本地 jgit 适配器（diff 与 GitHub 同构）+ 输出实时回显/全量落盘/摘录置顶 + 退出码 4（实跑失败，05§3 v1.3.2）+ 无密钥如实跳过评审；验收 8 e2e（注入挂测试分支）实跑通过**；
 - [x] T2.11 prompt 模板版本化并与 run 关联（05§1.2）；**已落地：trace `template_versions` 事件 + SQLite `prompt_template_version` 表（随发布成功落库）**。

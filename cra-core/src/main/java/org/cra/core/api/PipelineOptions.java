@@ -12,8 +12,10 @@ import java.util.Objects;
  * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 2000：>线降为 Quick 质量，02§4.4）
  * @param hardCapLines 硬上限（review.hard-cap-lines，默认 8000：>线仅评审 priority_paths）
  * @param nitBudgetDefault nit 预算默认值（review.nit-budget-default，默认 3；REVIEW.md 显式配置优先）
- * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M1
- *     无独立验证层，labeled 仅记录声明不生效）
+ * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
+ *     UNVERIFIED 标签发布的生效路径，02§4.2）
+ * @param importantRefutedSpotCheckPercent important/security 级 REFUTED 抽查保险丝百分比（03§4.3，
+ *     agents.verifier.important-refuted-spotcheck 的百分数形态；sha256(run_id|finding_id) mod 100 < pct）
  */
 public record PipelineOptions(
     long runTotalTokens,
@@ -22,10 +24,14 @@ public record PipelineOptions(
     int largeDiffLines,
     int hardCapLines,
     int nitBudgetDefault,
-    String publishUnverified) {
+    String publishUnverified,
+    int importantRefutedSpotCheckPercent) {
 
   /** run 级预算默认（02§4.4 v1.2.1：500k）。 */
   public static final long DEFAULT_RUN_TOTAL_TOKENS = 500_000;
+
+  /** important/security 级 REFUTED 抽查保险丝默认百分比（03§4.3 important-refuted-spotcheck=0.20）。 */
+  public static final int DEFAULT_SPOTCHECK_PERCENT = 20;
 
   public PipelineOptions {
     Objects.requireNonNull(publishUnverified, "publishUnverified");
@@ -50,6 +56,11 @@ public record PipelineOptions(
       throw new IllegalArgumentException(
           "publishUnverified must be never|labeled: " + publishUnverified);
     }
+    if (importantRefutedSpotCheckPercent < 0 || importantRefutedSpotCheckPercent > 100) {
+      throw new IllegalArgumentException(
+          "importantRefutedSpotCheckPercent must be in [0,100]: "
+              + importantRefutedSpotCheckPercent);
+    }
   }
 
   /**
@@ -58,6 +69,7 @@ public record PipelineOptions(
    * @return 默认 PipelineOptions
    */
   public static PipelineOptions defaults() {
-    return new PipelineOptions(DEFAULT_RUN_TOTAL_TOKENS, 0.70, 0.85, 2000, 8000, 3, "never");
+    return new PipelineOptions(
+        DEFAULT_RUN_TOTAL_TOKENS, 0.70, 0.85, 2000, 8000, 3, "never", DEFAULT_SPOTCHECK_PERCENT);
   }
 }

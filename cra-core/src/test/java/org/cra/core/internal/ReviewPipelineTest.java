@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.cra.agents.api.GeneralReviewerDefinition;
+import org.cra.agents.api.JudgeAgentDefinition;
+import org.cra.agents.api.VerifierAgentDefinition;
 import org.cra.agents.internal.TemplateLoader;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.git.DiffFile;
@@ -38,8 +40,6 @@ import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
 import org.cra.git.api.GitPlatformAdapter;
-import org.cra.llm.api.LlmGateway;
-import org.cra.llm.api.LlmResponse;
 import org.cra.store.api.ReviewLedger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -71,14 +71,14 @@ class ReviewPipelineTest {
 
   private GitPlatformAdapter adapter;
   private ReviewLedger ledger;
-  private LlmGateway gateway;
+  private ScriptedGateway scripted;
   private ReviewPipeline pipeline;
 
   @BeforeEach
   void setUp() {
     adapter = mock(GitPlatformAdapter.class);
     ledger = mock(ReviewLedger.class);
-    gateway = mock(LlmGateway.class);
+    scripted = new ScriptedGateway();
     when(ledger.findCompletion(anyInt(), anyString())).thenReturn(Optional.empty());
     when(ledger.publishedFindings(anyInt())).thenReturn(List.of());
     when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
@@ -108,8 +108,10 @@ class ReviewPipelineTest {
         new ReviewPipeline(
             adapter,
             ledger,
-            gateway,
+            scripted,
             new GeneralReviewerDefinition(new TemplateLoader()),
+            new VerifierAgentDefinition(new TemplateLoader()),
+            new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,
             org.cra.core.api.PipelineOptions.defaults(),
             null);
@@ -131,6 +133,16 @@ class ReviewPipelineTest {
     return "{\"findings\":[" + findingJson(title, line, category) + "]}";
   }
 
+  private static String findingInFile(String file, String title, int line, String category) {
+    return """
+        {"category":"%s","title":"%s",
+          "description":"d<!-- injected -->描述","failure_mode":"触发条件：x；错误结果：y",
+          "file":"%s","line":%d,"side":"RIGHT",
+          "evidence":"L%d: return items.get(items.size() - 1);","severity_proposed":"important",
+          "pre_existing_suspect":false,"confidence":0.8}"""
+        .formatted(category, title, file, line, line);
+  }
+
   private static String findingJson(String title, int line, String category) {
     return """
         {"category":"%s","title":"%s",
@@ -142,7 +154,7 @@ class ReviewPipelineTest {
   }
 
   private void gatewayReturns(String json) {
-    when(gateway.complete(any())).thenReturn(LlmResponse.ok(json, 100, 20, 5, "glm-x"));
+    scripted.review(json);
   }
 
   @Test
@@ -352,10 +364,7 @@ class ReviewPipelineTest {
   @Test
   void recordsDegradedCompletionWhenSchemaDropsAll() {
     // 降级完成也是完整发布（02§4.1）：完成标记以 DEGRADED 入账
-    when(gateway.complete(any()))
-        .thenReturn(LlmResponse.ok("a", 50, 5, 1, "glm-x"))
-        .thenReturn(LlmResponse.ok("b", 50, 5, 1, "glm-x"))
-        .thenReturn(LlmResponse.ok("c", 50, 5, 1, "glm-x"));
+    scripted.review("a").review("b").review("c");
     pipeline.run(request(false));
     ArgumentCaptor<LedgerRunMarker> runCaptor = ArgumentCaptor.forClass(LedgerRunMarker.class);
     verify(ledger).recordRunCompletion(eq(7), runCaptor.capture());
@@ -533,22 +542,17 @@ class ReviewPipelineTest {
 
   @Test
   void schemaRetryThenSuccess() {
-    when(gateway.complete(any()))
-        .thenReturn(LlmResponse.ok("这不是 JSON", 50, 5, 1, "glm-x"))
-        .thenReturn(LlmResponse.ok(findingsJson("越界", 4, "bug"), 50, 5, 1, "glm-x"));
+    scripted.review("这不是 JSON").review(findingsJson("越界", 4, "bug"));
     ReviewResult result = pipeline.run(request(false));
     assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
     assertThat(result.stats().findingsPublished()).isEqualTo(1);
-    verify(gateway, times(2)).complete(any());
+    assertThat(result.stats().degradations()).anyMatch(d -> d.startsWith("schema_retry_"));
   }
 
   @Test
   void schemaExhaustedDegradesWithDoneMarker() {
     // 三次全非法：候选全丢 → DEGRADED 收尾且发布 DONE 标记（降级完成也是完整发布，02§4.1）
-    when(gateway.complete(any()))
-        .thenReturn(LlmResponse.ok("a", 50, 5, 1, "glm-x"))
-        .thenReturn(LlmResponse.ok("b", 50, 5, 1, "glm-x"))
-        .thenReturn(LlmResponse.ok("c", 50, 5, 1, "glm-x"));
+    scripted.review("a").review("b").review("c");
     ReviewResult result = pipeline.run(request(false));
     assertThat(result.status()).isEqualTo(RunStatus.DEGRADED);
     assertThat(result.stats().findingsPublished()).isZero();
@@ -561,7 +565,7 @@ class ReviewPipelineTest {
 
   @Test
   void llmUnavailableFailsRunWithoutPublish() {
-    when(gateway.complete(any())).thenReturn(LlmResponse.unavailable("retries exhausted", 0, 10));
+    scripted.reviewUnavailable();
     ReviewResult result = pipeline.run(request(false));
     assertThat(result.status()).isEqualTo(RunStatus.FAILED);
     verify(adapter, never()).postReview(any());
@@ -717,35 +721,45 @@ class ReviewPipelineTest {
   @Test
   void budgetLadderTruncatesAndCountsSuppressed() {
     // 02§4.4：≥85% → 候选按 severity 只取 top-10，丢弃计数进 stats/Summary/完成标记
+    // T2.4 算术适配：评审两批 720 token，验证两批各 36（auto-confirm 压小）；预算 830——
+    // 评审后 720/830=87% ≥85% 触发发布截断，验证后 792/830=95% <100% 验证波两批全过
+    scripted.autoTokensIn = 30;
+    scripted.autoTokensOut = 6;
     org.cra.core.api.PipelineOptions tiny =
-        new org.cra.core.api.PipelineOptions(600, 0.70, 0.85, 2000, 8000, 3, "never");
+        new org.cra.core.api.PipelineOptions(830, 0.70, 0.85, 2000, 8000, 3, "never", 20);
     pipeline =
         new ReviewPipeline(
             adapter,
             ledger,
-            gateway,
+            scripted,
             new GeneralReviewerDefinition(new TemplateLoader()),
+            new VerifierAgentDefinition(new TemplateLoader()),
+            new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,
             tiny,
             null);
-    // 两个不同模块文件 → 2 个 chunk；每次调用 300/60 token → 两批后 720/600 = 120% ≥85%
+    // 两个不同模块文件 → 2 个 chunk；每次评审调用 300/60 token → 两批后 720/830 = 87% ≥85%
     DiffFile a =
         new DiffFile("mod-a/A.java", null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)));
     DiffFile b =
         new DiffFile("mod-b/B.java", null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)));
     when(adapter.fetchDiff(any(), anyString(), anyString()))
         .thenReturn(new DiffResult(BASE, HEAD, List.of(a, b), List.of()));
-    StringBuilder findings = new StringBuilder("{\"findings\":[");
+    // T2.8 语义适配：同 file ±3 行同 category 会合并——12 条候选须分文件且行距 >3 才能保住截断场景
+    StringBuilder findingsA = new StringBuilder("{\"findings\":[");
+    StringBuilder findingsB = new StringBuilder("{\"findings\":[");
     for (int i = 0; i < 6; i++) {
+      int line = 1 + i * 4;
       if (i > 0) {
-        findings.append(",");
+        findingsA.append(",");
+        findingsB.append(",");
       }
-      findings.append(findingJson("问题" + i, 4, "bug"));
+      findingsA.append(findingInFile("mod-a/A.java", "问题" + i, line, "bug"));
+      findingsB.append(findingInFile("mod-b/B.java", "问题" + i, line, "bug"));
     }
-    findings.append("]}");
-    when(gateway.complete(any()))
-        .thenReturn(LlmResponse.ok(findings.toString(), 300, 60, 5, "glm-x"))
-        .thenReturn(LlmResponse.ok(findings.toString(), 300, 60, 5, "glm-x"));
+    findingsA.append("]}");
+    findingsB.append("]}");
+    scripted.review(findingsA.toString(), 300, 60).review(findingsB.toString(), 300, 60);
     ReviewResult result = pipeline.run(request(false));
     // 12 条候选 → top-10 发布，suppressed=2；截断计数进 Summary 与完成标记
     assertThat(result.stats().findingsCandidate()).isEqualTo(12);
@@ -828,7 +842,7 @@ class ReviewPipelineTest {
     assertThat(summary).contains("跳过").contains("generated/Gen.java");
     assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
     // skipped 文件不进任何 brief（只有 src/Foo.java 一个 chunk）
-    verify(gateway, times(1)).complete(any());
+    assertThat(scripted.reviewCalls).hasSize(1);
   }
 
   @Test
@@ -847,12 +861,11 @@ class ReviewPipelineTest {
         "{\"findings\":["
             + findingJson("nit-1", 4, "bug")
             + ","
-            + findingJson("nit-2", 5, "bug")
+            + findingJson("nit-2", 4, "convention")
             + "]}");
-    // 第二条 line 5 不在 hunk 内 → 会走 anchor fallback；改为同 hunk 内不同行 5 不行（hunk 只有 1 行新文件）——用 4 行同锚不同
-    // category
+    // T2.8 语义适配：同 file 同行必须跨 category 才不会被 run 内合并（±3 行同 category）；
+    // findingJson 硬编码 important——nit 预算机制由 FindingAggregatorTest 覆盖，本用例只验证合并语义
     ReviewResult result = pipeline.run(request(false));
-    // 两条 nit 同文件同行同 category → 指纹相同会被去重；改用 line 4 + category bug 与 convention
     assertThat(result.stats().findingsCandidate()).isEqualTo(2);
   }
 
@@ -868,8 +881,10 @@ class ReviewPipelineTest {
         new ReviewPipeline(
             adapter,
             ledger,
-            gateway,
+            scripted,
             new GeneralReviewerDefinition(new TemplateLoader()),
+            new VerifierAgentDefinition(new TemplateLoader()),
+            new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,
             org.cra.core.api.PipelineOptions.defaults(),
             repo);

@@ -3,7 +3,9 @@ package org.cra.runner.cli;
 import java.nio.file.Path;
 import org.cra.agents.api.AgentsAssembly;
 import org.cra.agents.api.GeneralReviewInput;
+import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.SubAgent;
+import org.cra.agents.api.VerificationBatchInput;
 import org.cra.core.api.CoreAssembly;
 import org.cra.core.api.Orchestrator;
 import org.cra.git.api.GitPlatformAdapter;
@@ -55,6 +57,16 @@ class LocalAppConfig {
   }
 
   @Bean
+  SubAgent<VerificationBatchInput> verifier() {
+    return AgentsAssembly.createVerifier();
+  }
+
+  @Bean
+  SubAgent<JudgeCaseInput> judge() {
+    return AgentsAssembly.createJudge();
+  }
+
+  @Bean
   LocalRepoContext localRepoContext() {
     return org.cra.git.api.GitAssembly.createLocalRepoContext(Path.of(config.workspace()));
   }
@@ -68,7 +80,8 @@ class LocalAppConfig {
         config.largeDiffLines(),
         config.hardCapLines(),
         config.nitBudget(),
-        config.publishUnverified());
+        config.publishUnverified(),
+        config.spotCheckPercent());
   }
 
   @Bean
@@ -77,6 +90,8 @@ class LocalAppConfig {
       ReviewLedger ledger,
       LlmGateway gateway,
       SubAgent<GeneralReviewInput> reviewer,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
       LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
@@ -84,6 +99,8 @@ class LocalAppConfig {
         ledger,
         gateway,
         reviewer,
+        verifier,
+        judge,
         Path.of(config.runRoot()),
         pipelineOptions,
         localRepoContext);

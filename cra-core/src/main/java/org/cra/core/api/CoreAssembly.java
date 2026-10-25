@@ -2,7 +2,9 @@ package org.cra.core.api;
 
 import java.nio.file.Path;
 import org.cra.agents.api.GeneralReviewInput;
+import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.SubAgent;
+import org.cra.agents.api.VerificationBatchInput;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
 import org.cra.llm.api.LlmGateway;
@@ -18,16 +20,18 @@ public final class CoreAssembly {
   private CoreAssembly() {}
 
   /**
-   * 创建 M1 编排器（07 T1.3–T1.7：分层上下文 + REVIEW.md 策略 + 深度档位 + 大 diff 分 chunk + 降档阶梯 + nit 预算/severity 排序
-   * + jgit blame 复核；幂等闸与发布沿用 M0 契约，02§4.1）。
+   * 创建 M2 编排器（07 T2.4–T2.8：M1 流水线 + 独立复核验证波 + 判定晋升规则 + Judge 仲裁/抽查 + 收敛控制 + run 内精确去重
+   * merge；幂等闸与发布沿用既有契约，02§4.1）。
    *
    * @param adapter Git 平台适配器（diff/readFile/postReview）
-   * @param ledger 评审账本（commit 闸 + 指纹级去重）
+   * @param ledger 评审账本（commit 闸 + 指纹级去重 + 轮次计数）
    * @param gateway LLM 网关
-   * @param reviewer 评审子代理定义（M1 仍单角色）
+   * @param reviewer 评审子代理定义
+   * @param verifier 验证子代理定义（T2.4，balanced-review）
+   * @param judge 仲裁子代理定义（T2.6，arbitrate）
    * @param runRoot trace/brief 落盘根目录（如 .cra/runs）
    * @param options 编排参数（null 用默认）
-   * @param localRepoContext 本地仓库上下文（jgit blame；null 或仓库不可得时 pre-existing 复核降级声明，05§2.1）
+   * @param localRepoContext 本地仓库上下文（jgit blame + 被引 commit diff；null 时相应检测降级声明）
    * @return Orchestrator
    */
   public static Orchestrator createOrchestrator(
@@ -35,6 +39,8 @@ public final class CoreAssembly {
       ReviewLedger ledger,
       LlmGateway gateway,
       SubAgent<GeneralReviewInput> reviewer,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
       Path runRoot,
       PipelineOptions options,
       LocalRepoContext localRepoContext) {
@@ -43,6 +49,8 @@ public final class CoreAssembly {
         ledger,
         gateway,
         reviewer,
+        verifier,
+        judge,
         runRoot,
         options == null ? PipelineOptions.defaults() : options,
         localRepoContext);

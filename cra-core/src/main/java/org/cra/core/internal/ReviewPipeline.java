@@ -19,7 +19,9 @@ import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.GeneralReviewInput;
+import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.SubAgent;
+import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.context.AssembledContext;
 import org.cra.common.context.ContextInput;
 import org.cra.common.context.ReviewPolicy;
@@ -54,12 +56,16 @@ import org.cra.context.api.ReviewPolicyParser;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
+import org.cra.core.internal.pipeline.ConvergenceGuard;
 import org.cra.core.internal.pipeline.DepthPlan;
 import org.cra.core.internal.pipeline.DepthPolicy;
+import org.cra.core.internal.pipeline.ExactDedupMerger;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PolicySections;
 import org.cra.core.internal.pipeline.PreExistingBlameChecker;
+import org.cra.core.internal.pipeline.PromotionEngine;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
+import org.cra.core.internal.pipeline.SpotCheckFuse;
 import org.cra.core.internal.pipeline.SummarySections;
 import org.cra.core.internal.pipeline.SummarySections.CoverageInput;
 import org.cra.git.api.GitPlatformAdapter;
@@ -91,6 +97,7 @@ public final class ReviewPipeline implements Orchestrator {
   private static final String MARKER_VERSION = "2.1";
   private static final String REVIEW_MD = "REVIEW.md";
   private static final int MAX_PARALLEL_CHUNKS = 8;
+  private static final int MAX_PARALLEL_BATCHES = 4;
 
   /** 过期收尾前缀的判定起点（02§5：[已被 run_xxx 取代]；已收尾的评论不再叠加前缀）。 */
   private static final String SUPERSEDED_PREFIX = "[已被 run_";
@@ -102,18 +109,23 @@ public final class ReviewPipeline implements Orchestrator {
   private final ReviewLedger ledger;
   private final AgentRunner agentRunner;
   private final SubAgent<GeneralReviewInput> reviewer;
+  private final SubAgent<VerificationBatchInput> verifier;
+  private final SubAgent<JudgeCaseInput> judge;
   private final Path runRoot;
   private final PipelineOptions options;
   private final LocalRepoContext localRepoContext;
   private final ContextAssembler contextAssembler;
   private final ReviewPolicyParser policyParser;
   private final ExecutorService chunkPool;
+  private final ExecutorService verifyPool;
 
   public ReviewPipeline(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
       LlmGateway gateway,
       SubAgent<GeneralReviewInput> reviewer,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
       Path runRoot,
       PipelineOptions options,
       LocalRepoContext localRepoContext) {
@@ -121,6 +133,8 @@ public final class ReviewPipeline implements Orchestrator {
     this.ledger = ledger;
     this.agentRunner = new AgentRunner(gateway);
     this.reviewer = reviewer;
+    this.verifier = verifier;
+    this.judge = judge;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
     this.localRepoContext = localRepoContext;
@@ -131,6 +145,15 @@ public final class ReviewPipeline implements Orchestrator {
             MAX_PARALLEL_CHUNKS,
             runnable -> {
               Thread thread = new Thread(runnable, "cra-chunk");
+              thread.setDaemon(true);
+              return thread;
+            });
+    // 验证波并行度 ≤4（04§2.3 延迟算术：验证 wave ≤4 批并行）
+    this.verifyPool =
+        Executors.newFixedThreadPool(
+            MAX_PARALLEL_BATCHES,
+            runnable -> {
+              Thread thread = new Thread(runnable, "cra-verify");
               thread.setDaemon(true);
               return thread;
             });
@@ -191,19 +214,84 @@ public final class ReviewPipeline implements Orchestrator {
               ? "检测到 " + suspectCount + " 个可疑账本标记（LEDGER_SUSPECT），疑似注入尝试"
               : "";
 
+      // T2.7：收敛决议（03§5）——轮次按账本完成标记计数；非首轮 diff-only 复审只评审增量
+      ConvergenceGuard.RoundPlan roundPlan =
+          ConvergenceGuard.resolve(completedRuns, request.headSha());
+      trace.emit(
+          "convergence",
+          Map.of(
+              "round",
+              roundPlan.round(),
+              "breached",
+              roundPlan.breached(),
+              "review_base",
+              roundPlan.lastReviewedHead().map(ReviewPipeline::shortSha).orElse("pr-base")));
+
       DiffResult diff =
           adapter.fetchDiff(
               new RepoRef(request.repoOwner(), request.repoName()),
               request.baseSha(),
               request.headSha());
+      List<String> earlyDegradations = new ArrayList<>();
+      DiffResult reviewDiff =
+          roundPlan
+              .lastReviewedHead()
+              .map(last -> incrementDiff(request, trace, last, diff, earlyDegradations))
+              .orElse(diff);
 
-      // T1.4：REVIEW.md base 读取 + PR 内变更检测（04§3.2）
+      // T1.4：REVIEW.md base 读取 + PR 内变更检测（04§3.2；变更检测用全量 PR diff）
       ReviewPolicy policy = loadPolicy(trace, diff, request);
       boolean policyModified = hasReviewMdChange(diff);
 
-      // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2）
-      DepthPlan depthPlan = DepthPolicy.resolve(request.depth(), diff.totalPatchLines(), options);
-      ChunkPlanner.Plan plan = ChunkPlanner.plan(diff.files(), policy, depthPlan.priorityOnly());
+      // T2.7 轮次超限（03§5 v1.3 语义强化）：三轮不收敛 = 设计问题——停止一切新 finding，
+      // Summary 明确建议打回重新设计；不再执行评审与验证（人的职责是踩刹车）
+      if (roundPlan.breached()) {
+        List<String> breachCoverage =
+            new ArrayList<>(List.of("第 " + roundPlan.round() + " 轮：验证-复审循环已超上限，本轮停止评审"));
+        publish(
+            request,
+            runId,
+            trace,
+            List.of(),
+            0,
+            0,
+            new ArrayList<>(List.of("convergence-round-limit")),
+            false,
+            suspectWarning,
+            breachCoverage,
+            ConvergenceGuard.breachAdvice(),
+            Set.of(),
+            0,
+            Map.of());
+        return finish(
+            trace,
+            runId,
+            request,
+            RunStatus.SUCCESS,
+            new ReviewStats(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                System.currentTimeMillis() - start,
+                List.of("convergence-round-limit"),
+                0,
+                new Coverage(diff.files().size(), 0, "轮次超限，停止评审")),
+            "run=" + runId + " 轮次超限（第 " + roundPlan.round() + " 轮），停止评审并建议打回重新设计");
+      }
+
+      // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2；T2.7 diff-only：非首轮按增量）
+      DepthPlan depthPlan =
+          DepthPolicy.resolve(request.depth(), reviewDiff.totalPatchLines(), options);
+      ChunkPlanner.Plan plan =
+          ChunkPlanner.plan(reviewDiff.files(), policy, depthPlan.priorityOnly());
       trace.emit(
           "plan",
           Map.of(
@@ -215,7 +303,9 @@ public final class ReviewPipeline implements Orchestrator {
               "skipped", plan.skippedPaths().size(),
               "notes", plan.notes()));
 
-      RunOutcome outcome = executeChunks(request, runId, trace, diff, policy, depthPlan, plan);
+      RunBudgetTracker budget = new RunBudgetTracker(options);
+      RunOutcome outcome =
+          executeChunks(request, runId, trace, budget, reviewDiff, policy, depthPlan, plan);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
       trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
@@ -232,6 +322,9 @@ public final class ReviewPipeline implements Orchestrator {
                 0,
                 0,
                 0,
+                0,
+                0,
+                0,
                 outcome.tokensIn(),
                 outcome.tokensOut(),
                 System.currentTimeMillis() - start,
@@ -241,6 +334,7 @@ public final class ReviewPipeline implements Orchestrator {
             "LLM 不可得: " + outcome.llmError());
       }
       List<String> degradations = new ArrayList<>(outcome.degradations());
+      degradations.addAll(earlyDegradations);
       boolean degraded = false;
       if (!outcome.schemaErrors().isEmpty() && outcome.findings().isEmpty()) {
         // 候选全部被 schema 校验丢弃：run 降级收尾（仍发布完成标记，02§4.1 降级完成语义）
@@ -250,16 +344,23 @@ public final class ReviewPipeline implements Orchestrator {
       if (outcome.stoppedByBudget()) {
         degraded = true;
       }
-      if (!"never".equals(options.publishUnverified())) {
-        // 配置已受理但 M1 无验证层：如实声明不生效（05§5 review.publish-unverified）
-        degradations.add("publish-unverified-labeled-not-effective-m1");
-      }
+
+      // T2.8：run 内精确去重 merge（03§4.5：同 file ±3 行同 category；语义去重留 M3）
+      ExactDedupMerger.Result merged = ExactDedupMerger.merge(outcome.findings());
+      merged
+          .mergedFrom()
+          .forEach(
+              (keptId, sources) ->
+                  trace.emit("merge", Map.of("finding_id", keptId, "merged_from", sources)));
+      trace.emit(
+          "merge_summary",
+          Map.of("clusters", merged.clusters(), "merged_away", merged.mergedAway()));
 
       // 去重（指纹 exact → ±5 滑窗 → possible_duplicate，02§4.1）+ 锚定校验（05§2.2）
       List<FindingAggregator.Scored> candidates = new ArrayList<>();
       int skippedDuplicate = 0;
       Map<String, Optional<String>> contentCache = new HashMap<>();
-      for (CandidateFinding finding : outcome.findings()) {
+      for (CandidateFinding finding : merged.kept()) {
         List<String> lines =
             contentOf(finding.file(), request.headSha(), request, contentCache)
                 .map(text -> List.of(text.split("\n", -1)))
@@ -313,43 +414,141 @@ public final class ReviewPipeline implements Orchestrator {
                           blameOutcome.verdictOf(s.finding().id())))
               .toList();
 
-      // T1.7/T1.6：severity 排序 + nit 预算 + 阶梯截断 top-10（02§4.4）
+      // T2.4：验证波（文件批次 × balanced-review；INSUFFICIENT 受控补查；反锚定质控信号入 trace）
+      VerificationWave wave =
+          new VerificationWave(
+              verifier,
+              agentRunner,
+              trace,
+              budget,
+              verifyPool,
+              path -> contentOf(path, request.headSha(), request, contentCache),
+              new CitedEvidenceResolver(localRepoContext));
+      VerificationWave.WaveResult waveResult =
+          wave.verify(candidates, policy, outcome.headFiles(), reviewDiff, runId);
+      degradations.addAll(waveResult.degradations());
+      budget.record(waveResult.tokensIn(), waveResult.tokensOut());
+      long tokensIn = outcome.tokensIn() + waveResult.tokensIn();
+      long tokensOut = outcome.tokensOut() + waveResult.tokensOut();
+
+      // T2.5/T2.6：晋升规则（M2 形态）+ Judge 仲裁与抽查复核（03§4.3/03§4.4）
+      boolean publishUnverified = "labeled".equals(options.publishUnverified());
+      JudgeArbiter arbiter = new JudgeArbiter(judge, agentRunner, trace);
+      List<FindingAggregator.Scored> confirmedCandidates = new ArrayList<>();
+      List<FindingAggregator.Scored> unverifiedLabeled = new ArrayList<>();
+      int confirmedCount = 0;
+      int rejectedCount = 0;
+      int unverifiedCount = 0;
+      for (FindingAggregator.Scored s : candidates) {
+        CandidateFinding finding = s.finding();
+        VerificationWave.PerFinding verifierOutcome = waveResult.outcomes().get(finding.id());
+        VerdictJsonCodec.VerifierVerdict verdict =
+            verifierOutcome == null || verifierOutcome.verdict() == null
+                ? VerdictJsonCodec.VerifierVerdict.UNAVAILABLE
+                : verifierOutcome.verdict().verdict();
+        boolean fuseHit =
+            SpotCheckFuse.hit(runId, finding.id(), options.importantRefutedSpotCheckPercent());
+        PromotionEngine.Promotion promotion = PromotionEngine.promote(verdict, finding, fuseHit);
+        trace.emit(
+            "promotion",
+            Map.of(
+                "finding_id", finding.id(),
+                "verifier_verdict", verdict.name(),
+                "decision", promotion.decision().name().toLowerCase(Locale.ROOT),
+                "reason", promotion.reason(),
+                "spotcheck_fuse", fuseHit));
+        switch (promotion.decision()) {
+          case PUBLISH -> {
+            confirmedCount++;
+            confirmedCandidates.add(s);
+          }
+          case REJECT -> rejectedCount++;
+          case UNVERIFIED -> {
+            if (publishUnverified) {
+              // 05§5 review.publish-unverified=labeled：带 UNVERIFIED 标签发布（02§4.2 可配项）
+              unverifiedLabeled.add(s);
+            } else {
+              unverifiedCount++;
+            }
+          }
+          case JUDGE -> {
+            boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
+            JudgeArbiter.Judgement judgement =
+                arbitrate(arbiter, finding, verifierOutcome, spotCheck, outcome.headFiles(), runId);
+            budget.record(judgement.tokensIn(), judgement.tokensOut());
+            tokensIn += judgement.tokensIn();
+            tokensOut += judgement.tokensOut();
+            if (judgement.available()
+                && judgement.verdict() == JudgeJsonCodec.JudgeVerdict.CONFIRMED) {
+              confirmedCount++;
+              confirmedCandidates.add(s);
+            } else if (judgement.available()) {
+              rejectedCount++;
+            } else if (spotCheck) {
+              // 抽查复核的 judge 不可得：维持 REFUTED（保守不发布，02§4.2）
+              rejectedCount++;
+            } else {
+              unverifiedCount++;
+            }
+          }
+        }
+      }
+
+      // T1.7/T1.6：severity 排序 + nit 预算 + 阶梯截断 top-10（02§4.4；只对确认集执行）
       FindingAggregator.Aggregation aggregation =
           FindingAggregator.aggregate(
-              candidates, policy, options.nitBudgetDefault(), outcome.truncationReached());
+              confirmedCandidates, policy, options.nitBudgetDefault(), outcome.truncationReached());
+      List<FindingAggregator.Scored> toPublish = new ArrayList<>(aggregation.ordered());
+      toPublish.addAll(unverifiedLabeled);
       trace.emit(
           "aggregate",
           Map.of(
-              "candidates", candidates.size(),
+              "candidates", confirmedCandidates.size(),
               "ordered", aggregation.ordered().size(),
               "nit_dropped", aggregation.nitDropped(),
               "suppressed_by_truncation", aggregation.suppressedByTruncation()));
 
       // publish（dry-run 零写）；重试类事件入 stats 但不降级——降级语义 = 未按预期完整发布
       List<String> coverageLines =
-          coverageLines(
-              diff, policy, depthPlan, plan, outcome, blameOutcome, policyModified, aggregation);
+          new ArrayList<>(
+              coverageLines(
+                  diff,
+                  policy,
+                  depthPlan,
+                  plan,
+                  outcome,
+                  blameOutcome,
+                  policyModified,
+                  aggregation));
+      if (roundPlan.round() > 1 && roundPlan.lastReviewedHead().isPresent()) {
+        coverageLines.add(
+            "diff-only 复审（第 "
+                + roundPlan.round()
+                + " 轮）：只评审自 "
+                + shortSha(roundPlan.lastReviewedHead().get())
+                + " 以来的增量，已评审文件未变更者不重审");
+      }
       int publishedCount =
           publish(
               request,
               runId,
               trace,
-              aggregation.ordered(),
+              toPublish,
               skippedDuplicate,
               aggregation.suppressedByTruncation(),
               degradations,
               degraded,
               suspectWarning,
               coverageLines,
+              null,
+              unverifiedLabeled.stream().map(s -> s.finding().id()).collect(Collectors.toSet()),
+              unverifiedCount,
               outcome.templateVersions());
       int fallbackCount =
-          (int)
-              aggregation.ordered().stream()
-                  .filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK)
-                  .count();
+          (int) toPublish.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).count();
       int preExistingCount =
           (int)
-              aggregation.ordered().stream()
+              toPublish.stream()
                   .filter(
                       s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
                   .count();
@@ -361,34 +560,39 @@ public final class ReviewPipeline implements Orchestrator {
               outcome.findings().size(),
               publishedCount,
               skippedDuplicate,
+              confirmedCount,
+              rejectedCount,
+              unverifiedCount,
               fallbackCount,
               preExistingCount,
               aggregation.suppressedByTruncation(),
-              outcome.tokensIn(),
-              outcome.tokensOut(),
+              tokensIn,
+              tokensOut,
               System.currentTimeMillis() - start,
               List.copyOf(degradations),
               (int)
-                  aggregation.ordered().stream()
+                  toPublish.stream()
                       .filter(s -> s.finding().category() == FindingCategory.SECURITY)
                       .count(),
               new Coverage(diff.files().size(), filesReviewed, coverageNote(coverageLines)));
       String summaryLine =
           String.format(
-              "run=%s status=%s depth=%s candidate=%d published=%d dedup=%d fallback=%d "
-                  + "suppressed=%d tokens=%d/%d",
+              "run=%s status=%s depth=%s candidate=%d confirmed=%d rejected=%d unverified=%d "
+                  + "published=%d dedup=%d fallback=%d suppressed=%d tokens=%d/%d",
               runId,
               status,
               depthPlan.effectiveDepth().name().toLowerCase(Locale.ROOT),
               stats.findingsCandidate(),
+              confirmedCount,
+              rejectedCount,
+              unverifiedCount,
               stats.findingsPublished(),
               stats.skippedDuplicate(),
               stats.anchorFallback(),
               stats.suppressedByTruncation(),
               stats.tokensIn(),
               stats.tokensOut());
-      return finish(
-          trace, runId, request, status, stats, summaryLine, suggestionsOf(aggregation.ordered()));
+      return finish(trace, runId, request, status, stats, summaryLine, suggestionsOf(toPublish));
     } catch (RuntimeException e) {
       // run 级不可恢复故障统一捕获：落盘 FAILED + trace，不阻塞 PR（02§4.2）
       return finish(
@@ -447,12 +651,12 @@ public final class ReviewPipeline implements Orchestrator {
       ReviewRequest request,
       String runId,
       TraceWriter trace,
+      RunBudgetTracker budget,
       DiffResult diff,
       ReviewPolicy policy,
       DepthPlan depthPlan,
       ChunkPlanner.Plan plan) {
     Map<String, FileContent> headFiles = prefetchHeadFiles(request, plan);
-    RunBudgetTracker budget = new RunBudgetTracker(options);
     String commitMessages =
         diff.commits().stream()
             .map(c -> c.sha() + " " + c.message())
@@ -709,6 +913,50 @@ public final class ReviewPipeline implements Orchestrator {
     return headFiles;
   }
 
+  // ---------- 阶段：验证与晋升（T2.4–T2.6） ----------
+
+  /** T2.7 diff-only 复审的增量 diff（03§5.2）：取自上一轮完成 head；取不到（force-push/接口失败）回退全量并声明。 */
+  private DiffResult incrementDiff(
+      ReviewRequest request,
+      TraceWriter trace,
+      String lastHead,
+      DiffResult fallback,
+      List<String> earlyDegradations) {
+    try {
+      return adapter.fetchDiff(
+          new RepoRef(request.repoOwner(), request.repoName()), lastHead, request.headSha());
+    } catch (RuntimeException e) {
+      trace.emit(
+          "convergence",
+          Map.of(
+              "note", "increment-diff-unavailable",
+              "last_head", shortSha(lastHead),
+              "error", String.valueOf(e.getMessage())));
+      earlyDegradations.add("increment-diff-fallback-full");
+      return fallback;
+    }
+  }
+
+  /** Judge 案件组装 + 调用（03§4.4：brief = finding + 验证者判定与证据 + ≤3 文件上下文）。 */
+  private JudgeArbiter.Judgement arbitrate(
+      JudgeArbiter arbiter,
+      CandidateFinding finding,
+      VerificationWave.PerFinding verifierOutcome,
+      boolean spotCheck,
+      Map<String, FileContent> headFiles,
+      String runId) {
+    String verdictText =
+        verifierOutcome != null && verifierOutcome.verdict() != null
+            ? verifierOutcome.verdict().verdict().name()
+                + "。理由："
+                + verifierOutcome.verdict().rationale()
+            : "（验证不可得：验证者超时/预算击穿/输出不合法）";
+    JudgeCaseInput input =
+        VerificationBatchAssembler.buildJudgeCase(
+            finding, verdictText, JudgeArbiter.reasonText(spotCheck), headFiles);
+    return arbiter.arbitrate(input, runId, finding.id());
+  }
+
   // ---------- 阶段：聚合辅助 ----------
 
   private static String coverageNote(List<String> coverageLines) {
@@ -753,6 +1001,9 @@ public final class ReviewPipeline implements Orchestrator {
       boolean degraded,
       String suspectWarning,
       List<String> coverageLines,
+      String convergenceAdvice,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished,
       Map<String, String> templateVersions) {
     List<FindingAggregator.Scored> fallbacks =
         ordered.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList();
@@ -765,7 +1016,7 @@ public final class ReviewPipeline implements Orchestrator {
                         s.finding().file(),
                         s.finding().line(),
                         s.finding().side(),
-                        inlineBody(s, runId, request.headSha()),
+                        inlineBody(s, runId, request.headSha(), unverifiedIds),
                         s.finding().id()))
             .toList();
     String summaryBody =
@@ -779,7 +1030,10 @@ public final class ReviewPipeline implements Orchestrator {
             degradations,
             degraded,
             suspectWarning,
-            coverageLines);
+            coverageLines,
+            convergenceAdvice,
+            unverifiedIds,
+            unverifiedUnpublished);
     if (request.dryRun()) {
       // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧
       trace.emit(
@@ -944,10 +1198,12 @@ public final class ReviewPipeline implements Orchestrator {
 
   // ---------- 组装：inline 评论与 Summary 正文 ----------
 
-  private String inlineBody(FindingAggregator.Scored s, String runId, String commitSha) {
+  private String inlineBody(
+      FindingAggregator.Scored s, String runId, String commitSha, Set<String> unverifiedIds) {
     CandidateFinding f = s.finding();
+    boolean unverified = unverifiedIds.contains(f.id());
     StringBuilder body = new StringBuilder();
-    body.append("**[")
+    body.append(unverified ? "**[UNVERIFIED][" : "**[")
         .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
         .append("] ")
         .append(escape(f.title()))
@@ -956,6 +1212,9 @@ public final class ReviewPipeline implements Orchestrator {
         .append(":")
         .append(f.line())
         .append("`\n\n");
+    if (unverified) {
+      body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
+    }
     body.append(escape(f.description())).append("\n\n");
     body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
     body.append("**证据**：\n```\n").append(f.evidence()).append("\n```\n");
@@ -993,7 +1252,10 @@ public final class ReviewPipeline implements Orchestrator {
       List<String> degradations,
       boolean degraded,
       String suspectWarning,
-      List<String> coverageLines) {
+      List<String> coverageLines,
+      String convergenceAdvice,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
     body.append("变更：PR #")
@@ -1016,10 +1278,15 @@ public final class ReviewPipeline implements Orchestrator {
             .filter(s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
             .toList();
     if (important.isEmpty() && nits.isEmpty() && fallbacks.isEmpty() && preExisting.isEmpty()) {
-      body.append(
-          ordered.isEmpty() && skippedDuplicate == 0
-              ? "本次未发现问题（评审返回空结果）。\n\n"
-              : "本次无新发现（候选均被指纹去重抑制 " + skippedDuplicate + " 条）。\n\n");
+      if (ordered.isEmpty() && skippedDuplicate == 0) {
+        // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
+        body.append(
+            unverifiedUnpublished > 0
+                ? "本次无已确认发现；" + unverifiedUnpublished + " 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n"
+                : "本次未发现问题（评审返回空结果）。\n\n");
+      } else {
+        body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
+      }
     } else {
       if (!important.isEmpty()) {
         body.append("### Important\n");
@@ -1058,6 +1325,10 @@ public final class ReviewPipeline implements Orchestrator {
         body.append("\n");
       }
     }
+    if (convergenceAdvice != null && !convergenceAdvice.isBlank()) {
+      // T2.7 轮次超限（03§5）：停止一切新 finding，建议打回重新设计——人在这一关踩刹车
+      body.append("### 收敛控制\n> ⚠️ ").append(convergenceAdvice).append("\n\n");
+    }
     body.append("### 覆盖与统计\n");
     for (String line : coverageLines) {
       body.append("- ").append(line).append("\n");
@@ -1067,6 +1338,18 @@ public final class ReviewPipeline implements Orchestrator {
         .append(" 条；位置非法降级 ")
         .append(fallbacks.size())
         .append(" 条\n");
+    body.append("- 复核与晋升：确认 ")
+        .append(ordered.size() - unverifiedIds.size())
+        .append(" 条")
+        .append(
+            unverifiedIds.isEmpty()
+                ? ""
+                : "（含 UNVERIFIED 标签发布 " + unverifiedIds.size() + " 条——验证不可得）")
+        .append(
+            unverifiedUnpublished > 0
+                ? "；验证不可得未发布 " + unverifiedUnpublished + " 条（UNVERIFIED，02§4.2）"
+                : "")
+        .append("\n");
     if (!degradations.isEmpty()) {
       body.append("- 降级事件：").append(String.join("、", degradations)).append("\n");
     }
@@ -1208,7 +1491,8 @@ public final class ReviewPipeline implements Orchestrator {
   }
 
   private static ReviewStats emptyStats(long latencyMs) {
-    return new ReviewStats(0, 0, 0, 0, 0, 0, 0, 0, latencyMs, List.of(), 0, new Coverage(0, 0, ""));
+    return new ReviewStats(
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, latencyMs, List.of(), 0, new Coverage(0, 0, ""));
   }
 
   private static boolean hasReviewMdChange(DiffResult diff) {

@@ -114,7 +114,9 @@
 {"ts":"…","run_id":"…","event":"gate_check","gate":"commit","hit":false}
 {"ts":"…","run_id":"…","event":"agent_start","agent":"bug-hunter/boundary","brief_path":"…"}
 {"ts":"…","event":"agent_output","agent":"…","findings":3,"tokens":{…},"latency_ms":8200}
-{"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{…}}
+{"ts":"…","event":"convergence","round":2,"breached":false,"review_base":"abc1234|pr-base"}
+{"ts":"…","event":"merge","finding_id":"f_…","merged_from":["f_…"]}
+{"ts":"…","event":"merge_summary","clusters":5,"merged_away":2}
 {"ts":"…","event":"anchor_check","finding_id":"f_…","status":"SUMMARY_FALLBACK"}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
@@ -122,10 +124,19 @@
 {"ts":"…","event":"template_versions","versions":{"general-reviewer":"general@1a2b3c04"}}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"blame_check","note":"…"}
+{"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{"confirmed":3,"refuted":1,"insufficient":0,"unavailable":0}}
+{"ts":"…","event":"verify_retry","file_batch":"Foo.java","reason":"…"}
+{"ts":"…","event":"verify_followup","finding_id":"f_…","file":"src/…","status":"provided|unreadable"}
+{"ts":"…","event":"anti_anchor_check","finding_id":"f_…","status":"PASS|FAIL","overlap":0.0,"refs":2}
+{"ts":"…","event":"judge_start","agent":"judge","finding_id":"f_…","brief_path":"…","reason":"…"}
+{"ts":"…","event":"judge","finding_id":"f_…","verdict":"CONFIRMED|REJECTED|unavailable","rationale":"…"}
+{"ts":"…","event":"promotion","finding_id":"f_…","verifier_verdict":"CONFIRMED|REFUTED|INSUFFICIENT_EVIDENCE|UNAVAILABLE","decision":"publish|judge|reject|unverified","reason":"…","spotcheck_fuse":false}
 {"ts":"…","event":"aggregate","candidates":12,"ordered":5,"nit_dropped":2,"suppressed_by_truncation":0}
 {"ts":"…","event":"summary_supersede","comment_id":123,"status":"patched|skipped|unavailable|failed"}
 {"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"suppressed_by_truncation":0,"done_marker":true}
 ```
+
+**v1.2 补登（M2 T2.4–T2.8 实现面）**：`convergence`（轮次与 diff-only 基点，03§5）、`merge`/`merge_summary`（run 内精确去重，03§4.5）、`verify`（三值判定计数，03§4.2）、`verify_retry`（验证不可得缩上下文重试，02§4.2）、`verify_followup`（INSUFFICIENT 受控补查，03§4.2）、`anti_anchor_check`（反锚定质控信号 PASS/FAIL，不阻断晋升）、`judge_start`/`judge`（仲裁与抽查复核，03§4.4）、`promotion`（晋升决定与抽查保险丝命中，03§4.3）。
 
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 
