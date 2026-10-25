@@ -76,4 +76,6 @@ jobs:
           path: |
             cra-eval-work/report-all-k*.json
             cra-eval-work-adv/report-adv-k3.json
+            cra-eval-work/cases/**/trace.ndjson
+            cra-eval-work/cases/**/findings*.json
           if-no-files-found: warn
