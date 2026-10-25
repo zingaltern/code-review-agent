@@ -1,6 +1,6 @@
 # M1 评测实跑 workflow（07§2 验收 6/7）：cra-eval run 黑盒驱动 cra-runner-cli，
 # stub GitHub API + 真 LLM（DeepSeek，secrets/vars），聚合报告与对抗集 3 连结果以 artifact 回收。
-# 数据集快照 tgz 不入 git（06§3 铁律），从 v0.1.0 release 资产 dataset-snapshots-m1.tar 解包补齐。
+# 数据集快照 tgz 不入 git（06§3 铁律），从 v0.1.0 release 资产 dataset-snapshots-m3.tar 解包补齐。
 name: eval
 
 on:
@@ -59,9 +59,9 @@ jobs:
         run: mvn -B -ntp package -DskipTests -q
       - name: 下载并解包数据集快照（release 资产，06§3 不入 git）
         run: |
-          curl -sfL -o /tmp/dataset-snapshots-m1.tar \
-            "https://github.com/${{ github.repository }}/releases/download/v0.1.0/dataset-snapshots-m1.tar"
-          tar -xf /tmp/dataset-snapshots-m1.tar -C cra-eval/dataset
+          curl -sfL -o /tmp/dataset-snapshots-m3.tar \
+            "https://github.com/${{ github.repository }}/releases/download/v0.3.0/dataset-snapshots-m3.tar"
+          tar -xf /tmp/dataset-snapshots-m3.tar -C cra-eval/dataset
           find cra-eval/dataset -name repo_snapshot.tgz | wc -l
       - name: 评测（集合/k/depth/tier 可配：L2 复核 = set=l2,k=2,quick,l2；L3 全量 = set=all,k=3,standard,l3）
         if: inputs.runs == 'all'
