@@ -34,7 +34,10 @@ class LocalAppConfig {
   }
 
   @Bean
+  @org.springframework.context.annotation.Primary
   GitPlatformAdapter gitPlatformAdapter() {
+    // @Primary：LocalGitAdapter 同时被命令层 registerBean 注册（localGitAdapter）——本地形态
+    // 的主 GitPlatformAdapter 恒为本 bean，避免 orchestrator 按类型注入时双候选歧义
     return localGit;
   }
 
