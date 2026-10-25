@@ -71,7 +71,7 @@ PR:opened/synchronize ─→ Trigger(CI job / CLI)
 
 ```
 code-review-agent/
-├── cra-common/            # 纯 POJO：Finding/Brief/Verdict/Plan/RunStatus 等
+├── cra-common/            # 纯公共契约：Finding/Brief/Verdict/Plan/RunStatus + 无依赖文本/校验辅助
 ├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
 │   └── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
