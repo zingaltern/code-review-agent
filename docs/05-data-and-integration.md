@@ -262,8 +262,9 @@ cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
   --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256
 
 # 报告校验（CI 的 L2 门禁：哈希 + 门禁结论为绿 + commit 绑定；荣誉制，04§2.4）
+# REPORT_COMMIT = 报告内 commit 字段（被测代码提交）；须为 PR head 祖先，其后仅允许 eval/l2/ 变更
 cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.sha256 \
-  --tier l2 --expect-commit "$PR_HEAD_SHA"
+  --tier l2 --expect-commit "$REPORT_COMMIT"
 
 # 离线重判（阈值/检查项变更后用同一批观测重算门禁；不重跑 LLM）
 cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256-out PATH]
