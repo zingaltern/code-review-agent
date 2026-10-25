@@ -56,9 +56,10 @@ final class OpenAiCodec {
     if (tokensOut < 0) {
       tokensOut = TokenEstimator.estimate(content);
     }
-    return new ParsedResponse(content, tokensIn, tokensOut);
+    String model = root.path("model").asText(null);
+    return new ParsedResponse(content, tokensIn, tokensOut, model);
   }
 
   /** 解析结果。 */
-  record ParsedResponse(String content, long tokensIn, long tokensOut) {}
+  record ParsedResponse(String content, long tokensIn, long tokensOut, String model) {}
 }

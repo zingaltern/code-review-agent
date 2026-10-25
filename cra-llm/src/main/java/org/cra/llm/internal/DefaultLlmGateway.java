@@ -7,7 +7,6 @@ import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmRequest;
 import org.cra.llm.api.LlmResponse;
-import org.cra.llm.api.LlmStatus;
 
 /**
  * 网关默认实现（M0）：并发信号量（02§4.5，上限 8）→ 重试循环（429/5xx/超时指数退避 ≤maxRetries， 其余 4xx 不重试）→ usage
@@ -101,13 +100,12 @@ public final class DefaultLlmGateway implements LlmGateway {
         return LlmResponse.unavailable(
             "llm response missing content", 0, System.currentTimeMillis() - start);
       }
-      return new LlmResponse(
+      return LlmResponse.ok(
           parsed.content(),
           parsed.tokensIn(),
           parsed.tokensOut(),
           System.currentTimeMillis() - start,
-          LlmStatus.OK,
-          null);
+          parsed.model());
     } catch (java.io.IOException e) {
       // 协议级坏响应不重试（重试无法修复），直接降级并说明
       return LlmResponse.unavailable(

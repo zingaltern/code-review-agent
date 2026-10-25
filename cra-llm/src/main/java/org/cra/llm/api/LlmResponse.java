@@ -11,6 +11,7 @@ import java.util.Objects;
  * @param latencyMs 本次调用总耗时（含重试与排队）
  * @param status 结果状态
  * @param errorMessage 失败原因（OK 时为 null）
+ * @param model 实际响应的模型名（响应体 model 字段，finding origin.model 用；UNAVAILABLE 为 null）
  */
 public record LlmResponse(
     String content,
@@ -18,7 +19,8 @@ public record LlmResponse(
     long tokensOut,
     long latencyMs,
     LlmStatus status,
-    String errorMessage) {
+    String errorMessage,
+    String model) {
 
   public LlmResponse {
     Objects.requireNonNull(status, "status");
@@ -31,6 +33,21 @@ public record LlmResponse(
   }
 
   /**
+   * 成功结果工厂。
+   *
+   * @param content 回复内容
+   * @param tokensIn 输入 token
+   * @param tokensOut 输出 token
+   * @param latencyMs 耗时
+   * @param model 模型名
+   * @return LlmResponse
+   */
+  public static LlmResponse ok(
+      String content, long tokensIn, long tokensOut, long latencyMs, String model) {
+    return new LlmResponse(content, tokensIn, tokensOut, latencyMs, LlmStatus.OK, null, model);
+  }
+
+  /**
    * 降级结果工厂（UNAVAILABLE：content 为 null）。
    *
    * @param errorMessage 失败原因
@@ -39,6 +56,6 @@ public record LlmResponse(
    * @return LlmResponse
    */
   public static LlmResponse unavailable(String errorMessage, long tokensIn, long latencyMs) {
-    return new LlmResponse(null, tokensIn, 0, latencyMs, LlmStatus.UNAVAILABLE, errorMessage);
+    return new LlmResponse(null, tokensIn, 0, latencyMs, LlmStatus.UNAVAILABLE, errorMessage, null);
   }
 }
