@@ -1,0 +1,48 @@
+# M2 验收 8 真实 LLM 复核（07§3 T2.10）：pre-PR 本地模式对本仓库自身最近一次提交做评审，
+# 真实执行 --exec 命令（compile 门禁替代 verify 以控制时长），产出建议清单与报告 artifact。
+# 缺口声明：M1 合并时验收 8 的建议清单半程（真实 LLM 段）未实跑，本 workflow 补齐。
+name: pre-pr-smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pre-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: 构建 CLI
+        run: mvn -B -ntp package -DskipTests -q
+      - name: pre-PR 本地模式（真实 LLM 建议清单 + --exec 实跑）
+        env:
+          CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
+          CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
+          CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
+        run: |
+          java -jar cra-runner-cli/target/cra-runner-cli-0.1.0.jar review \
+            --local \
+            --base HEAD~1 --head HEAD \
+            --depth quick \
+            --exec "mvn -B -ntp -q -DskipTests compile" \
+            --ledger-db .cra/ledger.db 2>&1 | tee /tmp/pre-pr-output.log
+          echo "exit=$?" >> /tmp/pre-pr-output.log
+      - name: 上传报告与输出
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-pr-smoke-${{ github.run_id }}
+          path: |
+            .cra/runs/**
+            /tmp/pre-pr-output.log
+          if-no-files-found: warn
