@@ -37,6 +37,10 @@ PR 事件 ─→ 幂等检查(GitHub评论账本) ─→ 上下文组装(窗口/
 | [05 数据模型与集成](docs/05-data-and-integration.md) | Finding/账本指纹与**解析器防污染规则**、SPI（jgit blame/锚定降级）、CLI、workflow（draft 过滤）、安全检查单 | 开发必读 |
 | [06 评测与反馈闭环](docs/06-eval-and-feedback.md) | **聚合 Wilson CI 门禁 + 三级分级**、Defects4J 双侧数据集、整仓 fixture 规格、转化漏斗护栏 | 开发必读 |
 | [07 路线图](docs/07-roadmap.md) | M0–M4（pre-PR 实跑验证进 M2、投票降 M3）、任务拆解、验收标准、工程纪律（**提交前三条腿核查**） | 开发执行入口 |
+| [08 测试策略](docs/08-test-strategy.md) | 测试金字塔、CI 门禁演进表（M0→M3）、录制回放选型、19 条验收场景的测试设计 | 开发必读 |
+| [09 代码规范](docs/09-code-standards.md) | Spotless+google-java-format、命名/异常/日志/并发约定、Java 17 用法示例 | 开发必读 |
+| [10 架构规范](docs/10-architecture-standards.md) | 模块依赖矩阵、包结构/DI 约定、**ArchUnit 8 条守护**、ADR 机制（含 4 篇补录）、豁免流程 | 开发必读 |
+| [11 扩展性契约](docs/11-extensibility-charter.md) | 扩展点总表与稳定性分级、SPI 演进规则、新角色/新平台接入 checklist | 开发必读 |
 | [99 视频指导存档](docs/99-video-guide-reference.md) | 三功能框架整理稿（含**来源与证据等级声明**：单一博主、AI 生成内容，低于生产实践与学术引用） | 附录参考 |
 
 ## 技术栈
@@ -56,8 +60,9 @@ cra review --local --base main --depth standard --dry-run=true
 ## 状态
 
 - [x] 调研与需求定义（2026-10）
-- [x] 技术方案 v1.0 → v1.1 → v1.2 → v1.2.1 → **v1.3**（三轮评审 24 项缺陷闭环；v1.3 整合视频设计指导：CrossChecker 两模式详设、REVIEW.md 产品背景/事件/嗅探段、M4a 三条签字规矩与风险分级、三功能反模式清单、轮次打回语义）
-- [ ] M0 骨架与最小闭环
+- [x] 技术方案 v1.0 → … → v1.3.1（四轮评审 34 项缺陷闭环，对照表见 docs/01 §8）
+- [x] **开发规范包 docs/08–11**（测试策略 / 代码规范 / 架构规范+ADR / 扩展性契约——【强制/建议/可选】三级标注为效率与规范的平衡机制，强制项全部可自动化守护）
+- [ ] M0 骨架与最小闭环（含 cra-archtest 架构守护、Spotless 接入、docs/adr/ 目录创建）
 - [ ] M1 工程化与账本（含最小评测集与 fixture 规格、REVIEW.md 新段落解析）
 - [ ] M2 隔离审查 + 独立复核 + pre-PR 实跑（核心）
 - [ ] M3 评测闭环 + 双验证者投票（最小样本量 + 数据门禁）

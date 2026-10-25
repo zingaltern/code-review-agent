@@ -1,6 +1,6 @@
 # 02 · 总体架构设计
 
-> 文档版本：v1.2.1（2026-10-25，响应第三轮评审缺陷 ①③⑤）
+> 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③⑤；规范包 08–11 入库时 §3 登记 cra-archtest）
 > 前置阅读：`01-background-and-research.md`
 > **v1.1**：新增 §5 部署形态与状态归属；触发收窄为仅 PR；LLM 并发与降级语义补全。
 > **v1.2**：指纹 v2（commit 闸 + 代码内容锚）；截断丢弃进指标；触发边界表。
@@ -81,6 +81,7 @@ code-review-agent/
 ├── cra-runner-cli/        # CLI 入口（CI 模式 + M2 起本地 pre-PR 模式）
 ├── cra-store/             # 账本抽象：GitHub 评论账本 / SQLite 实现（服务形态 PG）
 ├── cra-eval/              # 评测框架：数据集、k 次运行统计门禁、报表
+├── cra-archtest/          # (M0 起) 构建期架构守护：仅 ArchUnit 测试，无主代码、不被依赖（10§5）
 └── cra-server/            # (M4) webhook 常驻服务、队列、多仓库
 ```
 
