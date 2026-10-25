@@ -16,12 +16,13 @@ class TemplateLoaderTest {
   void rendersPlaceholdersAndIncludes() {
     String out =
         loader.render(
-            "prompts/reviewer/general.md",
+            "prompts/reviewer/bug-hunter/boundary.md",
             Map.of(
                 "untrusted_pr_meta", "标题",
                 "review_policy_section", "策略",
                 "untrusted_diff", "diff 内容",
-                "untrusted_l1_context", "窗口上下文"));
+                "untrusted_l1_context", "窗口上下文",
+                "scoped_paths_note", ""));
     assertThat(out).startsWith("# System");
     assertThat(out).contains("# User");
     assertThat(out).contains("<<<UNTRUSTED_CONTENT");
@@ -35,7 +36,9 @@ class TemplateLoaderTest {
   void missingVarThrows() {
     assertThatIllegalArgumentException()
         .isThrownBy(
-            () -> loader.render("prompts/reviewer/general.md", Map.of("untrusted_pr_meta", "x")));
+            () ->
+                loader.render(
+                    "prompts/reviewer/bug-hunter/boundary.md", Map.of("untrusted_pr_meta", "x")));
   }
 
   @Test
@@ -47,10 +50,10 @@ class TemplateLoaderTest {
 
   @Test
   void versionIsStableContentHash() {
-    String v1 = loader.versionOf("prompts/reviewer/general.md");
-    String v2 = loader.versionOf("prompts/reviewer/general.md");
+    String v1 = loader.versionOf("prompts/reviewer/bug-hunter/boundary.md");
+    String v2 = loader.versionOf("prompts/reviewer/bug-hunter/boundary.md");
     assertThat(v1).isEqualTo(v2);
-    assertThat(v1).startsWith("general@").containsPattern("@[0-9a-f]{8}");
+    assertThat(v1).startsWith("boundary@").containsPattern("@[0-9a-f]{8}");
   }
 
   @Test
@@ -58,12 +61,13 @@ class TemplateLoaderTest {
     // 不可信内容含 {word} 不得被误当占位符（双花括号语法的存在理由）
     String out =
         loader.render(
-            "prompts/reviewer/general.md",
+            "prompts/reviewer/bug-hunter/boundary.md",
             Map.of(
                 "untrusted_pr_meta", "return {if} {x} from map",
                 "review_policy_section", "",
                 "untrusted_diff", "code {a} {{b}",
-                "untrusted_l1_context", "ctx {c}"));
+                "untrusted_l1_context", "ctx {c}",
+                "scoped_paths_note", ""));
     assertThat(out).contains("return {if} {x} from map");
     assertThat(out).contains("code {a} {{b}");
   }

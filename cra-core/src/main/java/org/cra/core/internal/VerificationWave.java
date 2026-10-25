@@ -173,19 +173,20 @@ final class VerificationWave {
             "agent", verifier.role().id(),
             "file_batch", file,
             "brief_path", persisted.toString()));
-    AgentRunner.AgentRunT<VerdictJsonCodec.ParseResult> run =
+    AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> run =
         agentRunner.executeParsed(
-            brief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)));
+            brief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)), trace);
     if (run.llmUnavailable()) {
       // 缩上下文重试 1 次（02§4.2 验证不可得语义的前半段）
       trace.emit("verify_retry", Map.of("file_batch", file, "reason", run.llmError()));
       degradations.add("verifier-retry-once");
       VerificationBatchInput reduced = reduceContext(input);
-      AgentRunner.AgentRunT<VerdictJsonCodec.ParseResult> retry =
+      AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> retry =
           agentRunner.executeParsed(
               verifier.buildBrief(reduced),
               runId,
-              (json, model) -> adapt(VerdictJsonCodec.parse(json)));
+              (json, model) -> adapt(VerdictJsonCodec.parse(json)),
+              trace);
       if (retry.llmUnavailable()) {
         degradations.add("verifier-unavailable");
         trace.emit(
@@ -206,7 +207,7 @@ final class VerificationWave {
       }
       run = retry;
     }
-    if (run.value() == null) {
+    if (run.output() == null) {
       // schema 校验重试耗尽：本批无可信判定 → 全部验证不可得（UNVERIFIED 不发布）
       degradations.add("verifier-schema-violation");
       trace.emit(
@@ -224,7 +225,7 @@ final class VerificationWave {
     }
     // 受控补查（INSUFFICIENT_EVIDENCE → followup_file → 至多一轮）
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
-    VerdictJsonCodec.ParseResult parsed = run.value();
+    VerdictJsonCodec.ParseResult parsed = run.output();
     long tokensIn = run.tokensIn();
     long tokensOut = run.tokensOut();
     Map<String, VerdictJsonCodec.ParsedVerdict> effective = new LinkedHashMap<>(parsed.verdicts());
@@ -249,14 +250,17 @@ final class VerificationWave {
               verifier.buildBrief(
                   VerificationBatchAssembler.withFollowup(input, followupText.get()));
           trace.persistBrief(followupBrief, briefSuffix(file) + "-fu");
-          AgentRunner.AgentRunT<VerdictJsonCodec.ParseResult> followupRun =
+          AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> followupRun =
               agentRunner.executeParsed(
-                  followupBrief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)));
+                  followupBrief,
+                  runId,
+                  (json, model) -> adapt(VerdictJsonCodec.parse(json)),
+                  trace);
           tokensIn += followupRun.tokensIn();
           tokensOut += followupRun.tokensOut();
-          if (!followupRun.llmUnavailable() && followupRun.value() != null) {
+          if (!followupRun.llmUnavailable() && followupRun.output() != null) {
             VerdictJsonCodec.ParsedVerdict updated =
-                followupRun.value().verdicts().get(finding.id());
+                followupRun.output().verdicts().get(finding.id());
             if (updated != null) {
               verdict = updated;
             }
@@ -342,9 +346,11 @@ final class VerificationWave {
     return finding.evidence() + "\n" + finding.description() + "\n" + finding.failureMode();
   }
 
-  private static AgentRunner.Parse<VerdictJsonCodec.ParseResult> adapt(
+  private static AgentRunner.FinalOutputParser.Parsed<VerdictJsonCodec.ParseResult> adapt(
       VerdictJsonCodec.ParseResult result) {
-    return new AgentRunner.Parse<>(result, result.errors());
+    return result.errors().isEmpty()
+        ? AgentRunner.FinalOutputParser.Parsed.of(result)
+        : AgentRunner.FinalOutputParser.Parsed.invalid(result.errors());
   }
 
   private static String briefSuffix(String file) {

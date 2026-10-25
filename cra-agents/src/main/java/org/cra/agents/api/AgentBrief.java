@@ -11,6 +11,7 @@ import java.util.Objects;
  * @param templateVersion 模板版本（内容哈希，05§1.2 prompt_template_versions 关联 run）
  * @param tools 工具白名单
  * @param budget 预算硬限
+ * @param modelTier 模型档位（03§6；编排器映射到 cra-llm 的 ModelTier 路由，T2.9）
  */
 public record AgentBrief(
     AgentRole role,
@@ -18,7 +19,8 @@ public record AgentBrief(
     String userPrompt,
     String templateVersion,
     ToolWhitelist tools,
-    AgentBudget budget) {
+    AgentBudget budget,
+    AgentTier modelTier) {
 
   public AgentBrief {
     Objects.requireNonNull(role, "role");
@@ -31,5 +33,26 @@ public record AgentBrief(
     Objects.requireNonNull(templateVersion, "templateVersion");
     Objects.requireNonNull(tools, "tools");
     Objects.requireNonNull(budget, "budget");
+    modelTier = modelTier == null ? AgentTier.STANDARD : modelTier;
+  }
+
+  /**
+   * M0/M1 形态兼容构造（standard 档）。
+   *
+   * @param role 角色
+   * @param systemPrompt 系统提示词
+   * @param userPrompt 用户内容
+   * @param templateVersion 模板版本
+   * @param tools 工具白名单
+   * @param budget 预算硬限
+   */
+  public AgentBrief(
+      AgentRole role,
+      String systemPrompt,
+      String userPrompt,
+      String templateVersion,
+      ToolWhitelist tools,
+      AgentBudget budget) {
+    this(role, systemPrompt, userPrompt, templateVersion, tools, budget, AgentTier.STANDARD);
   }
 }

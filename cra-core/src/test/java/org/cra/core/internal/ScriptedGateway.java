@@ -120,7 +120,15 @@ final class ScriptedGateway implements LlmGateway {
 
   private LlmResponse dispatch(LlmRequest request) {
     switch (request.caller()) {
-      case "general-reviewer" -> {
+      case "general-reviewer",
+          "bug-hunter/boundary",
+          "bug-hunter/dataflow",
+          "bug-hunter/concurrency",
+          "bug-hunter/resource",
+          "security-reviewer",
+          "test-reviewer",
+          "convention-reviewer",
+          "perf-reviewer" -> {
         reviewCalls.add(request);
         return pollOrRepeat(review);
       }

@@ -1,159 +1,423 @@
 package org.cra.core.internal;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.cra.agents.api.AgentBrief;
+import org.cra.agents.api.TemplateSupport;
+import org.cra.agents.api.ToolWhitelist;
+import org.cra.common.context.TokenMath;
 import org.cra.common.finding.CandidateFinding;
+import org.cra.common.git.FileContent;
 import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmRequest;
 import org.cra.llm.api.LlmResponse;
+import org.cra.llm.api.LlmStatus;
 import org.cra.llm.api.ResponseMode;
 
 /**
- * 子代理执行器（02§3 *Agent 语义：LLM 循环 + 结构化输出；上下文全部内联，M2 无工具循环——判定补查由 编排器受控注入）。schema 校验失败携错误重试 ≤2
- * 次，仍失败丢弃记 SCHEMA_VIOLATION（04§6）；LLM 不可得 如实上告，由调用方降级（02§4.2）。判定/终裁输出经 {@link #executeParsed}
- * 走同一重试骨架（T2.4/T2.6）。
+ * 子代理隔离运行时（T2.1，03§1/03§2）：LLM 循环 + 受限工具 + 三重预算硬限 + 失败隔离。
+ *
+ * <ul>
+ *   <li>上下文隔离：一切输入来自 brief；工具结果以 UNTRUSTED 定界追加进对话（04§3.3）；
+ *   <li>工具白名单：不在白名单或路径越界（不在 scoped 集）→ 立即终止记 TOOL_VIOLATION——隔离边界实现层硬编码，不靠 prompt（04§5 反模式 8）；
+ *   <li>三重预算硬限：token（每轮输入估算 ≤ 输入预算、累计输出 ≤ 输出预算）、轮次（≤ maxTurns 次调用）、时间（≤ timeoutMs）——超限即杀记
+ *       BUDGET_EXCEEDED（03§1）；
+ *   <li>失败隔离：任何异常/不可得收敛为结果对象，绝不抛穿扇出层（02§4.2/09§4）——单代理失败不传染（03§2.3）；
+ *   <li>结构化出口：最终输出交由角色解析器校验，失败携错误重试 ≤2 次后丢弃记 SCHEMA_VIOLATION（04§6；重试受轮次预算约束）。
+ * </ul>
+ *
+ * <p>最终输出的 schema 解析由调用方注入（评审=findings、验证=verdicts——T2.4 复用本运行时）；工具协议见
+ * prompts/shared/tool-protocol.md： 模型输出含 "tool" 字段的 JSON 对象即工具调用，否则视为最终结果。
  */
-final class AgentRunner {
+public final class AgentRunner {
 
   /** schema 重试上限（04§6：≤2 次）。 */
   static final int MAX_SCHEMA_RETRIES = 2;
 
+  private static final ObjectMapper MAPPER = new ObjectMapper();
+
   private final LlmGateway gateway;
 
-  AgentRunner(LlmGateway gateway) {
+  public AgentRunner(LlmGateway gateway) {
     this.gateway = gateway;
   }
 
-  /** 单代理执行结果（findings 形态，评审波用）。 */
-  record AgentRun(
-      List<CandidateFinding> findings,
+  /** 最终输出解析器（角色定制点）：解析失败携逐条错误（04§6 携错误重试的载体）。 */
+  public interface FinalOutputParser<T> {
+
+    /**
+     * 解析最终输出。
+     *
+     * @param json 模型回复内容
+     * @param model 实际响应模型（finding origin.model 用）
+     * @return 解析结果（errors 非空 = 校验失败）
+     */
+    Parsed<T> parse(String json, String model);
+
+    /** 解析结果。 */
+    record Parsed<T>(T value, List<String> errors) {
+
+      /**
+       * 成功。
+       *
+       * @param value 解析值
+       * @param <T> 值类型
+       * @return 成功结果
+       */
+      public static <T> Parsed<T> of(T value) {
+        return new Parsed<>(value, List.of());
+      }
+
+      /**
+       * 失败。
+       *
+       * @param errors 逐条错误
+       * @param <T> 值类型
+       * @return 失败结果
+       */
+      public static <T> Parsed<T> invalid(List<String> errors) {
+        return new Parsed<>(null, List.copyOf(errors));
+      }
+    }
+  }
+
+  /** 执行终态（03§1 预算硬限 + 02§4.2 降级语义；随 agent_output 事件入 trace）。 */
+  public enum Termination {
+    /** 正常完成 */
+    COMPLETED,
+    /** 三重预算超限即杀（03§1：token/轮次/时间） */
+    BUDGET_EXCEEDED,
+    /** LLM 不可得（02§4.2：重试耗尽/排队超时，网关降级结果） */
+    LLM_UNAVAILABLE,
+    /** schema 重试耗尽后丢弃（04§6） */
+    SCHEMA_VIOLATION,
+    /** 工具白名单/作用域违规——立即终止（03§2.3 硬边界） */
+    TOOL_VIOLATION,
+    /** 未预期异常（失败隔离收敛点，02§4.2） */
+    FAILED
+  }
+
+  /**
+   * 一次隔离执行的结果（失败隔离：任何终态都不抛异常）。
+   *
+   * @param output 解析后的最终输出（非 COMPLETED 为 null）
+   * @param schemaErrors schema 校验错误（SCHEMA_VIOLATION 时非空）
+   * @param tokensIn 累计输入 token（全部轮次）
+   * @param tokensOut 累计输出 token
+   * @param latencyMs 总耗时（含全部轮次）
+   * @param turns LLM 调用轮数（≤ maxTurns）
+   * @param termination 终态
+   * @param errorMessage 失败原因（COMPLETED 为 null）
+   * @param model 实际响应模型（任一轮成功响应即记录）
+   * @param degradations 降级事件（schema 重试等）
+   * @param <T> 最终输出类型
+   */
+  public record AgentRun<T>(
+      T output,
       List<String> schemaErrors,
       long tokensIn,
       long tokensOut,
       long latencyMs,
-      boolean llmUnavailable,
-      String llmError,
+      int turns,
+      Termination termination,
+      String errorMessage,
       String model,
-      List<String> degradations) {}
+      List<String> degradations) {
 
-  /** 泛化执行结果（value 形态由解析器决定）。 */
-  record AgentRunT<T>(
-      T value,
-      List<String> schemaErrors,
-      long tokensIn,
-      long tokensOut,
-      long latencyMs,
-      boolean llmUnavailable,
-      String llmError,
-      String model,
-      List<String> degradations) {}
+    /**
+     * 兼容视图：LLM 不可得终态（02§4.2 run FAILED 判定用）。
+     *
+     * @return true 若 LLM 不可得
+     */
+    public boolean llmUnavailable() {
+      return termination == Termination.LLM_UNAVAILABLE;
+    }
 
-  /** 解析器出口（value + 逐条校验错误，04§6 携错误重试的载体）。 */
-  record Parse<T>(T value, List<String> errors) {}
+    /**
+     * 兼容视图：不可得原因（验证波/Judge 的错误注记用，02§4.2）。
+     *
+     * @return 错误消息（无则 null）
+     */
+    public String llmError() {
+      return errorMessage;
+    }
+  }
 
-  /** 输出解析器（接收 json 与产出模型名——origin 归因，05§1.1）。 */
-  interface ResponseParser<T> {
-    Parse<T> parse(String json, String model);
+  /** 工具上下文：白名单 + 预取并裁剪到作用域的文件集（scoped 即边界，03§2.1 白名单在 brief 生成时确定）。 */
+  public record ToolContext(ToolWhitelist whitelist, Map<String, FileContent> scopedFiles) {
+
+    /**
+     * 无工具形态（M0：上下文全部内联）。
+     *
+     * @return 空白名单上下文
+     */
+    public static ToolContext none() {
+      return new ToolContext(ToolWhitelist.NONE, Map.of());
+    }
   }
 
   /**
-   * 执行一次评审代理调用（含 schema 重试）。
+   * 评审角色的 findings 解析器（FindingJsonCodec 契约；runId/role 由本方法绑定）。
    *
-   * @param brief 自包含简报
    * @param runId run 标识
-   * @return 执行结果
+   * @param agentRole 产出角色标识
+   * @return findings 解析器
    */
-  AgentRun execute(AgentBrief brief, String runId) {
-    AgentRunT<List<CandidateFinding>> run =
-        executeParsed(
-            brief,
-            runId,
-            (json, model) -> {
-              FindingJsonCodec.ParseResult parsed =
-                  FindingJsonCodec.parse(json, runId, brief.role().id(), model);
-              return new Parse<>(parsed.findings(), parsed.errors());
-            });
-    return new AgentRun(
-        run.value() == null ? List.of() : run.value(),
-        run.schemaErrors(),
-        run.tokensIn(),
-        run.tokensOut(),
-        run.latencyMs(),
-        run.llmUnavailable(),
-        run.llmError(),
-        run.model(),
-        run.degradations());
+  public static FinalOutputParser<List<CandidateFinding>> findingsParser(
+      String runId, String agentRole) {
+    return (json, model) -> {
+      FindingJsonCodec.ParseResult result = FindingJsonCodec.parse(json, runId, agentRole, model);
+      return result.errors().isEmpty()
+          ? FinalOutputParser.Parsed.of(result.findings())
+          : FinalOutputParser.Parsed.invalid(result.errors());
+    };
   }
 
   /**
-   * 执行一次代理调用并按给定解析器结构化（验证/终裁共用重试骨架）。
+   * 判定/终裁便捷入口（T2.4/T2.6）：无工具上下文 + 角色解析器；trace 供运行时事件（07§6.5）。
    *
    * @param brief 自包含简报
    * @param runId run 标识
-   * @param parser 输出解析器（value + 逐条错误；错误非空触发重试）
-   * @param <T> 解析产物类型
-   * @return 执行结果
+   * @param parser 最终输出解析器（调用方注入角色 schema 适配）
+   * @param trace trace 写入器
+   * @param <T> 最终输出类型
+   * @return 执行结果（绝不抛异常）
    */
-  <T> AgentRunT<T> executeParsed(AgentBrief brief, String runId, ResponseParser<T> parser) {
+  public <T> AgentRun<T> executeParsed(
+      AgentBrief brief, String runId, FinalOutputParser<T> parser, TraceWriter trace) {
+    return execute(brief, ToolContext.none(), parser, runId, trace);
+  }
+
+  /**
+   * 执行一次隔离代理调用（工具循环 + 预算硬限 + 失败隔离）。
+   *
+   * @param brief 自包含简报
+   * @param tools 工具上下文（作用域文件集）
+   * @param parser 最终输出解析器
+   * @param runId run 标识
+   * @param trace trace 写入器（tool_call/tool_result/agent_budget_exceeded 事件先行，07§6.5）
+   * @param <T> 最终输出类型
+   * @return 执行结果（绝不抛异常）
+   */
+  public <T> AgentRun<T> execute(
+      AgentBrief brief,
+      ToolContext tools,
+      FinalOutputParser<T> parser,
+      String runId,
+      TraceWriter trace) {
+    long start = System.currentTimeMillis();
+    long deadline = start + brief.budget().timeoutMs();
+    List<String> degradations = new ArrayList<>();
     long tokensIn = 0;
     long tokensOut = 0;
-    long start = System.currentTimeMillis();
-    List<String> degradations = new ArrayList<>();
-    String userPrompt = brief.userPrompt();
-    for (int attempt = 0; attempt <= MAX_SCHEMA_RETRIES; attempt++) {
-      LlmResponse response =
-          gateway.complete(
-              new LlmRequest(
-                  brief.systemPrompt(),
-                  userPrompt,
-                  ResponseMode.JSON,
-                  (int) brief.budget().maxOutputTokens(),
-                  brief.role().id()));
-      if (response.status() == org.cra.llm.api.LlmStatus.UNAVAILABLE) {
-        return new AgentRunT<>(
-            null,
-            List.of(),
-            tokensIn + response.tokensIn(),
-            tokensOut,
-            System.currentTimeMillis() - start,
-            true,
-            response.errorMessage(),
-            null,
-            degradations);
+    int turns = 0;
+    int schemaRetries = 0;
+    String lastModel = null;
+    ScopedToolSet toolSet = new ScopedToolSet(tools.scopedFiles());
+    StringBuilder conversation = new StringBuilder(brief.userPrompt());
+    try {
+      while (true) {
+        // 轮次硬限（03§6 轮次列 = LLM 调用次数上限；schema 重试同样消耗轮次）
+        if (turns >= brief.budget().maxTurns()) {
+          trace.emit("agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "turns"));
+          return new AgentRun<>(
+              null,
+              List.of(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.BUDGET_EXCEEDED,
+              "轮次硬限（maxTurns=" + brief.budget().maxTurns() + "）",
+              lastModel,
+              degradations);
+        }
+        // 输入预算：每轮 prompt（system + 对话，含工具结果）估算超限即杀（03§6 输入预算/chunk）
+        long estimatedInput = TokenMath.estimateTokens(brief.systemPrompt() + conversation);
+        if (estimatedInput > brief.budget().maxInputTokens()) {
+          trace.emit(
+              "agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "input-tokens"));
+          return new AgentRun<>(
+              null,
+              List.of(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.BUDGET_EXCEEDED,
+              "输入超预算（估算 " + estimatedInput + " > " + brief.budget().maxInputTokens() + "）",
+              lastModel,
+              degradations);
+        }
+        // 时间硬限（03§1：超限即杀）
+        if (System.currentTimeMillis() > deadline) {
+          trace.emit("agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "time"));
+          return new AgentRun<>(
+              null,
+              List.of(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.BUDGET_EXCEEDED,
+              "时间硬限（timeoutMs=" + brief.budget().timeoutMs() + "）",
+              lastModel,
+              degradations);
+        }
+        turns++;
+        LlmResponse response =
+            gateway.complete(
+                new LlmRequest(
+                    brief.systemPrompt(),
+                    conversation.toString(),
+                    ResponseMode.JSON,
+                    (int) brief.budget().maxOutputTokens(),
+                    brief.role().id(),
+                    org.cra.llm.api.ModelTier.valueOf(brief.modelTier().name())));
+        if (response.status() == LlmStatus.UNAVAILABLE) {
+          return new AgentRun<>(
+              null,
+              List.of(),
+              tokensIn + response.tokensIn(),
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.LLM_UNAVAILABLE,
+              response.errorMessage(),
+              null,
+              degradations);
+        }
+        tokensIn += response.tokensIn();
+        tokensOut += response.tokensOut();
+        if (response.model() != null) {
+          lastModel = response.model();
+        }
+        // 输出预算（03§6 输出预算/代理，累计口径）
+        if (tokensOut > brief.budget().maxOutputTokens()) {
+          trace.emit(
+              "agent_budget_exceeded",
+              Map.of("agent", brief.role().id(), "limit", "output-tokens"));
+          return new AgentRun<>(
+              null,
+              List.of(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.BUDGET_EXCEEDED,
+              "输出超预算（累计 " + tokensOut + " > " + brief.budget().maxOutputTokens() + "）",
+              lastModel,
+              degradations);
+        }
+
+        JsonNode root = readJsonOrNull(response.content());
+        if (root != null && root.isObject() && root.hasNonNull("tool")) {
+          // 工具调用轮（协议：prompts/shared/tool-protocol.md）
+          String toolName = root.path("tool").asText();
+          ScopedToolSet.ToolResult result = toolSet.execute(toolName, root);
+          trace.emit(
+              "tool_call",
+              Map.of(
+                  "agent",
+                  brief.role().id(),
+                  "tool",
+                  toolName,
+                  "turn",
+                  turns,
+                  "allowed",
+                  result.allowed()));
+          if (!result.allowed()) {
+            // 白名单/作用域违规 = 隔离边界被试探：立即终止该代理（03§2.3）
+            return new AgentRun<>(
+                null,
+                List.of(),
+                tokensIn,
+                tokensOut,
+                System.currentTimeMillis() - start,
+                turns,
+                Termination.TOOL_VIOLATION,
+                "工具越界: " + toolName,
+                lastModel,
+                degradations);
+          }
+          trace.emit(
+              "tool_result",
+              Map.of(
+                  "agent", brief.role().id(),
+                  "tool", toolName,
+                  "chars", result.output().length()));
+          conversation
+              .append("\n\n## 工具结果（第 ")
+              .append(turns)
+              .append(" 轮，工具 ")
+              .append(toolName)
+              .append("）\n")
+              .append(TemplateSupport.untrusted(result.output()));
+          continue;
+        }
+
+        // 最终输出 → 角色解析器（04§6：失败携错误重试 ≤2，不放宽 schema）
+        FinalOutputParser.Parsed<T> parsed = parser.parse(response.content(), lastModel);
+        if (parsed.errors().isEmpty()) {
+          return new AgentRun<>(
+              parsed.value(),
+              List.of(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.COMPLETED,
+              null,
+              lastModel,
+              degradations);
+        }
+        if (schemaRetries >= MAX_SCHEMA_RETRIES) {
+          return new AgentRun<>(
+              null,
+              parsed.errors(),
+              tokensIn,
+              tokensOut,
+              System.currentTimeMillis() - start,
+              turns,
+              Termination.SCHEMA_VIOLATION,
+              "schema 重试耗尽",
+              lastModel,
+              degradations);
+        }
+        schemaRetries++;
+        degradations.add("schema_retry_" + schemaRetries);
+        conversation
+            .append("\n\n【系统提示】上次输出未通过 schema 校验，逐条错误如下：\n")
+            .append(String.join("\n", parsed.errors()))
+            .append("\n请严格按输出契约重新输出，只输出一个 JSON 对象。");
       }
-      tokensIn += response.tokensIn();
-      tokensOut += response.tokensOut();
-      Parse<T> parsed = parser.parse(response.content(), response.model());
-      if (parsed.errors().isEmpty()) {
-        return new AgentRunT<>(
-            parsed.value(),
-            List.of(),
-            tokensIn,
-            tokensOut,
-            System.currentTimeMillis() - start,
-            false,
-            null,
-            response.model(),
-            degradations);
-      }
-      degradations.add("schema_retry_" + attempt);
-      // 04§6：携校验错误重试，不放宽 schema、不正则修 JSON
-      userPrompt =
-          brief.userPrompt()
-              + "\n\n【系统提示】上次输出未通过 schema 校验，逐条错误如下：\n"
-              + String.join("\n", parsed.errors())
-              + "\n请严格按输出契约重新输出，只输出一个 json 对象。";
+    } catch (RuntimeException e) {
+      // 失败隔离（03§2.3/09§4）：单代理异常不传染，收敛为结果对象
+      return new AgentRun<>(
+          null,
+          List.of(),
+          tokensIn,
+          tokensOut,
+          System.currentTimeMillis() - start,
+          turns,
+          Termination.FAILED,
+          e.getClass().getSimpleName() + ": " + e.getMessage(),
+          lastModel,
+          degradations);
     }
-    return new AgentRunT<>(
-        null,
-        List.of("SCHEMA_VIOLATION: " + MAX_SCHEMA_RETRIES + " 次重试后仍不合法"),
-        tokensIn,
-        tokensOut,
-        System.currentTimeMillis() - start,
-        false,
-        null,
-        null,
-        degradations);
+  }
+
+  private static JsonNode readJsonOrNull(String content) {
+    if (content == null || content.isBlank()) {
+      return null;
+    }
+    try {
+      return MAPPER.readTree(content);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      return null;
+    }
   }
 }

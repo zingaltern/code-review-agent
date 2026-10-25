@@ -109,20 +109,25 @@
 
 ### 1.4 Trace 格式（NDJSON）
 
+> **v1.3.2**（2026-10-25，M2 隔离运行时事件先行定点修订，07§6.5）：注册 `tool_call` / `tool_result` / `agent_budget_exceeded` 事件与 `agent_output.termination` 字段；`dedup.match` 增 `in-run-exact` 取值（M2 跨代理精确去重合并，03§4.5 汇聚侧，T2.8 的验证侧分组复用同一键）。
+
 ```json
 {"ts":"…","run_id":"…","event":"run_start","repo":"…","pr":42,"depth":"standard","dry_run":false}
 {"ts":"…","run_id":"…","event":"gate_check","gate":"commit","hit":false}
 {"ts":"…","run_id":"…","event":"agent_start","agent":"bug-hunter/boundary","brief_path":"…"}
-{"ts":"…","event":"agent_output","agent":"…","findings":3,"tokens":{…},"latency_ms":8200}
+{"ts":"…","event":"agent_output","agent":"…","findings":3,"termination":"completed","tokens":{…},"latency_ms":8200}
+{"ts":"…","event":"tool_call","agent":"…","tool":"read_file","turn":2,"allowed":true}
+{"ts":"…","event":"tool_result","agent":"…","tool":"read_file","chars":1200}
+{"ts":"…","event":"agent_budget_exceeded","agent":"…","limit":"turns|time|input-tokens|output-tokens"}
 {"ts":"…","event":"convergence","round":2,"breached":false,"review_base":"abc1234|pr-base"}
 {"ts":"…","event":"merge","finding_id":"f_…","merged_from":["f_…"]}
 {"ts":"…","event":"merge_summary","clusters":5,"merged_away":2}
 {"ts":"…","event":"anchor_check","finding_id":"f_…","status":"SUMMARY_FALLBACK"}
-{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
+{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
 {"ts":"…","event":"plan","effective_depth":"standard","chunks":4,"skipped":2}
-{"ts":"…","event":"template_versions","versions":{"general-reviewer":"general@1a2b3c04"}}
-{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
+{"ts":"…","event":"template_versions","versions":{"bug-hunter/dataflow":"dataflow@1a2b3c04","security-reviewer":"security@5e6f7a80"}}
+{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"blame_check","note":"…"}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{"confirmed":3,"refuted":1,"insufficient":0,"unavailable":0}}
 {"ts":"…","event":"verify_retry","file_batch":"Foo.java","reason":"…"}

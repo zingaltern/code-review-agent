@@ -51,14 +51,17 @@ final class JudgeArbiter {
             "finding_id", findingId,
             "brief_path", persisted.toString(),
             "reason", input.caseReason()));
-    AgentRunner.AgentRunT<JudgeJsonCodec.Judgement> run =
+    AgentRunner.AgentRun<JudgeJsonCodec.Judgement> run =
         agentRunner.executeParsed(
             brief,
             runId,
             (json, model) -> {
               JudgeJsonCodec.ParseResult parsed = JudgeJsonCodec.parse(json);
-              return new AgentRunner.Parse<>(parsed.judgement(), parsed.errors());
-            });
+              return parsed.errors().isEmpty()
+                  ? AgentRunner.FinalOutputParser.Parsed.of(parsed.judgement())
+                  : AgentRunner.FinalOutputParser.Parsed.invalid(parsed.errors());
+            },
+            trace);
     trace.emit(
         "agent_output",
         Map.of(
@@ -66,7 +69,7 @@ final class JudgeArbiter {
             "finding_id", findingId,
             "tokens", Map.of("in", run.tokensIn(), "out", run.tokensOut()),
             "latency_ms", run.latencyMs()));
-    if (run.llmUnavailable() || run.value() == null) {
+    if (run.llmUnavailable() || run.output() == null) {
       trace.emit(
           "judge",
           Map.of(
@@ -82,11 +85,11 @@ final class JudgeArbiter {
         "judge",
         Map.of(
             "finding_id", findingId,
-            "verdict", run.value().verdict().name(),
-            "rationale", run.value().rationale()));
+            "verdict", run.output().verdict().name(),
+            "rationale", run.output().rationale()));
     return new Judgement(
-        run.value().verdict(),
-        run.value().rationale(),
+        run.output().verdict(),
+        run.output().rationale(),
         true,
         run.tokensIn(),
         run.tokensOut(),

@@ -1,8 +1,8 @@
 package org.cra.runner.cli;
 
 import org.cra.agents.api.AgentsAssembly;
-import org.cra.agents.api.GeneralReviewInput;
 import org.cra.agents.api.JudgeCaseInput;
+import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.core.api.CoreAssembly;
@@ -55,8 +55,9 @@ class AppConfig {
   }
 
   @Bean
-  SubAgent<GeneralReviewInput> generalReviewer() {
-    return AgentsAssembly.createGeneralReviewer();
+  ReviewCrew reviewCrew() {
+    // T2.2：M2 评审班组（BugHunter 四视角；T2.3 扩展专角色）
+    return AgentsAssembly.createReviewCrew();
   }
 
   @Bean
@@ -94,7 +95,7 @@ class AppConfig {
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
       LlmGateway gateway,
-      SubAgent<GeneralReviewInput> reviewer,
+      ReviewCrew crew,
       SubAgent<VerificationBatchInput> verifier,
       SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
@@ -103,7 +104,7 @@ class AppConfig {
         adapter,
         ledger,
         gateway,
-        reviewer,
+        crew,
         verifier,
         judge,
         java.nio.file.Path.of(config.runRoot()),

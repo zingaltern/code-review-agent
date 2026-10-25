@@ -36,4 +36,13 @@ public interface SubAgent<I> {
    * @return 预算
    */
   AgentBudget budget();
+
+  /**
+   * 模型档位（03§6 速查表；M2 记录进 trace/run plan，T2.9 路由的消费点）。
+   *
+   * @return 档位，默认标准
+   */
+  default AgentTier modelTier() {
+    return AgentTier.STANDARD;
+  }
 }

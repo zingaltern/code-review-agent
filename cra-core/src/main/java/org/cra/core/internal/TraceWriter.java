@@ -16,7 +16,7 @@ import org.cra.agents.api.AgentBrief;
  * trace 写入器（05§1.4 NDJSON）：.cra/runs/&lt;run_id&gt;/trace.ndjson + briefs/*.md（brief 全文随 trace 存于同
  * artifact——M0 验收 4）。事件集对齐 05§1.4，M0 新增编排步骤事件先行（07§6.5）。
  */
-final class TraceWriter {
+public final class TraceWriter {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -24,7 +24,7 @@ final class TraceWriter {
   private final String runId;
   private final Object lock = new Object();
 
-  TraceWriter(Path runRoot, String runId) {
+  public TraceWriter(Path runRoot, String runId) {
     this.runId = runId;
     this.runDir = runRoot.resolve(runId);
     try {
@@ -34,7 +34,7 @@ final class TraceWriter {
     }
   }
 
-  Path runDir() {
+  public Path runDir() {
     return runDir;
   }
 
@@ -44,7 +44,7 @@ final class TraceWriter {
    * @param event 事件名（05§1.4，snake_case）
    * @param fields 事件字段
    */
-  void emit(String event, Map<String, Object> fields) {
+  public void emit(String event, Map<String, Object> fields) {
     ObjectNode node = MAPPER.createObjectNode();
     node.put("ts", Instant.now().toString());
     node.put("run_id", runId);
@@ -70,7 +70,7 @@ final class TraceWriter {
    * @param brief 自包含简报
    * @return brief 文件路径（进 agent_start 事件的 brief_path）
    */
-  Path persistBrief(AgentBrief brief) {
+  public Path persistBrief(AgentBrief brief) {
     return persistBrief(brief, null);
   }
 
@@ -81,12 +81,12 @@ final class TraceWriter {
    * @param suffix 文件名后缀（如 chunk 序号），null 时用角色 id
    * @return brief 文件路径
    */
-  Path persistBrief(AgentBrief brief, String suffix) {
+  public Path persistBrief(AgentBrief brief, String suffix) {
     Map<String, Object> fields = new LinkedHashMap<>();
+    // M2 角色标识含斜杠（bug-hunter/dataflow，03§2.2）——文件名内归一为下划线，避免拼出子目录
+    String roleId = brief.role().id().replace('/', '_');
     String name =
-        suffix == null || suffix.isBlank()
-            ? brief.role().id() + ".md"
-            : brief.role().id() + "-" + suffix + ".md";
+        suffix == null || suffix.isBlank() ? roleId + ".md" : roleId + "-" + suffix + ".md";
     Path path = runDir.resolve("briefs").resolve(name);
     String content = "# system\n" + brief.systemPrompt() + "\n\n# user\n" + brief.userPrompt();
     try {

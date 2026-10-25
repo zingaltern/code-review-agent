@@ -6,8 +6,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
-import org.cra.agents.api.GeneralReviewerDefinition;
+import org.cra.agents.api.BugHunterDefinition;
 import org.cra.agents.api.JudgeAgentDefinition;
+import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.VerifierAgentDefinition;
 import org.cra.agents.internal.TemplateLoader;
 import org.cra.common.git.DiffFile;
@@ -98,7 +99,12 @@ class VerificationPromotionTest {
         adapter,
         ledger,
         scripted,
-        new GeneralReviewerDefinition(new TemplateLoader()),
+        ReviewCrew.ofBugHunters(
+            List.of(
+                new BugHunterDefinition(
+                    BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                new BugHunterDefinition(
+                    BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))),
         new VerifierAgentDefinition(new TemplateLoader()),
         new JudgeAgentDefinition(new TemplateLoader()),
         runRoot,
@@ -406,12 +412,13 @@ class VerificationPromotionTest {
            "file":"src/Foo.java","line":4,"side":"RIGHT","evidence":"L4: c","severity_proposed":"important",
            "pre_existing_suspect":false}]}""");
     ReviewResult result = pipeline.run(request());
-    // bug@L4 + bug@L6（行距 2 ≤3）合并；security@L4 同行但类别不同不合并 → 2 条进验证
+    // ReviewStage 跨视角汇聚时已按 03§4.5 精确合并（bug@L4 + bug@L6 行距 2 ≤3 合并；
+    // security@L4 同行但类别不同不合并）→ 2 条进验证；pipeline 层 ExactDedupMerger 幂等复核
     assertThat(scripted.verifierCalls).hasSize(1);
     assertThat(scripted.verifierCalls.get(0).userPrompt()).contains("越界").doesNotContain("越界B");
-    assertThat(result.stats().findingsCandidate()).isEqualTo(3);
+    assertThat(result.stats().findingsCandidate()).isEqualTo(2);
     assertThat(result.stats().confirmed()).isEqualTo(2);
-    assertThat(traceOf(result)).contains("\"event\":\"merge\"");
+    assertThat(traceOf(result)).contains("\"match\":\"in-run-exact\"");
   }
 
   // ---------- 模板与 brief（分型组装） ----------

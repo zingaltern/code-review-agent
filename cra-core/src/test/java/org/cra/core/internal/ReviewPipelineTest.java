@@ -20,8 +20,9 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
-import org.cra.agents.api.GeneralReviewerDefinition;
+import org.cra.agents.api.BugHunterDefinition;
 import org.cra.agents.api.JudgeAgentDefinition;
+import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.VerifierAgentDefinition;
 import org.cra.agents.internal.TemplateLoader;
 import org.cra.common.finding.AnchorStatus;
@@ -109,7 +110,12 @@ class ReviewPipelineTest {
             adapter,
             ledger,
             scripted,
-            new GeneralReviewerDefinition(new TemplateLoader()),
+            ReviewCrew.ofBugHunters(
+                List.of(
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))),
             new VerifierAgentDefinition(new TemplateLoader()),
             new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,
@@ -331,12 +337,13 @@ class ReviewPipelineTest {
     ArgumentCaptor<java.util.Map<String, String>> versionsCaptor =
         ArgumentCaptor.forClass(java.util.Map.class);
     verify(ledger).recordTemplateVersions(eq(7), eq(result.runId()), versionsCaptor.capture());
-    assertThat(versionsCaptor.getValue()).containsKey("general-reviewer");
-    assertThat(versionsCaptor.getValue().get("general-reviewer")).matches("general@[0-9a-f]{8}");
+    assertThat(versionsCaptor.getValue()).containsKey("bug-hunter/dataflow");
+    assertThat(versionsCaptor.getValue().get("bug-hunter/dataflow"))
+        .matches("dataflow@[0-9a-f]{8}");
     Path runDir = Path.of(result.traceRef().substring("file://".length()));
     String trace = Files.readString(runDir.resolve("trace.ndjson"));
     assertThat(trace).contains("\"event\":\"template_versions\"");
-    assertThat(trace).contains("\"general-reviewer\":\"general@");
+    assertThat(trace).contains("\"bug-hunter/dataflow\":\"dataflow@");
   }
 
   @Test
@@ -581,8 +588,7 @@ class ReviewPipelineTest {
     try {
       List<Path> briefs;
       try (java.util.stream.Stream<Path> listed = Files.list(runDir.resolve("briefs"))) {
-        briefs =
-            listed.filter(p -> p.getFileName().toString().startsWith("general-reviewer")).toList();
+        briefs = listed.filter(p -> p.getFileName().toString().startsWith("bug-hunter")).toList();
       }
       assertThat(briefs).isNotEmpty();
       String brief = Files.readString(briefs.get(0));
@@ -732,7 +738,12 @@ class ReviewPipelineTest {
             adapter,
             ledger,
             scripted,
-            new GeneralReviewerDefinition(new TemplateLoader()),
+            ReviewCrew.ofBugHunters(
+                List.of(
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))),
             new VerifierAgentDefinition(new TemplateLoader()),
             new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,
@@ -882,7 +893,12 @@ class ReviewPipelineTest {
             adapter,
             ledger,
             scripted,
-            new GeneralReviewerDefinition(new TemplateLoader()),
+            ReviewCrew.ofBugHunters(
+                List.of(
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))),
             new VerifierAgentDefinition(new TemplateLoader()),
             new JudgeAgentDefinition(new TemplateLoader()),
             runRoot,

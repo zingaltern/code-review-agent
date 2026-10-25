@@ -12,20 +12,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SplittableRandom;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-import org.cra.agents.api.AgentBrief;
-import org.cra.agents.api.GeneralReviewInput;
 import org.cra.agents.api.JudgeCaseInput;
+import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
-import org.cra.common.context.AssembledContext;
-import org.cra.common.context.ContextInput;
 import org.cra.common.context.ReviewPolicy;
-import org.cra.common.context.TokenMath;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.CandidateFinding;
@@ -50,7 +44,6 @@ import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
 import org.cra.common.run.ReviewSuggestion;
 import org.cra.common.run.RunStatus;
-import org.cra.context.api.ContextAssembler;
 import org.cra.context.api.ContextAssembly;
 import org.cra.context.api.ReviewPolicyParser;
 import org.cra.core.api.Orchestrator;
@@ -64,6 +57,7 @@ import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PolicySections;
 import org.cra.core.internal.pipeline.PreExistingBlameChecker;
 import org.cra.core.internal.pipeline.PromotionEngine;
+import org.cra.core.internal.pipeline.ReviewStage;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
 import org.cra.core.internal.pipeline.SpotCheckFuse;
 import org.cra.core.internal.pipeline.SummarySections;
@@ -74,21 +68,22 @@ import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 
 /**
- * M1 编排流水线（07 T1.3–T1.7）：幂等闸 → 策略/深度/分块规划 → 按 chunk 扇出评审（阶梯预算内） → 去重/锚定 → blame 复核 → 聚合 → publish。
+ * M2 编排流水线（07 T2.2/T2.3 评审段 + M1 存量）：幂等闸 → 策略/深度/分块规划 → 评审扇出（{@link ReviewStage}： 视角路由/并发
+ * 8/失败隔离/精确合并） → 去重/锚定 → blame 复核 → 聚合 → publish。
  *
  * <ul>
  *   <li>第一道闸：commit 级幂等，只认账本中该 commit 的 DONE/DEGRADED 完成标记（02§4.1）；
  *   <li>第二道闸：指纹级去重 exact → ±5 滑窗容错 → possible_duplicate 入 trace（02§4.1，{@link
  *       FingerprintDeduper}）——发布中途掐断的 run 无完成标记，重跑按指纹补发缺失条目、已发布不重发（07§1 验收 3）；
  *   <li>上下文：L0 diff + L1 窗口/条件全文（04§1），REVIEW.md 一律读 base SHA（04§3.2）；
- *   <li>降档阶梯：≥70% 简化剩余 chunk 上下文、≥85% 发布集合截断 top-10、100% 终止剩余 chunk（02§4.4），截断丢弃数进
+ *   <li>降档阶梯：≥70% 简化剩余 chunk 上下文并砍 1 视角、≥85% 发布集合截断 top-10、100% 终止剩余代理（02§4.4），截断丢弃数进
  *       stats/Summary（梯度沉默护栏）；
  *   <li>发布顺序：inline review → Summary issue comment（05§2.2）；锚定校验位置非法降级进 Summary（05§2.2）；正文 {@code
  *       <!--} 全量转义、标记行最后追加（05§1.3 规则 3）；
- *   <li>dry-run 全程零写（05§6）；run 级故障统一捕获落盘 FAILED（02§4.2）；trace 事件先行（07§6.5）。 *
+ *   <li>dry-run 全程零写（05§6）；run 级故障统一捕获落盘 FAILED（02§4.2）；trace 事件先行（07§6.5）。
  * </ul>
  *
- * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker）与构造期创建的固定线程池（09§6，daemon 线程）。
+ * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker，run 内单实例）；扇出线程池由 ReviewStage 持有（09§6）。
  */
 public final class ReviewPipeline implements Orchestrator {
 
@@ -96,7 +91,6 @@ public final class ReviewPipeline implements Orchestrator {
   private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
   private static final String MARKER_VERSION = "2.1";
   private static final String REVIEW_MD = "REVIEW.md";
-  private static final int MAX_PARALLEL_CHUNKS = 8;
   private static final int MAX_PARALLEL_BATCHES = 4;
 
   /** 过期收尾前缀的判定起点（02§5：[已被 run_xxx 取代]；已收尾的评论不再叠加前缀）。 */
@@ -107,23 +101,21 @@ public final class ReviewPipeline implements Orchestrator {
 
   private final GitPlatformAdapter adapter;
   private final ReviewLedger ledger;
+  private final ReviewStage reviewStage;
   private final AgentRunner agentRunner;
-  private final SubAgent<GeneralReviewInput> reviewer;
   private final SubAgent<VerificationBatchInput> verifier;
   private final SubAgent<JudgeCaseInput> judge;
   private final Path runRoot;
   private final PipelineOptions options;
   private final LocalRepoContext localRepoContext;
-  private final ContextAssembler contextAssembler;
   private final ReviewPolicyParser policyParser;
-  private final ExecutorService chunkPool;
   private final ExecutorService verifyPool;
 
   public ReviewPipeline(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
       LlmGateway gateway,
-      SubAgent<GeneralReviewInput> reviewer,
+      ReviewCrew crew,
       SubAgent<VerificationBatchInput> verifier,
       SubAgent<JudgeCaseInput> judge,
       Path runRoot,
@@ -131,24 +123,15 @@ public final class ReviewPipeline implements Orchestrator {
       LocalRepoContext localRepoContext) {
     this.adapter = adapter;
     this.ledger = ledger;
+    this.reviewStage =
+        new ReviewStage(crew, new AgentRunner(gateway), ContextAssembly.createContextAssembler());
     this.agentRunner = new AgentRunner(gateway);
-    this.reviewer = reviewer;
     this.verifier = verifier;
     this.judge = judge;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
     this.localRepoContext = localRepoContext;
-    this.contextAssembler = ContextAssembly.createContextAssembler();
     this.policyParser = ContextAssembly.createReviewPolicyParser();
-    this.chunkPool =
-        Executors.newFixedThreadPool(
-            MAX_PARALLEL_CHUNKS,
-            runnable -> {
-              Thread thread = new Thread(runnable, "cra-chunk");
-              thread.setDaemon(true);
-              return thread;
-            });
-    // 验证波并行度 ≤4（04§2.3 延迟算术：验证 wave ≤4 批并行）
     this.verifyPool =
         Executors.newFixedThreadPool(
             MAX_PARALLEL_BATCHES,
@@ -303,9 +286,28 @@ public final class ReviewPipeline implements Orchestrator {
               "skipped", plan.skippedPaths().size(),
               "notes", plan.notes()));
 
+      // T2.2：评审扇出（视角路由/并发 8/失败隔离/精确合并）——run 级预算账目在 run() 持有，随派发记账
       RunBudgetTracker budget = new RunBudgetTracker(options);
-      RunOutcome outcome =
-          executeChunks(request, runId, trace, budget, reviewDiff, policy, depthPlan, plan);
+      Map<String, FileContent> headFiles = prefetchHeadFiles(request, plan);
+      String commitMessages =
+          diff.commits().stream()
+              .map(c -> c.sha() + " " + c.message())
+              .collect(Collectors.joining("\n"));
+      String prTitle = "PR #" + request.prNumber();
+      String policySection = PolicySections.render(policy, hasReviewMdChange(diff));
+      ReviewStage.StageOutcome outcome =
+          reviewStage.execute(
+              runId,
+              trace,
+              diff,
+              policy,
+              depthPlan,
+              plan,
+              headFiles,
+              budget,
+              prTitle,
+              commitMessages,
+              policySection);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
       trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
@@ -425,7 +427,7 @@ public final class ReviewPipeline implements Orchestrator {
               path -> contentOf(path, request.headSha(), request, contentCache),
               new CitedEvidenceResolver(localRepoContext));
       VerificationWave.WaveResult waveResult =
-          wave.verify(candidates, policy, outcome.headFiles(), reviewDiff, runId);
+          wave.verify(candidates, policy, headFiles, reviewDiff, runId);
       degradations.addAll(waveResult.degradations());
       budget.record(waveResult.tokensIn(), waveResult.tokensOut());
       long tokensIn = outcome.tokensIn() + waveResult.tokensIn();
@@ -474,7 +476,7 @@ public final class ReviewPipeline implements Orchestrator {
           case JUDGE -> {
             boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
             JudgeArbiter.Judgement judgement =
-                arbitrate(arbiter, finding, verifierOutcome, spotCheck, outcome.headFiles(), runId);
+                arbitrate(arbiter, finding, verifierOutcome, spotCheck, headFiles, runId);
             budget.record(judgement.tokensIn(), judgement.tokensOut());
             tokensIn += judgement.tokensIn();
             tokensOut += judgement.tokensOut();
@@ -629,270 +631,7 @@ public final class ReviewPipeline implements Orchestrator {
     return policy;
   }
 
-  // ---------- 阶段：分 chunk 扇出（T1.5/T1.6） ----------
-
-  /** 全部 chunk 的执行产出。 */
-  private record RunOutcome(
-      List<CandidateFinding> findings,
-      Map<String, FileContent> headFiles,
-      long tokensIn,
-      long tokensOut,
-      boolean llmUnavailable,
-      String llmError,
-      List<String> schemaErrors,
-      List<String> degradations,
-      boolean stoppedByBudget,
-      boolean truncationReached,
-      List<String> contextNotes,
-      List<String> trimDecisions,
-      Map<String, String> templateVersions) {}
-
-  private RunOutcome executeChunks(
-      ReviewRequest request,
-      String runId,
-      TraceWriter trace,
-      RunBudgetTracker budget,
-      DiffResult diff,
-      ReviewPolicy policy,
-      DepthPlan depthPlan,
-      ChunkPlanner.Plan plan) {
-    Map<String, FileContent> headFiles = prefetchHeadFiles(request, plan);
-    String commitMessages =
-        diff.commits().stream()
-            .map(c -> c.sha() + " " + c.message())
-            .collect(Collectors.joining("\n"));
-    String prTitle = "PR #" + request.prNumber();
-    String policySection = PolicySections.render(policy, hasReviewMdChange(diff));
-
-    List<Future<ChunkOutcome>> futures = new ArrayList<>();
-    List<ChunkOutcome> collected = new ArrayList<>();
-    List<String> degradations = new ArrayList<>();
-    List<String> contextNotes = new ArrayList<>();
-    List<String> trimDecisions = new ArrayList<>();
-    boolean stopped = false;
-    boolean truncationReached = false;
-    int dispatched = 0;
-    try {
-      while (true) {
-        RunBudgetTracker.Phase phase = budget.phase();
-        if (phase == RunBudgetTracker.Phase.STOP) {
-          // 100%：终止剩余代理，已派发的照常收集（02§4.4 DEGRADED 收尾）
-          if (dispatched < plan.chunks().size()) {
-            degradations.add("budget-exhausted-stop");
-            stopped = true;
-            trace.emit(
-                "budget_check",
-                Map.of(
-                    "phase",
-                    "stop",
-                    "ratio",
-                    budget.ratio(),
-                    "skipped_chunks",
-                    plan.chunks().size() - dispatched));
-          }
-          if (futures.isEmpty()) {
-            break;
-          }
-        } else {
-          // 70%/85% 档：剩余 chunk 简化上下文；85% 档同时置发布截断标记
-          boolean simplified = phase != RunBudgetTracker.Phase.NORMAL;
-          if (phase == RunBudgetTracker.Phase.DEGRADE
-              && !degradations.contains("budget-degrade-70")) {
-            degradations.add("budget-degrade-70");
-            trace.emit("budget_check", Map.of("phase", "degrade", "ratio", budget.ratio()));
-          }
-          if (phase == RunBudgetTracker.Phase.TRUNCATE) {
-            truncationReached = true;
-            if (!degradations.contains("budget-truncate-85")) {
-              degradations.add("budget-truncate-85");
-              trace.emit("budget_check", Map.of("phase", "truncate", "ratio", budget.ratio()));
-            }
-          }
-          while (dispatched < plan.chunks().size() && futures.size() < MAX_PARALLEL_CHUNKS) {
-            ChunkPlanner.Chunk chunk = plan.chunks().get(dispatched++);
-            ContextInput contextInput = buildContextInput(chunk, headFiles, depthPlan, simplified);
-            futures.add(
-                chunkPool.submit(
-                    () ->
-                        runChunk(
-                            request,
-                            runId,
-                            trace,
-                            chunk,
-                            prTitle,
-                            commitMessages,
-                            policySection,
-                            contextInput)));
-          }
-          if (futures.isEmpty()) {
-            break;
-          }
-        }
-        ChunkOutcome outcome = futures.remove(0).get();
-        budget.record(outcome.tokensIn(), outcome.tokensOut());
-        collected.add(outcome);
-        degradations.addAll(outcome.degradations());
-        contextNotes.addAll(outcome.contextNotes());
-        trimDecisions.addAll(outcome.trimDecisions());
-        trace.emit(
-            "chunk_done",
-            Map.of(
-                "chunk", outcome.chunkKey(),
-                "files", outcome.fileCount(),
-                "findings", outcome.findings().size(),
-                "tokens_in", outcome.tokensIn(),
-                "tokens_out", outcome.tokensOut(),
-                "est_tokens", outcome.estimatedTokens()));
-      }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new IllegalStateException("chunk 执行被中断", e);
-    } catch (ExecutionException e) {
-      Throwable cause = e.getCause() == null ? e : e.getCause();
-      throw new IllegalStateException(
-          "chunk 执行失败: "
-              + cause.getClass().getSimpleName()
-              + ": "
-              + cause.getMessage()
-              + " @ "
-              + (cause.getStackTrace().length > 0 ? cause.getStackTrace()[0] : "?"),
-          cause);
-    }
-
-    List<CandidateFinding> findings = new ArrayList<>();
-    long tokensIn = 0;
-    long tokensOut = 0;
-    boolean llmUnavailable = false;
-    String llmError = null;
-    List<String> schemaErrors = new ArrayList<>();
-    Map<String, String> templateVersions = new LinkedHashMap<>();
-    for (ChunkOutcome outcome : collected) {
-      findings.addAll(outcome.findings());
-      tokensIn += outcome.tokensIn();
-      tokensOut += outcome.tokensOut();
-      // T2.11：本 run 实际使用的模板版本（角色 → 版本；05§1.2 prompt_template_versions）
-      templateVersions.putIfAbsent(outcome.roleId(), outcome.templateVersion());
-      if (outcome.llmUnavailable()) {
-        llmUnavailable = true;
-        llmError = outcome.llmError();
-      }
-      schemaErrors.addAll(outcome.schemaErrors());
-    }
-    // 终态复查：消耗只增不减，最后一批调用跨越 85%/100% 线时同样生效（02§4.4 按已消耗判定）
-    RunBudgetTracker.Phase finalPhase = budget.phase();
-    if (finalPhase.ordinal() >= RunBudgetTracker.Phase.TRUNCATE.ordinal()) {
-      truncationReached = true;
-      if (!degradations.contains("budget-truncate-85")) {
-        degradations.add("budget-truncate-85");
-        trace.emit("budget_check", Map.of("phase", "truncate-final", "ratio", budget.ratio()));
-      }
-    }
-    return new RunOutcome(
-        findings,
-        headFiles,
-        tokensIn,
-        tokensOut,
-        llmUnavailable,
-        llmError,
-        schemaErrors,
-        degradations,
-        stopped,
-        truncationReached,
-        contextNotes,
-        trimDecisions,
-        templateVersions);
-  }
-
-  /** 单 chunk 执行（LLM 调用；异常边界在 AgentRunner 与网关内转换）。 */
-  private ChunkOutcome runChunk(
-      ReviewRequest request,
-      String runId,
-      TraceWriter trace,
-      ChunkPlanner.Chunk chunk,
-      String prTitle,
-      String commitMessages,
-      String policySection,
-      ContextInput contextInput) {
-    AssembledContext context = contextAssembler.assemble(contextInput);
-    GeneralReviewInput input =
-        new GeneralReviewInput(
-            prTitle, commitMessages, context.diffText(), context.windowText(), policySection);
-    AgentBrief brief = reviewer.buildBrief(input);
-    Path briefPath = trace.persistBrief(brief, chunkBriefSuffix(chunk));
-    trace.emit(
-        "agent_start",
-        Map.of(
-            "agent", reviewer.role().id(),
-            "chunk", chunk.key(),
-            "brief_path", briefPath.toString(),
-            "est_tokens", context.estimatedTokens(),
-            "trim_decisions", context.trimDecisions()));
-    AgentRunner.AgentRun outcome = agentRunner.execute(brief, runId);
-    trace.emit(
-        "agent_output",
-        Map.of(
-            "agent", reviewer.role().id(),
-            "chunk", chunk.key(),
-            "findings", outcome.findings().size(),
-            "tokens", Map.of("in", outcome.tokensIn(), "out", outcome.tokensOut()),
-            "latency_ms", outcome.latencyMs()));
-    return new ChunkOutcome(
-        chunk.key(),
-        chunk.files().size(),
-        reviewer.role().id(),
-        brief.templateVersion(),
-        outcome.findings(),
-        outcome.tokensIn(),
-        outcome.tokensOut(),
-        outcome.llmUnavailable(),
-        outcome.llmError(),
-        outcome.schemaErrors(),
-        outcome.degradations(),
-        context.coverageNotes(),
-        context.trimDecisions(),
-        context.estimatedTokens());
-  }
-
-  private record ChunkOutcome(
-      String chunkKey,
-      int fileCount,
-      String roleId,
-      String templateVersion,
-      List<CandidateFinding> findings,
-      long tokensIn,
-      long tokensOut,
-      boolean llmUnavailable,
-      String llmError,
-      List<String> schemaErrors,
-      List<String> degradations,
-      List<String> contextNotes,
-      List<String> trimDecisions,
-      long estimatedTokens) {}
-
-  /** L1 预算 = 评审员输入预算 − L0 估算 − 定界/策略占用余量（04§1 预算裁决）；DEGRADE 档收窄窗口并关全文（02§4.4 70% 档的 M1 映射）。 */
-  private ContextInput buildContextInput(
-      ChunkPlanner.Chunk chunk,
-      Map<String, FileContent> headFiles,
-      DepthPlan depthPlan,
-      boolean simplified) {
-    boolean fullText = depthPlan.conditionalFullText() && !simplified;
-    int window = simplified ? Math.min(depthPlan.windowLines(), 15) : depthPlan.windowLines();
-    long reserved = TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000;
-    long l1Budget = Math.max(1_000, reviewer.budget().maxInputTokens() - reserved);
-    return new ContextInput(
-        chunk.files(), headFiles, window, fullText, depthPlan.fullFileMaxLines(), l1Budget);
-  }
-
-  private String estimateChunkL0(ChunkPlanner.Chunk chunk) {
-    StringBuilder sb = new StringBuilder();
-    for (DiffFile file : chunk.files()) {
-      if (file.patch() != null) {
-        sb.append(file.patch());
-      }
-    }
-    return sb.toString();
-  }
-
+  // ---------- 阶段：head 全文预取（ReviewStage 组装与工具作用域的数据面） ----------
   /** head 侧全文预取（cra-context 不发起平台调用，10§2）；不可读文件以 binary 占位（text=null）——指纹与 L1 都按不可得降级。 */
   private Map<String, FileContent> prefetchHeadFiles(
       ReviewRequest request, ChunkPlanner.Plan plan) {
@@ -968,7 +707,7 @@ public final class ReviewPipeline implements Orchestrator {
       ReviewPolicy policy,
       DepthPlan depthPlan,
       ChunkPlanner.Plan plan,
-      RunOutcome outcome,
+      ReviewStage.StageOutcome outcome,
       PreExistingBlameChecker.Outcome blameOutcome,
       boolean policyModified,
       FindingAggregator.Aggregation aggregation) {

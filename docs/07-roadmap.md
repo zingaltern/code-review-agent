@@ -76,9 +76,9 @@
 
 **任务**：
 
-- [ ] T2.1 SubAgent 抽象与隔离运行时（03§1）：brief 注入、工具白名单、三重预算硬限、失败隔离；
-- [ ] T2.2 BugHunter 四视角模板（03§2.2）+ 视角路由 + 并行扇出/汇聚（并发 8）；
-- [ ] T2.3 Security/Test/Convention/Perf 接入；**Security/Perf 按 chunk 扇出**（03§6 v1.2 修正——独享全量 brief 超 2 倍预算，不可行）；
+- [x] T2.1 SubAgent 抽象与隔离运行时（03§1）：brief 注入、工具白名单、三重预算硬限、失败隔离；**已落地（2026-10-25）：ScopedToolSet 隔离边界实现层硬编码（白名单/路径越界即 TOOL_VIOLATION）、token/轮次/时间/输出四重预算硬限（BUDGET_EXCEEDED）、失败隔离收敛结果对象绝不抛穿扇出层、tool_call/tool_result/agent_budget_exceeded 事件进 trace**；
+- [x] T2.2 BugHunter 四视角模板（03§2.2）+ 视角路由 + 并行扇出/汇聚（并发 8）；**已落地：四视角模板（dataflow/boundary/concurrency/resource）+ 档位路由（quick 1/standard 2/deep 4，派发序即优先级序）+ 70% 档砍 1 视角 + 跨代理精确合并（in-run-exact 入 trace）**；
+- [x] T2.3 Security/Test/Convention/Perf 接入；**Security/Perf 按 chunk 扇出**（03§6 v1.2 修正——独享全量 brief 超 2 倍预算，不可行）；**已落地：Security 每 chunk 必跑/Test 逻辑变更触发/Convention 策略定义时触发/Perf Deep 档，专角色 null = 未装配跳过；M2 骨架（verifier/judge 模板占位 + pre-PR --local --exec 骨架）随本线先行，真实模板与实现由验证线/路由线落地后取代**；
 - [x] T2.4 VerifierAgent（balanced-review 模板，04§4.2）：文件批次组织、三值判定、INSUFFICIENT 受控补查；**反锚定校验器作为质控信号实现**（输出 PASS/FAIL 入 trace，不阻断晋升；归一化与统计口径按 03§4.2 v1.2）；**已落地（2026-10-25）：文件合批单 brief（founder 论证+全文+diff 切片）、followup_file 受控补查一次（编排器预取注入）、LLM 不可得缩上下文重试 1 次、反锚定按 v1.2 归一化口径（FAIL=重叠率 1.0）入 trace/finding**；
 - [x] T2.5 判定与晋升规则（03§4.3 M2 形态）：含 important 级 REFUTED 确定性抽查保险丝（sha256(run_id|finding_id) mod 100 < 20，可复现）与验证不可得 → UNVERIFIED 不发布语义；**已落地：PromotionEngine 五岔（confirmed 发布/refuted 拒真统计/insufficient→Judge/security·important 抽查保险丝 `--spot-check-percent` 默认 20 同 run 可复现/unavailable→UNVERIFIED 不发布）；`publish-unverified=labeled` 生效语义落地**；
 - [x] T2.6 JudgeAgent：INSUFFICIENT 仲裁 + 抽查复核 + **上下文按案件界定**（≤3 文件，03§6）；**已落地：arbitrate 一次性终裁无第三态；judge 不可得时仲裁案回 UNVERIFIED、抽查案维持 REFUTED（均不发布）**；
