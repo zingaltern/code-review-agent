@@ -20,6 +20,10 @@ final class CliArgs {
    * @return 运行配置
    */
   static CraConfig parse(String[] args, Map<String, String> env) {
+    // java -jar cra-runner-cli.jar review --repo …（05§3/05§4）：可选 review 子命令前缀
+    if (args.length > 0 && "review".equals(args[0])) {
+      args = java.util.Arrays.copyOfRange(args, 1, args.length);
+    }
     Map<String, String> named = new HashMap<>();
     boolean dryRun = false;
     boolean securityBlock = false;

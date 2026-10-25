@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 记录开始时间
+        run: date +%s > /tmp/ci_start
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: mvn verify（00§4 自检：compile + 全模块单测 + spotless + cra-archtest R1-R8/源码扫描 + enforcer + JaCoCo 解析器门禁）
+        run: mvn -B -ntp verify
+      - name: 时长守护（>10min 即门禁事故，08§4）
+        if: always()
+        run: |
+          start=$(cat /tmp/ci_start)
+          elapsed=$(( $(date +%s) - start ))
+          echo "CI elapsed: ${elapsed}s"
+          if [ "$elapsed" -gt 600 ]; then
+            echo "::error::CI 时长超过 10min——门禁事故，按 08§4 处置次序处理"
+            exit 1
+          fi
