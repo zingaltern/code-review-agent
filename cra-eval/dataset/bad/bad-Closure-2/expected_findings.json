@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/com/google/javascript/jscomp/TypeCheck.java",
+      "line": 1566,
+      "category": "bug",
+      "keywords": [
+        "getImplicitPrototype"
+      ],
+      "note": "人工确认：删除 implicitProto 空防护分支，interface proxy 到不存在对象时 currentPropertyNames 处理崩溃（TypeCheck 缺陷）"
+    }
+  ],
+  "negative_baits": []
+}

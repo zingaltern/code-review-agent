@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/rate/RateParser.java",
+      "category": "bug",
+      "keywords": [
+        "exception"
+      ],
+      "note": "catch NumberFormatException 一律返回 100：溢出输入（如 99999999999）被静默改为默认值——'signed off'注释是真缺陷伪装",
+      "line": 12
+    }
+  ],
+  "negative_baits": []
+}

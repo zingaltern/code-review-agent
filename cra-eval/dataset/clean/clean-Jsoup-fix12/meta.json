@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "clean-Jsoup-fix12",
+  "set": "clean",
+  "adversarial_subtype": null,
+  "source": "defects4j",
+  "project": "Jsoup",
+  "bug_id": 12,
+  "report_id": "52",
+  "base_sha": "43a39b308abfbe39ea06729277d0630786b9956d",
+  "head_sha": "d0a7e3a00350ea9bdca6a1f005ccc75e5b2d19d4",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "6bbf9bb2908abb05812cd9ab8a6cd626137e0fc05b043b9f1351f197fe19bcff",
+    "crop_root": "src"
+  },
+  "review_request": {
+    "pr_number": 9001,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "clean-Jsoup-fix12"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "cra-eval-agent(m1)",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": "",
+    "reason": ""
+  },
+  "note": "D4J Jsoup-12 fixed 侧 diff（修复变更本身作为良性样本，人工快筛待复核）；快筛通过（agent 复核 diff 全文：真实代码变更、非缺陷态、非纯文档）"
+}

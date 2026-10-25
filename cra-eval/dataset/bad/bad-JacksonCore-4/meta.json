@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-JacksonCore-4",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "JacksonCore",
+  "bug_id" : 4,
+  "report_id" : "152",
+  "base_sha" : "3baa7d6742f7460bfb0af8edf48bf1575658109a",
+  "head_sha" : "7317dc95b0c9d09b94f37c8ae3a48de8b37729cc",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "62802c45d4e1d234cae8e60e3731fbbfc419871832bf47199d830e01d82bf323",
+    "crop_root" : "src/main/java/com/fasterxml/jackson/core/util"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-JacksonCore-4"
+  },
+  "filtered_test_files" : [ "src/test/java/com/fasterxml/jackson/core/util/TestTextBuffer.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-coordinator",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J JacksonCore-4 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 9 行"
+}

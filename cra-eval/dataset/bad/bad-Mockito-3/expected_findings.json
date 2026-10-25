@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/invocation/InvocationMatcher.java",
+      "line": 126,
+      "category": "bug",
+      "keywords": [
+        "indexOfVararg"
+      ],
+      "note": "人工确认：删除 indexOfVararg 起的 vararg 捕获循环（vararg 参数捕获缺陷）"
+    }
+  ],
+  "negative_baits": []
+}

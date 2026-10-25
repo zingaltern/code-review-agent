@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Closure-2",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Closure",
+  "bug_id" : 2,
+  "report_id" : "issue-884.json",
+  "base_sha" : "d1cfe67977d8f3aaa85ec20c262171da394d5977",
+  "head_sha" : "61095090415cff7cae4f3645fa76ee7cdd3ee23d",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "1d4e1be0e7041424d4bceb8b6385ebb1c42c34d33991616461913bfdcb99ec68",
+    "crop_root" : "src/com/google/javascript/jscomp"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Closure-2"
+  },
+  "filtered_test_files" : [ "test/com/google/javascript/jscomp/TypeCheckTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-coordinator",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Closure-2 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 12 行"
+}

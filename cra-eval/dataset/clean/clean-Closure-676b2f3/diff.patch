@@ -1,0 +1,88 @@
+diff --git a/src/com/google/javascript/jscomp/CodeConsumer.java b/src/com/google/javascript/jscomp/CodeConsumer.java
+index 3c360da6a..8a04ca0a6 100644
+--- a/src/com/google/javascript/jscomp/CodeConsumer.java
++++ b/src/com/google/javascript/jscomp/CodeConsumer.java
+@@ -332,10 +332,12 @@ public abstract class CodeConsumer {
+ 
+   void addNumber(double x, Node n) {
+     checkState(isPositive(x), x);
++    addConstant(formatNumber(x));
++  }
+ 
++  static String formatNumber(double x) {
+     if ((long) x != x) {
+-      addConstant(String.valueOf(x).replace(".0E", "E").replaceFirst("^0\\.", "."));
+-      return;
++      return String.valueOf(x).replace(".0E", "E").replaceFirst("^0\\.", ".");
+     }
+ 
+     long value = (long) x;
+@@ -349,22 +351,20 @@ public abstract class CodeConsumer {
+     }
+ 
+     if (exp > 2) {
+-      addConstant(mantissa + "E" + exp);
+-      return;
++      return mantissa + "E" + exp;
+     }
+ 
+     String decValueString = Long.toString(value);
+     if (value <= 1000000000000L) {
+       // Values <1E12 are shorter in decimal
+-      addConstant(decValueString);
+-      return;
++      return decValueString;
+     }
+ 
+     String hexValueString = Long.toHexString(value);
+     if (hexValueString.length() + 2 < decValueString.length()) {
+-      addConstant("0x" + hexValueString);
++      return "0x" + hexValueString;
+     } else {
+-      addConstant(decValueString);
++      return decValueString;
+     }
+   }
+ 
+diff --git a/test/com/google/javascript/jscomp/CodePrinterTest.java b/test/com/google/javascript/jscomp/CodePrinterTest.java
+index 30a40e6b5..eaf2595dd 100644
+--- a/test/com/google/javascript/jscomp/CodePrinterTest.java
++++ b/test/com/google/javascript/jscomp/CodePrinterTest.java
+@@ -2739,6 +2739,37 @@ public final class CodePrinterTest extends CodePrinterTestBase {
+     assertPrintNumber("1.01", 1.01);
+   }
+ 
++  @Test
++  public void testFormatNumber() {
++    // Schubfach boundary values
++    assertThat(CodeConsumer.formatNumber(2.0e-3)).isEqualTo(".002");
++    assertThat(CodeConsumer.formatNumber(1.0e23)).isEqualTo("1E23");
++    assertThat(CodeConsumer.formatNumber(Double.parseDouble("9.007199254740993e15")))
++        .isEqualTo("9007199254740992");
++
++    // Subnormals and MAX_VALUE
++    assertThat(CodeConsumer.formatNumber(Double.MIN_VALUE)).isEqualTo("4.9E-324");
++    assertThat(CodeConsumer.formatNumber(Double.MAX_VALUE)).isEqualTo("1.7976931348623157E308");
++
++    // Powers of 10
++    assertThat(CodeConsumer.formatNumber(100)).isEqualTo("100");
++    assertThat(CodeConsumer.formatNumber(1000)).isEqualTo("1E3");
++    assertThat(CodeConsumer.formatNumber(1e12)).isEqualTo("1E12");
++    assertThat(CodeConsumer.formatNumber(1e13)).isEqualTo("1E13");
++
++    // Hex-vs-decimal crossover integers around 1000000000000L
++    assertThat(CodeConsumer.formatNumber(1000000000000L)).isEqualTo("1E12");
++    assertThat(CodeConsumer.formatNumber(1000000000001L)).isEqualTo("0xe8d4a51001");
++
++    // Leading-zero fractions
++    assertThat(CodeConsumer.formatNumber(0.5)).isEqualTo(".5");
++    assertThat(CodeConsumer.formatNumber(0.002)).isEqualTo(".002");
++    assertThat(CodeConsumer.formatNumber(0.0001)).isEqualTo("1E-4");
++
++    // .0E stripping
++    assertThat(CodeConsumer.formatNumber(1.0e21)).isEqualTo("1E21");
++  }
++
+   @Test
+   public void testBiggerThanMaxLongNumericLiterals() {
+     // Since ECMAScript implements IEEE 754 "round to nearest, ties to even",

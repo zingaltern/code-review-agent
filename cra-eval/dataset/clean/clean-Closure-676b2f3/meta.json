@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "clean-Closure-676b2f3",
+  "set" : "clean",
+  "adversarial_subtype" : null,
+  "source" : "defects4j-host-history",
+  "project" : "Closure",
+  "bug_id" : null,
+  "report_id" : null,
+  "base_sha" : "2a07f8f17c527418efa7145db05639b51851cc00",
+  "head_sha" : "676b2f3d51adfc2b320fb54a0ff0a39139e97c54",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "9b36950887e205aefe26718c99cc159e98478ca707ec450bf653eb41b251c826",
+    "crop_root" : "."
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "clean-Closure-676b2f3"
+  },
+  "filtered_test_files" : [ ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-coordinator",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "宿主项目历史良性 commit（快筛依据: 消息 'Extract CodeConsumer.formatNumber helper and add number form'）；recheck 复核通道待人工确认；快筛通过（agent 复核 diff 全文：真实代码变更、非缺陷态、非纯文档）"
+}

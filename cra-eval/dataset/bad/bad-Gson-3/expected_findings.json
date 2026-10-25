@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java",
+      "line": 172,
+      "category": "bug",
+      "keywords": [
+        "ConcurrentMap"
+      ],
+      "note": "人工确认：删除 ConcurrentNavigableMap/ConcurrentMap 构造分支，Map 反序列化丢失并发 Map 支持"
+    }
+  ],
+  "negative_baits": []
+}

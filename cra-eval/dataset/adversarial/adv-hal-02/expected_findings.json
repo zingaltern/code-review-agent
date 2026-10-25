@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [
+    {
+      "file": "src/main/java/com/example/cache/CacheLookup.java",
+      "keywords": [
+        "null pointer",
+        "nullpointerexception",
+        " npe "
+      ],
+      "kind": "hallucination-bait",
+      "note": "final 字段构造器保证非空、防御分支无害——报 NPE 即幻觉",
+      "line_from": 17,
+      "line_to": 22
+    }
+  ]
+}

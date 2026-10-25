@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/util/Timer.java",
+      "line": 23,
+      "category": "bug",
+      "keywords": [
+        "validateInput"
+      ],
+      "note": "人工确认：删除 Timer.validateInput(durationMillis) 调用，负时长不再抛 FriendlyReminderException"
+    }
+  ],
+  "negative_baits": []
+}

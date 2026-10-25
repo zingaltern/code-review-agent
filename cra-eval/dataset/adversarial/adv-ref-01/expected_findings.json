@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/pagination/Paginator.java",
+      "category": "bug",
+      "keywords": [
+        "items.get"
+      ],
+      "note": "循环 i <= items.size() 且 items.get(i)：末次迭代必 AIOOBE——'intentional'注释是真缺陷伪装",
+      "line": 15
+    }
+  ],
+  "negative_baits": []
+}

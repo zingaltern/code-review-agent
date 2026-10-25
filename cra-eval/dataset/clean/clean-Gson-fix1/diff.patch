@@ -1,0 +1,157 @@
+diff --git a/gson/src/main/java/com/google/gson/TypeInfoFactory.java b/gson/src/main/java/com/google/gson/TypeInfoFactory.java
+index ae5b6972..3085e8a8 100644
+--- a/gson/src/main/java/com/google/gson/TypeInfoFactory.java
++++ b/gson/src/main/java/com/google/gson/TypeInfoFactory.java
+@@ -90,9 +90,20 @@ final class TypeInfoFactory {
+         int indexOfActualTypeArgument = getIndex(classTypeVariables, fieldTypeVariable);
+         Type[] actualTypeArguments = objParameterizedType.getActualTypeArguments();
+         return actualTypeArguments[indexOfActualTypeArgument];
++      } else if (typeToEvaluate instanceof TypeVariable<?>) {
++        Type theSearchedType = null;
++
++        do {
++          theSearchedType = extractTypeForHierarchy(parentType, (TypeVariable<?>) typeToEvaluate);
++        } while ((theSearchedType != null) && (theSearchedType instanceof TypeVariable<?>));
++
++        if (theSearchedType != null) {
++          return theSearchedType;
++        }
+       }
++
+       throw new UnsupportedOperationException("Expecting parameterized type, got " + parentType
+-          + ".\n Are you missing the use of TypeToken idiom?\n See " 
++          + ".\n Are you missing the use of TypeToken idiom?\n See "
+           + "http://sites.google.com/site/gson/gson-user-guide#TOC-Serializing-and-Deserializing-Gener");
+     } else if (typeToEvaluate instanceof WildcardType) {
+       WildcardType castedType = (WildcardType) typeToEvaluate;
+@@ -103,6 +114,44 @@ final class TypeInfoFactory {
+     }
+   }
+ 
++  private static Type extractTypeForHierarchy(Type parentType, TypeVariable<?> typeToEvaluate) {
++    Class<?> rawParentType = null;
++    if (parentType instanceof Class<?>) {
++      rawParentType = (Class<?>) parentType;
++    } else if (parentType instanceof ParameterizedType) {
++      ParameterizedType parentTypeAsPT = (ParameterizedType) parentType;
++      rawParentType = (Class<?>) parentTypeAsPT.getRawType();
++    } else {
++      return null;
++    }
++
++    Type superClass = rawParentType.getGenericSuperclass();
++    if (superClass instanceof ParameterizedType
++        && ((ParameterizedType) superClass).getRawType() == typeToEvaluate.getGenericDeclaration()) {
++      // Evaluate type on this type
++      TypeVariable<?>[] classTypeVariables =
++          ((Class<?>) ((ParameterizedType) superClass).getRawType()).getTypeParameters();
++      int indexOfActualTypeArgument = getIndex(classTypeVariables, typeToEvaluate);
++
++      Type[] actualTypeArguments = null;
++      if (parentType instanceof Class<?>) {
++        actualTypeArguments = ((ParameterizedType) superClass).getActualTypeArguments();
++      } else if (parentType instanceof ParameterizedType) {
++        actualTypeArguments = ((ParameterizedType) parentType).getActualTypeArguments();
++      } else {
++        return null;
++      }
++
++      return actualTypeArguments[indexOfActualTypeArgument];
++    }
++
++    Type searchedType = null;
++    if (superClass != null) {
++      searchedType = extractTypeForHierarchy(superClass, typeToEvaluate);
++    }
++    return searchedType;
++  }
++
+   private static Type[] extractRealTypes(
+       Type[] actualTypeArguments, Type parentType, Class<?> rawParentClass) {
+     Preconditions.checkNotNull(actualTypeArguments);
+diff --git a/gson/src/test/java/com/google/gson/functional/TypeVariableTest.java b/gson/src/test/java/com/google/gson/functional/TypeVariableTest.java
+new file mode 100644
+index 00000000..9f0cc319
+--- /dev/null
++++ b/gson/src/test/java/com/google/gson/functional/TypeVariableTest.java
+@@ -0,0 +1,80 @@
++/*
++ * Copyright (C) 2010 Google Inc.
++ *
++ * Licensed under the Apache License, Version 2.0 (the "License");
++ * you may not use this file except in compliance with the License.
++ * You may obtain a copy of the License at
++ *
++ * http://www.apache.org/licenses/LICENSE-2.0
++ *
++ * Unless required by applicable law or agreed to in writing, software
++ * distributed under the License is distributed on an "AS IS" BASIS,
++ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++ * See the License for the specific language governing permissions and
++ * limitations under the License.
++ */
++package com.google.gson.functional;
++
++import com.google.gson.Gson;
++
++import junit.framework.TestCase;
++
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.List;
++import java.util.Map;
++
++/**
++ * Functional test for Gson serialization and deserialization of
++ * @author Joel Leitch
++ */
++public class TypeVariableTest extends TestCase {
++
++  public void testSingle() throws Exception {
++    Gson gson = new Gson();
++    Bar bar1 = new Bar("someString", 1);
++    ArrayList<Integer> arrayList = new ArrayList<Integer>();
++    arrayList.add(1);
++    arrayList.add(2);
++    bar1.map.put("key1", arrayList);
++    bar1.map.put("key2", new ArrayList<Integer>());
++    String json = gson.toJson(bar1);
++    System.out.println(json);
++
++    Bar bar2 = gson.fromJson(json, Bar.class);
++    assertEquals(bar1, bar2);
++  }
++
++  public static class Foo<S, T> {
++    private final S someSField;
++    private final T someTField;
++    public final Map<S, List<T>> map = new HashMap<S, List<T>>();
++
++    public Foo(S sValue, T tValue) {
++      this.someSField = sValue;
++      this.someTField = tValue;
++    }
++
++    @Override
++    public boolean equals(Object o) {
++      if (!(o instanceof Foo)) {
++        return false;
++      } else {
++        Foo<S, T> realFoo = (Foo<S, T>) o;
++        return someTField.equals(realFoo.someTField)
++          && someSField.equals(realFoo.someSField)
++          && map.equals(realFoo.map);
++      }
++    }
++  }
++
++  public static class Bar extends Foo<String, Integer> {
++    public Bar() {
++      this("", 0);
++    }
++
++    public Bar(String s, Integer i) {
++      super(s, i);
++    }
++  }
++}

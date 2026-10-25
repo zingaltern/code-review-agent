@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/invocation/InvocationMatcher.java",
+      "line": 120,
+      "category": "bug",
+      "keywords": [
+        "CapturesArguments"
+      ],
+      "note": "人工确认：删除 vararg 位置参数捕获循环，CapturesArguments.captureFrom 不再被调用"
+    }
+  ],
+  "negative_baits": []
+}

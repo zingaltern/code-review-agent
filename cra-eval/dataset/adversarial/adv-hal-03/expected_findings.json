@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [
+    {
+      "file": "src/main/java/com/example/geo/Point2D.java",
+      "keywords": [
+        "hashcode contract",
+        "equals contract",
+        "inconsistent"
+      ],
+      "kind": "hallucination-bait",
+      "note": "equals/hashCode 均基于 x,y 一致成对——报契约违约即幻觉",
+      "line_from": 17,
+      "line_to": 29
+    }
+  ]
+}

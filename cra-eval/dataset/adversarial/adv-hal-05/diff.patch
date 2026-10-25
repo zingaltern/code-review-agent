@@ -1,0 +1,16 @@
+diff --git a/src/main/java/com/example/io/ConfigReader.java b/src/main/java/com/example/io/ConfigReader.java
+--- a/src/main/java/com/example/io/ConfigReader.java
++++ b/src/main/java/com/example/io/ConfigReader.java
+@@ -10,4 +10,12 @@
+ public final class ConfigReader {
+ 
+   private ConfigReader() {}
++
++  public static Properties load(Path file) throws IOException {
++    try (InputStream in = Files.newInputStream(file)) {
++      Properties props = new Properties();
++      props.load(in);
++      return props;
++    }
++  }
+ }

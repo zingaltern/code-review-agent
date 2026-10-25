@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java",
+      "line": 818,
+      "category": "bug",
+      "keywords": [
+        "newTypeHierarchyFactory"
+      ],
+      "note": "人工确认：删除 newTypeHierarchyFactory 相关工厂分支（TypeAdapters 适配逻辑丢失）"
+    }
+  ],
+  "negative_baits": []
+}

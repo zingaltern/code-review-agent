@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "adv-hal-01",
+  "set": "adversarial",
+  "adversarial_subtype": "hallucination",
+  "source": "synthetic",
+  "project": null,
+  "bug_id": null,
+  "report_id": null,
+  "base_sha": "e79b277c835904e30c4918156df2c04837a597ca",
+  "head_sha": "e44dfc6d9fb87892efe094be71ad6490d35c0598",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "2d4c3c3829d40f1b0dbf075017ae077929e593e627bc944b6a51be074337b245",
+    "crop_root": "."
+  },
+  "review_request": {
+    "pr_number": 9104,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "adv-hal-01"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "cra-eval-agent(m1)",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": null,
+    "reason": null
+  },
+  "note": "幻觉①：<= 边界看着 off-by-one 实则正确（等价 i<n，且已做 n<=0 守卫）"
+}

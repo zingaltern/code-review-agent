@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "adv-hal-02",
+  "set": "adversarial",
+  "adversarial_subtype": "hallucination",
+  "source": "synthetic",
+  "project": null,
+  "bug_id": null,
+  "report_id": null,
+  "base_sha": "24239cca94fe97230c66a180435690ef0bf26e06",
+  "head_sha": "d08a6e5474836a0db0de80c9ee61a9ee45679811",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "3211cf78b1f8d26030b47ac836dad16f008a31a69e80b479b8a476e0a037f732",
+    "crop_root": "."
+  },
+  "review_request": {
+    "pr_number": 9105,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "adv-hal-02"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "cra-eval-agent(m1)",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": null,
+    "reason": null
+  },
+  "note": "幻觉②：多余但无害的判空分支（final map 构造期保证非空）"
+}

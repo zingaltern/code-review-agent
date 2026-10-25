@@ -1,0 +1,6 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [],
+  "_note": "clean 用例空断言：良性变更，无预期缺陷；clean 集指标=该 run 全部已发布 findings 计误报（06§3）"
+}

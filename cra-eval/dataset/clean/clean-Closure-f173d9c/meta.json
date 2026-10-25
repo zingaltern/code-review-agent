@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "clean-Closure-f173d9c",
+  "set": "clean",
+  "adversarial_subtype": null,
+  "source": "defects4j-host-history",
+  "project": "Closure",
+  "bug_id": null,
+  "report_id": null,
+  "base_sha": "0d6ebb41152e6c8fd7b884402d71c4626c9e7cf3",
+  "head_sha": "f173d9c1891ff603b801ab7be85bc20a5a177530",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "65a0aa1fe88550bb44a3dc49c1ebf93bd5bf53be8e7b93a19538315f99cb1d67",
+    "crop_root": "src/com/google/javascript/jscomp/parsing"
+  },
+  "review_request": {
+    "pr_number": 9001,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "clean-Closure-f173d9c"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "cra-eval-agent(m1)",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": null,
+    "reason": null
+  },
+  "note": "宿主项目历史良性 commit（快筛依据: 消息 'Remove unused private method'）；recheck 复核通道待人工确认；快筛通过（agent 复核 diff 全文：真实代码变更、非缺陷态、非纯文档）"
+}

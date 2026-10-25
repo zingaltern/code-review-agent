@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/exceptions/Reporter.java",
+      "line": 420,
+      "category": "bug",
+      "keywords": [
+        "safelyGetMockName"
+      ],
+      "note": "人工确认：删除 safelyGetMockName/exceptionCauseMessageIfAvailable，错误报告丢失 mock 名与原因信息"
+    }
+  ],
+  "negative_baits": []
+}

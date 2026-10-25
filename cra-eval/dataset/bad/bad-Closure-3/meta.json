@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Closure-3",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Closure",
+  "bug_id" : 3,
+  "report_id" : "issue-864.json",
+  "base_sha" : "d80fcc04239ab8c4cf781273c4f9bc54cf06f479",
+  "head_sha" : "3cc85c3c37aa8bc834a4a86f91ddeb399d854024",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "282a4a2b266f433d30555a238b3da2c1ad6c2e285d4c231cff7e1d3f84a80b1e",
+    "crop_root" : "src/com/google/javascript/jscomp"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Closure-3"
+  },
+  "filtered_test_files" : [ "test/com/google/javascript/jscomp/FlowSensitiveInlineVariablesTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-coordinator",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Closure-3 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 19 行"
+}

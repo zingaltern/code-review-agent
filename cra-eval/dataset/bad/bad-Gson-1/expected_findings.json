@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/TypeInfoFactory.java",
+      "line": 90,
+      "category": "bug",
+      "keywords": [
+        "TypeVariable"
+      ],
+      "note": "人工确认：hunk1 删除 TypeVariable 解析分支（Gson#40 的缺陷引入），关键词取被删分支类型名"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/TypeInfoFactory.java",
+      "line": 103,
+      "category": "bug",
+      "keywords": [
+        "extractTypeForHierarchy"
+      ],
+      "note": "人工确认：hunk2 删除 extractTypeForHierarchy 方法（同一缺陷的第二处表现）"
+    }
+  ],
+  "negative_baits": []
+}

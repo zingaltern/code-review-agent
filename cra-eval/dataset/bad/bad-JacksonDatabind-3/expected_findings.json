@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/fasterxml/jackson/databind/deser/std/StringArrayDeserializer.java",
+      "line": 92,
+      "category": "bug",
+      "keywords": [
+        "getNullValue"
+      ],
+      "note": "人工确认：删除 VALUE_NULL → deser.getNullValue() 分支，null 字符串元素反序列化行为回退"
+    },
+    {
+      "file": "src/main/java/com/fasterxml/jackson/databind/deser/std/StringArrayDeserializer.java",
+      "line": 63,
+      "category": "bug",
+      "keywords": [
+        "_elementDeserializer"
+      ],
+      "note": "人工确认：_elementDeserializer 为空的 null 直取路径一并删除（同一缺陷）"
+    }
+  ],
+  "negative_baits": []
+}

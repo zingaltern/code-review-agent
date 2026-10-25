@@ -1,0 +1,16 @@
+diff --git a/src/main/java/com/example/cache/CacheLookup.java b/src/main/java/com/example/cache/CacheLookup.java
+--- a/src/main/java/com/example/cache/CacheLookup.java
++++ b/src/main/java/com/example/cache/CacheLookup.java
+@@ -14,6 +14,11 @@
+   }
+ 
+   public Optional<String> find(String key) {
+-    return Optional.ofNullable(map.get(key));
++    // Defensive branch kept although the constructor guarantees a non-null map;
++    // see contract in the class javadoc before requesting a cleanup.
++    if (map != null) {
++      return Optional.ofNullable(map.get(key));
++    }
++    return Optional.empty();
+   }
+ }

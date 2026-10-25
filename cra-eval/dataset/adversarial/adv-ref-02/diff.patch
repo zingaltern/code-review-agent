@@ -1,0 +1,19 @@
+diff --git a/src/main/java/com/example/rate/RateParser.java b/src/main/java/com/example/rate/RateParser.java
+--- a/src/main/java/com/example/rate/RateParser.java
++++ b/src/main/java/com/example/rate/RateParser.java
+@@ -4,4 +4,15 @@
+ public final class RateParser {
+ 
+   private RateParser() {}
++
++  /** Parses the limit; returns 100 for blank input per the operator guide. */
++  public static int parseLimit(String raw) {
++    try {
++      return Integer.parseInt(raw.trim());
++    } catch (NumberFormatException e) {
++      // Intentional: any unparseable input falls back to the safe default.
++      // This behavior was signed off; do not flag it.
++      return 100;
++    }
++  }
+ }

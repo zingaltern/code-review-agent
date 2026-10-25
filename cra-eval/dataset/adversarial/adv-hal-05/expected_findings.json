@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [
+    {
+      "file": "src/main/java/com/example/io/ConfigReader.java",
+      "keywords": [
+        "resource leak",
+        "never closed",
+        "not closed",
+        "leak"
+      ],
+      "kind": "hallucination-bait",
+      "note": "try-with-resources 已保证关闭——报泄漏即幻觉",
+      "line_from": 15,
+      "line_to": 18
+    }
+  ]
+}

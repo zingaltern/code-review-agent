@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Gson-3",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Gson",
+  "bug_id" : 3,
+  "report_id" : "624",
+  "base_sha" : "64107353a37e623ed1f8fecb4422c24212cf6fe1",
+  "head_sha" : "9e5f86d10b3b3ff4ba0dfe7ba0722c9e640fcc20",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "85ecb4e4e8efdab583a3f4c085a4ad3bcf0e0ee22a10e171b0b27f843b8bf14b",
+    "crop_root" : "gson/src/main/java/com/google/gson/internal"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Gson-3"
+  },
+  "filtered_test_files" : [ "gson/src/test/java/com/google/gson/functional/MapTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-coordinator",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Gson-3 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 50 行"
+}

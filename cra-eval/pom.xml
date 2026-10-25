@@ -11,12 +11,25 @@
 
   <artifactId>cra-eval</artifactId>
   <name>cra-eval</name>
-  <description>评测框架：数据集、k 次运行统计门禁、报表（02§3、06）；M0 为占位模块，T1.8/T1.9 起填充实现</description>
+  <description>评测框架：数据集、断言器、k 次运行统计门禁、报表（02§3、06）；T1.8/T1.9：bad12+clean8+对抗10 与 cra-eval run/annotate</description>
 
   <dependencies>
     <dependency>
       <groupId>org.cra</groupId>
       <artifactId>cra-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git-github</artifactId>
+    </dependency>
+    <!-- Jackson：meta/expected/report 读写 + stub 服务器 JSON 面（09§7 白名单依赖，版本由 BOM 管理） -->
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
     </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
@@ -29,4 +42,42 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <!-- 05§3 评测 CLI：shaded jar（与 cra-runner-cli 分发同形态） -->
+              <shadedArtifactAttached>false</shadedArtifactAttached>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>org.cra.eval.api.EvalCli</mainClass>
+                </transformer>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+              </transformers>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

@@ -1,0 +1,19 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [
+    {
+      "file": "src/main/java/com/example/text/Repeater.java",
+      "keywords": [
+        "off-by-one",
+        "out of bounds",
+        "outofbound",
+        "indexoutofbound"
+      ],
+      "kind": "hallucination-bait",
+      "note": "i <= n - 1 与 i < n 等价且已判空——正确代码，报缺陷即幻觉",
+      "line_from": 15,
+      "line_to": 18
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "clean-Mockito-fix1",
+  "set": "clean",
+  "adversarial_subtype": null,
+  "source": "defects4j",
+  "project": "Mockito",
+  "bug_id": 1,
+  "report_id": "188",
+  "base_sha": "837fd054a0da2c8706732dcd4bc880a64b957c78",
+  "head_sha": "4e9d7607825c3c668fd43f19507bfead566c528c",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "00e6ca8d40c10f27f8b412217e99df81875441f96bab86ceff6ab30884fc0735",
+    "crop_root": "src/org/mockito/internal/invocation"
+  },
+  "review_request": {
+    "pr_number": 9001,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "clean-Mockito-fix1"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "cra-eval-agent(m1)",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": "",
+    "reason": ""
+  },
+  "note": "D4J Mockito-1 fixed 侧 diff（修复变更本身作为良性样本，人工快筛待复核）；快筛通过（agent 复核 diff 全文：真实代码变更、非缺陷态、非纯文档）"
+}

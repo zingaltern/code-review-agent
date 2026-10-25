@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/fasterxml/jackson/core/util/TextBuffer.java",
+      "line": 580,
+      "category": "bug",
+      "keywords": [
+        "MAX_SEGMENT_LEN"
+      ],
+      "note": "人工确认：删除段增长封顶逻辑（len>>1 增长与 MAX_SEGMENT_LEN 上限判断）"
+    }
+  ],
+  "negative_baits": []
+}

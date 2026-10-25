@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/com/google/javascript/jscomp/RemoveUnusedVars.java",
+      "line": 367,
+      "category": "bug",
+      "keywords": [
+        "removeGlobals"
+      ],
+      "note": "人工确认：删除 !removeGlobals 提前返回守卫，非移除全局场景下未引用函数参数也被移除（RemoveUnusedVars 缺陷引入）"
+    }
+  ],
+  "negative_baits": []
+}

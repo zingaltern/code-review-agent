@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "expected": [],
+  "negative_baits": [
+    {
+      "file": "src/main/java/com/example/math/Average.java",
+      "keywords": [
+        "overflow",
+        "integer overflow",
+        "shift"
+      ],
+      "kind": "hallucination-bait",
+      "note": "调用方契约保证 <2^30，无符号移位安全——报溢出即幻觉",
+      "line_from": 12,
+      "line_to": 13
+    }
+  ]
+}

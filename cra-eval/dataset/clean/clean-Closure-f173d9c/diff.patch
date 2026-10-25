@@ -1,0 +1,16 @@
+diff --git a/src/com/google/javascript/jscomp/parsing/IRFactory.java b/src/com/google/javascript/jscomp/parsing/IRFactory.java
+index 7663d76d5..f8cc67f85 100644
+--- a/src/com/google/javascript/jscomp/parsing/IRFactory.java
++++ b/src/com/google/javascript/jscomp/parsing/IRFactory.java
+@@ -3501,11 +3501,6 @@ class IRFactory {
+       }
+     }
+ 
+-    Node unsupportedLanguageFeature(ParseTree node, String feature) {
+-      errorReporter.error(
+-          "unsupported language feature: " + feature, sourceName, lineno(node), charno(node));
+-      return createMissingExpressionNode();
+-    }
+ 
+     Node processLiteralExpression(LiteralExpressionTree expr) {
+       return switch (expr.literalToken.type) {
