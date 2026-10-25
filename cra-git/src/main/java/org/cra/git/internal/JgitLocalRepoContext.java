@@ -11,6 +11,7 @@ import java.util.Set;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.git.BlameResult;
 import org.cra.common.git.CommitHistoryEntry;
+import org.cra.common.text.Texts;
 import org.cra.git.api.LocalRepoContext;
 import org.eclipse.jgit.api.BlameCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
@@ -166,6 +167,6 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
   }
 
   private static String shortSha(String sha) {
-    return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "");
   }
 }

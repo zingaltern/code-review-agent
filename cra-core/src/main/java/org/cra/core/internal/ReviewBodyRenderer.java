@@ -6,6 +6,7 @@ import java.util.Set;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.Severity;
 import org.cra.common.run.ReviewRequest;
+import org.cra.common.text.Texts;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PreExistingBlameChecker;
 
@@ -213,6 +214,6 @@ final class ReviewBodyRenderer {
   }
 
   static String shortSha(String sha) {
-    return sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "");
   }
 }

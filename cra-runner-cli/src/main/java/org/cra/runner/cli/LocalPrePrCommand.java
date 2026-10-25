@@ -6,6 +6,7 @@ import org.cra.common.exception.CraException;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
+import org.cra.common.text.Texts;
 import org.cra.core.api.Orchestrator;
 import org.cra.git.api.GitAssembly;
 import org.cra.git.api.LocalGitAdapter;
@@ -138,6 +139,6 @@ final class LocalPrePrCommand {
   }
 
   private static String shortSha(String sha) {
-    return sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "");
   }
 }

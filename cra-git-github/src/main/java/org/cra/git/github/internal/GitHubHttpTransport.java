@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.git.RepoRef;
+import org.cra.common.text.Texts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -88,12 +89,7 @@ final class GitHubHttpTransport {
         continue;
       }
       throw new CraIntegrationException(
-          "GitHub API "
-              + status
-              + " on "
-              + path
-              + ": "
-              + GitHubPayloadSupport.abbreviate(response.body()));
+          "GitHub API " + status + " on " + path + ": " + Texts.truncate(response.body(), 200));
     }
   }
 
@@ -114,8 +110,7 @@ final class GitHubHttpTransport {
               + " on "
               + path
               + ": "
-              + GitHubPayloadSupport.abbreviate(
-                  new String(response.body(), StandardCharsets.UTF_8)));
+              + Texts.truncate(new String(response.body(), StandardCharsets.UTF_8), 200));
     }
   }
 

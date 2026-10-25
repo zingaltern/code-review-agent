@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.git.CommentSource;
+import org.cra.common.text.Texts;
 import org.cra.git.github.api.GitHubAssembly;
 import org.cra.git.github.api.GitHubComponents;
 
@@ -33,7 +34,8 @@ public final class BadcaseCommand {
     boolean needRemote = args.diffFile() == null || args.snapshotDir() == null;
     GitHubComponents components = null;
     if (needRemote) {
-      String token = firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
+      String token =
+          Texts.firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
       if (token == null) {
         throw new CraConfigException(
             "badcase add 需要 GitHub 只读 token（--token/GITHUB_TOKEN/GH_TOKEN）用于拉 diff/快照，"
@@ -125,14 +127,5 @@ public final class BadcaseCommand {
     }
     String fromEnv = env.get("CRA_ARTIFACT_ROOT");
     return fromEnv == null || fromEnv.isBlank() ? Path.of(".cra", "artifact") : Path.of(fromEnv);
-  }
-
-  private static String firstNonBlank(String... values) {
-    for (String value : values) {
-      if (value != null && !value.isBlank()) {
-        return value;
-      }
-    }
-    return null;
   }
 }

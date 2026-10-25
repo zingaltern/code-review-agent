@@ -6,6 +6,7 @@ import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
 import org.cra.common.git.CommitHistoryEntry;
 import org.cra.common.git.DiffFile;
+import org.cra.common.text.Texts;
 
 /**
  * CrossChecker brief 材料组装（03§3.1 模式 A/B；03§6 预算行 = ≤16k 输入：diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k）。
@@ -185,6 +186,6 @@ public final class CrossCheckMaterials {
   }
 
   private static String shortSha(String sha) {
-    return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "");
   }
 }

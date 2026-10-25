@@ -3,6 +3,7 @@ package org.cra.runner.cli;
 import java.util.List;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewSuggestion;
+import org.cra.common.text.Texts;
 
 /**
  * 本地 pre-PR 报告渲染（07 T2.10）：构建/测试实跑段（退出码 + 失败摘录置顶——对齐"必须展示输出而非 声称完成"）+ 本地评审段（建议清单）。纯文本到
@@ -132,9 +133,6 @@ final class LocalPrePrReport {
   }
 
   private static String shortSha(String sha) {
-    if (sha == null || sha.isBlank()) {
-      return "?";
-    }
-    return sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "?");
   }
 }

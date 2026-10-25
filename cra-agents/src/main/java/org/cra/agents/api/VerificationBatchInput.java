@@ -1,6 +1,7 @@
 package org.cra.agents.api;
 
 import java.util.List;
+import org.cra.common.text.Texts;
 
 /**
  * VerifierAgent 的输入（03§4.2：批处理单元 = 同一文件的候选 finding 合并为一个验证 brief）。 v1.3.1 分型组装：代码类注入文件全文 +
@@ -29,7 +30,7 @@ public record VerificationBatchInput(
     String followupContext) {
 
   public VerificationBatchInput {
-    requireNonBlank(file, "file");
+    Texts.requireNonBlank(file, "file");
     items = List.copyOf(items == null ? List.of() : items);
     if (items.isEmpty()) {
       throw new IllegalArgumentException("items must be non-empty");
@@ -38,11 +39,5 @@ public record VerificationBatchInput(
     citedEvidence = citedEvidence == null ? "" : citedEvidence;
     policySections = policySections == null ? "" : policySections;
     followupContext = followupContext == null ? "" : followupContext;
-  }
-
-  private static void requireNonBlank(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank");
-    }
   }
 }

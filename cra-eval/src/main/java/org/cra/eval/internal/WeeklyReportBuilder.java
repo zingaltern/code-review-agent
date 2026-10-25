@@ -16,6 +16,7 @@ import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PullRequestRef;
+import org.cra.common.text.Texts;
 import org.cra.eval.api.EvalReport;
 import org.cra.eval.api.WeeklyReport;
 
@@ -520,9 +521,6 @@ final class WeeklyReportBuilder {
   }
 
   private static String abbreviate(String sha) {
-    if (sha == null || sha.isBlank()) {
-      return "?";
-    }
-    return sha.length() <= 8 ? sha : sha.substring(0, 8);
+    return Texts.shortSha(sha, 8, "?");
   }
 }

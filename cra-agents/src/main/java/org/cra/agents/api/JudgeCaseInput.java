@@ -1,6 +1,7 @@
 package org.cra.agents.api;
 
 import java.util.Objects;
+import org.cra.common.text.Texts;
 
 /**
  * JudgeAgent 的输入（03§4.4：brief = finding + 验证者判定与证据 + 更大配额的涉事代码上下文）。 上下文按案件界定（≤3
@@ -39,21 +40,15 @@ public record JudgeCaseInput(
     if (findingId.isBlank()) {
       throw new IllegalArgumentException("findingId must be non-blank");
     }
-    requireNonBlank(category, "category");
-    requireNonBlank(severity, "severity");
-    requireNonBlank(title, "title");
-    requireNonBlank(description, "description");
-    requireNonBlank(failureMode, "failureMode");
-    requireNonBlank(evidence, "evidence");
+    Texts.requireNonBlank(category, "category");
+    Texts.requireNonBlank(severity, "severity");
+    Texts.requireNonBlank(title, "title");
+    Texts.requireNonBlank(description, "description");
+    Texts.requireNonBlank(failureMode, "failureMode");
+    Texts.requireNonBlank(evidence, "evidence");
     suggestion = suggestion == null ? "" : suggestion;
-    requireNonBlank(verifierVerdict, "verifierVerdict");
+    Texts.requireNonBlank(verifierVerdict, "verifierVerdict");
     caseContext = caseContext == null ? "" : caseContext;
-    requireNonBlank(caseReason, "caseReason");
-  }
-
-  private static void requireNonBlank(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank");
-    }
+    Texts.requireNonBlank(caseReason, "caseReason");
   }
 }

@@ -1,6 +1,7 @@
 package org.cra.agents.api;
 
 import java.util.Objects;
+import org.cra.common.text.Texts;
 
 /**
  * 验证批次内单条待复核结论（05§1.1 finding 全文的最小投影；发现者论证不剥离——04§4.2 "不假装盲， 靠输出约束反锚定"）。id 由编排器生成并原样回填
@@ -32,16 +33,10 @@ public record VerificationItem(
     }
     Objects.requireNonNull(category, "category");
     Objects.requireNonNull(severity, "severity");
-    requireNonBlank(title, "title");
-    requireNonBlank(description, "description");
-    requireNonBlank(failureMode, "failureMode");
-    requireNonBlank(evidence, "evidence");
+    Texts.requireNonBlank(title, "title");
+    Texts.requireNonBlank(description, "description");
+    Texts.requireNonBlank(failureMode, "failureMode");
+    Texts.requireNonBlank(evidence, "evidence");
     suggestion = suggestion == null ? "" : suggestion;
-  }
-
-  private static void requireNonBlank(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank");
-    }
   }
 }

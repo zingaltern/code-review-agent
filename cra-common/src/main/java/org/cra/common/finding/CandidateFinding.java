@@ -1,6 +1,7 @@
 package org.cra.common.finding;
 
 import java.util.Objects;
+import org.cra.common.text.Texts;
 
 /**
  * 候选发现（05§1.1，M0 子集——验证/锚定/指纹等生命周期字段由编排层状态表持有，不回写实体，09§6）。 构造即 schema 校验：非法输入抛 {@link
@@ -51,26 +52,20 @@ public record CandidateFinding(
       throw new IllegalArgumentException("bad runId: " + runId);
     }
     Objects.requireNonNull(category, "category");
-    requireNonBlank(title, "title");
-    requireNonBlank(description, "description");
-    requireNonBlank(failureMode, "failureMode");
-    requireNonBlank(file, "file");
+    Texts.requireNonBlank(title, "title");
+    Texts.requireNonBlank(description, "description");
+    Texts.requireNonBlank(failureMode, "failureMode");
+    Texts.requireNonBlank(file, "file");
     if (line <= 0) {
       throw new IllegalArgumentException("line must be positive: " + line);
     }
     side = side == null ? Side.RIGHT : side;
-    requireNonBlank(evidence, "evidence");
+    Texts.requireNonBlank(evidence, "evidence");
     Objects.requireNonNull(severityProposed, "severityProposed");
     if (confidence != null && (confidence < 0 || confidence > 1)) {
       throw new IllegalArgumentException("confidence must be in [0,1]: " + confidence);
     }
-    requireNonBlank(originAgentRole, "originAgentRole");
-    requireNonBlank(originModel, "originModel");
-  }
-
-  private static void requireNonBlank(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank");
-    }
+    Texts.requireNonBlank(originAgentRole, "originAgentRole");
+    Texts.requireNonBlank(originModel, "originModel");
   }
 }

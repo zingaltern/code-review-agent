@@ -5,6 +5,7 @@ import java.util.Locale;
 import java.util.Optional;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.git.RepoRef;
+import org.cra.common.text.Texts;
 import org.cra.eval.api.FixtureMeta;
 
 /** badcase 用例标识与集合判定（T3.5）：set 归类、case_id 生成/清洗、原 run 验证者判定提取。 */
@@ -51,10 +52,7 @@ final class BadcaseIdentifiers {
   }
 
   static String abbreviate(String sha) {
-    if (sha == null || sha.isBlank()) {
-      return "?";
-    }
-    return sha.length() <= 8 ? sha : sha.substring(0, 8);
+    return Texts.shortSha(sha, 8, "?");
   }
 
   /** 校验 label/finding_id/dataset 必填项（用户输入边界）。 */

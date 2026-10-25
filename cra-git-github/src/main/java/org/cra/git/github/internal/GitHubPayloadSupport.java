@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
 import org.cra.common.git.DiffHunk;
 
 /**
- * GitHub payload 的纯解析/编码辅助：diff hunk、严格 UTF-8、glob→regex、路径与 URL 编码、错误信息截断。
+ * GitHub payload 的纯解析/编码辅助：diff hunk、严格 UTF-8、glob→regex、路径与 URL 编码。
  *
  * <p>从 {@link GitHubHttpAdapter} 拆出，均为无状态纯函数，便于单独测试与复用。
  */
@@ -76,12 +76,5 @@ final class GitHubPayloadSupport {
 
   static String urlEncode(String value) {
     return URLEncoder.encode(value, StandardCharsets.UTF_8);
-  }
-
-  static String abbreviate(String s) {
-    if (s == null) {
-      return "";
-    }
-    return s.length() <= 200 ? s : s.substring(0, 200) + "…";
   }
 }
