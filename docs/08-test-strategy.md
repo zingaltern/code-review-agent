@@ -51,7 +51,8 @@ L1 快检在 CI 内发生真实 LLM 调用（04§2.4），但它是**评测门�
 - **Mockito**：只 mock SPI 边界（`GitPlatformAdapter` / `LlmGateway` / `ReviewLedger`），不 mock 模块内部【建议】——mock 内部会把测试绑死在实现上，重构即碎；
 - **AssertJ**：随 spring-boot-starter-test 引入，断言风格不另立；
 - **WireMock**：GitHub REST mock（§3.2 之外的另一半）；
-- **自研轻量 LLM 录制回放**（cassette）：见 3.2 定案。
+- **自研轻量 LLM 录制回放**（cassette）：见 3.2 定案；
+- **ArchUnit**（test scope，仅 cra-archtest）：架构守护 R1–R8 + 源码文本扫描（10§5），随 `mvn verify` 运行（v1 基线补登——10§5 曾称"按本节修订程序补进"，同批即漏，第五轮缺陷②）。
 
 **【强制】** 上述清单为准：新增测试依赖须先修订本文（文档即契约，07§6）——防止测试依赖树悄悄膨胀。
 
@@ -82,9 +83,9 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 
 | 里程碑 | 门禁内容（累加） | 断言 | 时长预算 |
 |---|---|---|---|
-| M0 | compile + 全模块单测 + spotless 格式检查（即 00§4 自检 `mvn verify` 同款 + 格式） | CI 绿 = 合入前提 | ≤5min |
+| M0 | compile + 全模块单测 + spotless 格式检查 + **cra-archtest（R1–R8 与源码扫描随 verify 自动运行，10§5）**（即 00§4 自检 `mvn verify` 同款） | CI 绿 = 合入前提 | ≤5min |
 | M1 | + 账本解析器与幂等闸单测（05§1.3 规则 1–5 逐条，§5 场景 3/4）；+ L1 快检接入 CI（对抗集注入 3 + 幻觉 2，~3min，04§2.4） | 解析规则全分支覆盖（§7）；L1 红**只升级不阻塞**（04§2.4） | ≤10min |
-| M2 | + 隔离机制单测：预算硬限 / 工具白名单 / UNTRUSTED 定界 / 反锚定校验器（07 T2.1/T2.4，07§6 纪律 2）；+ e2e dry-run；+ ArchUnit 守护 02§1/§3 分层与依赖方向（规则清单见 10§5） | e2e 断言 finding 集合与账本标记；ArchUnit 违例即红 | ≤10min |
+| M2 | + 隔离机制单测：预算硬限 / 工具白名单 / UNTRUSTED 定界 / 反锚定校验器（07 T2.1/T2.4，07§6 纪律 2）；+ e2e dry-run（ArchUnit 自 M0 已随 verify 生效，v1 基线修正） | e2e 断言 finding 集合与账本标记；ArchUnit 违例即红 | ≤10min |
 | M3 | + L2 报告哈希校验：prompt/模型改动 PR 附 `cra-eval run --json` 报告，CI 校验其存在与 sha256（04§2.4 荣誉制） | 报告缺失或哈希不符即红 | ≤10min |
 
 **【强制】** 任一阶段 CI 时长 >10min 视为门禁事故，处置次序固定：先把该检查挪夜间/本地 + 哈希校验（04§2.4 同款），不减门禁权威（06§1.2"被绕过的门禁等于没有门禁"）。守护方式：workflow 末尾计时 step，超限即失败。

@@ -18,7 +18,7 @@
 | 检查机制 | 覆盖 |
 |---|---|
 | Spotless `spotless:check`（绑定 verify） | 格式与 import（§2） |
-| 规则自检测试：JUnit 源码文本扫描，cra-common 持有 | System.out、吞异常、parallelStream、import 通配符、SPI Javadoc（§4/5/6/8） |
+| 规则自检测试：JUnit 源码文本扫描，**cra-archtest 持有**（v1 基线修正：原放 cra-common 在单模块构建/IDE 下会扫描 0 文件、空集断言、绿灯空转）——Maven 属性传递各模块源码根 + **最小文件数断言（目标模块 <N 源文件即红）** + 仅根构建有效 | System.out、吞异常、parallelStream、import 通配符、SPI Javadoc（§4/5/6/8） |
 | maven-enforcer | 依赖红线（§7） |
 | PR 描述检查（00§5） | 新依赖用途说明（§7） |
 
@@ -47,7 +47,7 @@
 
 ## 3. 命名约定
 
-包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-runner-cli → org.cra.runner.cli`）；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
+包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-runner-cli → org.cra.runner.cli`、`cra-archtest → org.cra.archtest`（v1 基线补登，第五轮缺陷②））；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
 
 类名后缀语义表【强制】——新类型取名先查此表，与既有类型对齐：
 

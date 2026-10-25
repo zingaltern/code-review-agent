@@ -5,7 +5,7 @@
 本项目是 [openai-code-review](https://github.com/zingaltern/openai-code-review)（2025）的继任者：继承其"挂在 Git 平台 CI 上的评审组件"定位，按 [Anthropic《Solving Code Review at Anthropic》](https://claude.dev/blog/solving-code-review-at-anthropic/)（2026）的最佳实践重新设计架构。差异化核心：**子代理隔离审查 + 独立复核评判**（验证层具体构造为自主设计，以评测数据为唯一裁判，见 docs/03 §7 诚实溯源）。
 
 > ⚠️ 仓库纪律：本仓库为全新独立仓库，**严禁向原 openai-code-review 仓库推送任何内容**；远端操作规范见 [docs/00](docs/00-branching-and-workflow.md) §8。
-> 📌 当前版本：**技术方案 v1.3.1**（2026-10-25；四轮评审 34 项缺陷闭环 + 三功能框架整合（含跨文档传播修复），对照表见 [docs/01 §8](docs/01-background-and-research.md)）。
+> 📌 当前版本：**v1 基线**（2026-10-25 冻结；五轮评审 40 项缺陷全部闭环，对照表见 [docs/01 §8](docs/01-background-and-research.md)。治理：基线冻结、增量走 ADR、每里程碑非红驱动文档改动 ≤1 PR、红即修——见 [docs/07](docs/07-roadmap.md) 头部）。
 
 ## 核心理念
 
@@ -60,7 +60,7 @@ cra review --local --base main --depth standard --dry-run=true
 ## 状态
 
 - [x] 调研与需求定义（2026-10）
-- [x] 技术方案 v1.0 → … → v1.3.1（四轮评审 34 项缺陷闭环，对照表见 docs/01 §8）
+- [x] 技术方案 v1.0 → … → v1.3.1 → **v1 基线冻结**（五轮评审 40 项缺陷闭环，对照表见 docs/01 §8）
 - [x] **开发规范包 docs/08–11**（测试策略 / 代码规范 / 架构规范+ADR / 扩展性契约——【强制/建议/可选】三级标注为效率与规范的平衡机制，强制项全部可自动化守护）
 - [ ] M0 骨架与最小闭环（含 cra-archtest 架构守护、Spotless 接入、docs/adr/ 目录创建）
 - [ ] M1 工程化与账本（含最小评测集与 fixture 规格、REVIEW.md 新段落解析）

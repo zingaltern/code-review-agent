@@ -92,7 +92,9 @@
 <!-- cra:v=2.1 | run=run_01hxy… | commit=abc1234 | status=DONE | findings=5 | suppressed=0 -->
 ```
 
-无 DONE 标记的 run（发布中途崩溃、被 cancel-in-progress 掐断）视为**不完整**：重跑时不全量跳过，走指纹级补发（02§4.1）——修复"发布 3/8 条后崩溃的 run 与完整发布在账本中不可区分，余下 5 条永久静默"的缺陷。
+`status` 取值 `DONE | DEGRADED`，**两者均为完成标记**（02§4.1 v1 基线修正：降级完成也是完整发布——部分角色超时但 run 正常收尾并发布了全部应发内容）。
+
+无任何完成标记的 run（发布中途崩溃、被 cancel-in-progress 掐断）视为**不完整**：重跑时不全量跳过，走指纹级补发（02§4.1）——修复"发布 3/8 条后崩溃的 run 与完整发布在账本中不可区分，余下 5 条永久静默"的缺陷。
 
 指纹键构成与锚行选取规则、±5 行滑窗容错匹配：见 02§4.1（**不含 LLM 生成文本与绝对行号**）。
 
@@ -140,6 +142,13 @@ public interface LocalRepoContext {                                            /
     BlameResult blame(String path, int line, String sha);                      // jgit 实现
     Optional<String> localRepoRoot();                                          // CI checkout / 本地模式存在；纯 API 模式为空
 }
+
+public interface CommentSource {                                               // v1 基线新增（ADR-0005，10§6）：账本与处置采集的取数端口
+    CommentLedger fetchBotComments(RepoRef repo, int prNumber);                // 与 GitPlatformAdapter 同名方法同语义，返回 common POJO
+    DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);   // 06§1.1 周报数据面
+}
+// 消费方：cra-store 的 GitHub 评论账本实现（构造器注入，只依赖 common 类型）与 cra-eval report；
+// 提供方：cra-git-github（适配既有 adapter 方法）；装配：组合根（cra-runner-cli 与 eval 的 Main）。
 ```
 
 **修订说明**：

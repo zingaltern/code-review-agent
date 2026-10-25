@@ -1,6 +1,6 @@
 # 10 · 架构规范
 
-> 文档版本：v1.0（2026-10-25，开发前规范包）
+> 文档版本：v1.0.1（2026-10-25，并入 v1 基线：第五轮缺陷①③⑤——eval 矩阵行放开取数、源码扫描并入 cra-archtest、R1-R8 自 M0 required；附录增 ADR-0005）
 > 前置阅读：`02-architecture-design.md` §1/§3、`03-multi-agent-design.md` §1、`05-data-and-integration.md` §2
 > 定位：**02 是架构设计（是什么），本文是架构的"守则与守护"（怎么保住它）**——模块依赖规则、包结构、DI 约定、ArchUnit 守护清单、ADR 与豁免流程。目标是个人项目的一句话版本：**让依赖方向永远不烂**，不是企业级治理。代码怎么写归 09，测试怎么跑归 08，扩展点登记归 11；模块怎么依赖、谁来守护，归本文。
 
@@ -27,7 +27,7 @@
 | **cra-store** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | - | ❌ | ❌ | ❌ | ❌ |
 | **cra-core** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | - | ❌ | ❌ | ❌ |
 | **cra-runner-cli** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | - | ❌ | ❌ |
-| **cra-eval** | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | - | ❌ |
+| **cra-eval** | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | - | ❌ |
 | **cra-server**（M4） | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | - |
 
 每行一句 ❌ 理由（✅ 的依据已在 02§3）：
@@ -40,7 +40,7 @@
 - **cra-store**：账本只面向 cra-common 纯 POJO（11§4 第 3 条），不感知平台 API；
 - **cra-core**：不依赖 git-github——编排与平台实现解耦，换平台/换形态不改 core（02§5"core 全部逻辑与形态无关"）；不依赖 cli/eval/server——上游不知道壳和评测；
 - **cra-runner-cli**：组合根例外（见下），但 ❌ eval/server 两条仍是铁律——入口不依赖评测框架，两个壳互不知道彼此；
-- **cra-eval**：评测框架经命令行黑盒驱动被测对象（05§3），只直连 common（数据模型）与 store（账本读取，02§5 回灌）；若 M3 评测落地确需进程内驱动 core，先修订 02§3 与本表并写 ADR（§6）；
+- **cra-eval**：评测运行经命令行黑盒驱动被测对象（05§3）；`report` 周报与处置采集需要平台数据直连——经 `CommentSource` 端口（ADR-0005，05§2.1）取数，故 eval→git(+git-gh) ✅（仅 api 类型；eval 是开发侧模块，不进运行时依赖图）；若确需进程内驱动 core，先修订 02§3 与本表并写 ADR（§6）；
 - **cra-server**（M4）：第二组合根，同 cli 约束（02§5：CLI 与 server 只是两种壳）。
 
 **组合根例外【强制】**：cra-runner-cli 是唯一允许依赖图上一切的位置（除 eval/server），且**仅限各模块的 api 包类型**（§3/R3 守护）——装配需要触达各模块 api 包的装配工厂，这是"所有模块 → 按需向下"的唯一豁免点。M4 起 cra-server 成为第二组合根，届时先修订 §5 R6 与本注并写 ADR。
@@ -84,7 +84,7 @@ org.cra.<module>/
 
 ## 5. 架构守护【强制】
 
-**守护模块：`cra-archtest`**（02§3 模块清单之外的构建期守护件，登记于本节）。仅 `src/test/java`、无主代码、不被任何模块依赖、不进运行时依赖图；test 依赖全部模块以获得完整类视图。不选 cra-common 的理由：cra-common 是矩阵底座（列全 ❌），为守护测试让它 test 依赖全部模块等于自拆底座——09§1 的"规则自检测试放 cra-common"是**源码文本扫描**（不需要类路径），与 ArchUnit 的**字节码分析**分工并存：cra-common 管写法（System.out、吞异常、通配 import），cra-archtest 管结构（依赖方向）。依赖登记：ArchUnit（test scope，仅 cra-archtest）按 08§3.1 修订程序补进固定清单——08§4 M2 行已预置该门禁，此处不越权代改。
+**守护模块：`cra-archtest`**（02§3 模块清单之外的构建期守护件，登记于本节）。仅 `src/test/java`、无主代码、不被任何模块依赖、不进运行时依赖图；test 依赖全部模块以获得完整类视图。不选 cra-common 的理由：cra-common 是矩阵底座（列全 ❌），为守护测试让它 test 依赖全部模块等于自拆底座——源码文本扫描（09§1 规则自检，管写法：System.out、吞异常、通配 import）**同由 cra-archtest 持有**（v1 基线修正：原放 cra-common 会在单模块构建/IDE 运行时扫描 0 文件、断言空集、绿灯空转——扫描器经 Maven 属性显式接收各模块源码根，并带最小文件数断言：任一目标模块 <N 个源文件即红；仅根构建有效（09§1））；与 ArchUnit 字节码分析（管结构：依赖方向）同居一模块、各管一半。依赖登记：ArchUnit（test scope，仅 cra-archtest）按 08§3.1 修订程序补进固定清单——08§4 M2 行已预置该门禁，此处不越权代改。
 
 **规则清单（8 条，即 cra-archtest 的全部内容）**：
 
@@ -116,7 +116,7 @@ layeredArchitecture().consideringAllDependencies()
 7. **R7 注入注解零出现**：`noClasses().should().dependOnClassesThat().belongToAnyOf(Autowired.class)`——字段/setter/多构造器注入都必然引入该注解依赖，一网打尽（§4 构造器注入唯一）；
 8. **R8 反射禁令**：`org.cra..` 的类不得依赖 `java.lang.reflect..`——跨层反射是绕过 api/internal 可见性的万能钥匙；确需（如 cra-eval 反射装载）走 §7 豁免。
 
-**CI 接入时点**：cra-archtest 于 M0 建仓时随骨架创建（规则先行，本地 `mvn -B -ntp verify`（00§4）从 M0 即运行它）；作为 **required check 自 M2 起**——与 08§4 CI 门禁演进表 M2 行（"+ ArchUnit 守护 02§1/§3 分层与依赖方向（规则清单见 10 号文档）"）逐字对齐，违例即红。
+**CI 接入时点（v1 基线修正）**：cra-archtest 于 M0 建仓时随骨架创建；reactor 内模块随 `mvn -B -ntp verify`（00§4）自动执行——CI 的 M0 门禁就是 verify，**R1–R8 与源码扫描自 M0 起即 required**（原"自 M2 起"与 reactor 构建机制矛盾：只要 CI 跑 verify，规则就在强制，写 M2 反而让 M0 建仓 agent 无所适从）；与 08§4 演进表 M0 行对齐。
 
 ## 6. ADR 决策记录机制
 
@@ -131,6 +131,7 @@ layeredArchitecture().consideringAllDependencies()
 - **ADR-0002 放弃"盲评"，改为独立复核 + 反锚定质控信号**：背景——finding 描述即完整论证，"盲"是装饰（01§8 首轮缺陷③）；引用新颖性硬校验拒真（二轮缺陷④）。决策——verifier 看完整论证但必须独立重建证据链（自定位行号 + 自己的话重述）；新颖性校验降级为 `anti_anchor_check` 质控信号，FAIL 不阻断（03§4.2）。替代方案——剥离论证的真盲评、纯证伪指令（保留给 M3 V2 做差异化）。后果——FAIL 率进周报预警（06§1.3 口径）。
 - **ADR-0003 Java 17 + Spring Boot 3.x（仅 DI/配置）+ 自研轻量编排**：背景——01§5.1 决策矩阵。决策——与原项目及团队技能连续；agent 核心循环本就轻量，自研可控可测；Spring 收缩为组合根的 DI 与配置。替代方案——Python + LangGraph/CrewAI（生态丰富但与原项目断裂、pipeline 易失控）、TS + Claude Agent SDK（分发重）。后果——LLM 生态靠 OpenAI 兼容协议补齐（01§4.1 G4）；"禁编排框架"成为依赖红线（09§7）。
 - **ADR-0004 双验证者投票降级为 M3 数据门禁增量**：背景——M2 做不到验证者异构，"N 个高相关性投票者等价于 1 个"（01§8 首轮缺陷②⑧；03§2）。决策——M2 单强模型验证者 + Judge 仲裁 + 拒真抽查；M3 双异构投票由数据门禁开启（拒真池样本 ≥20 且推翻率 ≥10%，或处置样本 ≥30 且精确率 <80%，03§4.3）。替代方案——M2 即上双验证者（同构投票空转，虚假独立性）。后果——`require-distinct-model-family` 违例拒绝启动（05§5）；头号特性去留由数据决定。
+- **ADR-0005 账本与处置采集的取数端口 CommentSource（cra-common）**：背景——第五轮缺陷①：cra-store 只依赖 common，但 GitHub 评论账本的原始数据（bot 评论/处置信号）只能经 `GitPlatformAdapter.fetchBotComments/fetchDispositionSignals`（cra-git-github 实现）获取，矩阵下无合法路径；`cra-eval report` 周报同样断供。决策——cra-common 定义 `CommentSource` 端口（返回 common POJO）；store 的 GitHub 账本实现**构造器注入**该端口；cra-git-github 提供默认实现（适配既有 adapter 方法）；组合根（cra-runner-cli / eval 的 Main）装配；矩阵放开 `cra-eval→git(+git-gh) ✅`（仅 api、仅开发侧）。替代方案——store 私建 GitHub 客户端（双维护）、store→git 直接依赖（账本抽象开始知道平台）、core 内桥接（编排器沾平台 IO）。后果——每新增平台须同步提供 CommentSource 实现（11§2 已登记）。
 
 ## 7. 例外与豁免【强制流程】
 

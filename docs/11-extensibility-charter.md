@@ -23,6 +23,7 @@
 | 扩展点 | 接口或机制 | 稳定性 | 当前实现 | 新增实现的最小集 |
 |---|---|---|---|---|
 | Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3） | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；接入走 §6 checklist |
+| 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
 | 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1） |
 | 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态），按部署形态选择（02§5） | 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植** |
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |

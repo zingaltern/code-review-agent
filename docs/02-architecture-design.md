@@ -79,7 +79,7 @@ code-review-agent/
 ├── cra-agents/            # 子代理定义：角色 prompt 模板、工具白名单、输出 schema
 ├── cra-core/              # Orchestrator：Planner/Fan-out/Verify/Aggregate/Publish/Convergence
 ├── cra-runner-cli/        # CLI 入口（CI 模式 + M2 起本地 pre-PR 模式）
-├── cra-store/             # 账本抽象：GitHub 评论账本 / SQLite 实现（服务形态 PG）
+├── cra-store/             # 账本抽象：GitHub 评论账本（经 CommentSource 端口取数，ADR-0005）/ SQLite（服务形态 PG）
 ├── cra-eval/              # 评测框架：数据集、k 次运行统计门禁、报表
 ├── cra-archtest/          # (M0 起) 构建期架构守护：仅 ArchUnit 测试，无主代码、不被依赖（10§5）
 └── cra-server/            # (M4) webhook 常驻服务、队列、多仓库
@@ -93,7 +93,7 @@ code-review-agent/
 
 ### 4.1 幂等与重放（v1.2.1：完整发布判定 + 滑窗容错）
 
-- **第一道闸（commit 级幂等，只认完整发布）**：run 收尾时随 Summary 评论发布 `status=DONE` 完成标记（05§1.3）；重跑同 commit 时，**仅当账本存在该 commit 的 DONE 标记才全量跳过**（只更新 Summary）。发布 3/8 条后崩溃或被 `cancel-in-progress` 掐断的 run **没有 DONE 标记**——重跑不放行全跳，而是走指纹级补发（已发布的不重发、缺失的补发），杜绝"其余 5 条永久静默丢失"；
+- **第一道闸（commit 级幂等，只认完整发布，v1 基线修正：完成标记 = `status ∈ {DONE, DEGRADED}`）**：run 收尾时随 Summary 评论发布完成标记（05§1.3）——**降级完成也是完整发布**（部分角色超时但 run 正常收尾并发布了全部应发内容），对它全量重评既浪费又违背幂等初衷；重跑同 commit 时，仅当账本存在该 commit 的完成标记才全量跳过（只更新 Summary）。发布 3/8 条后崩溃或被 `cancel-in-progress` 掐断的 run **没有任何完成标记**——重跑走指纹级补发（已发布的不重发、缺失的补发），杜绝"其余 5 条永久静默丢失"；
 - **第二道闸（指纹级，防跨 push 重复）**：指纹 v2 键**只含确定性成分，不含任何 LLM 生成文本**：
 
 ```

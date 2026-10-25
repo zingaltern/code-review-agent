@@ -30,7 +30,7 @@
 
 **run 级满意度信号（v1.2.1 载体明确后启用）**：Summary 改为 issue comment 后有独立 reaction API（05§2.2）——作者对 Summary 的 👍/👎 记录为该 run 满意度，进周报趋势，不参与单条 finding 处置分类。
 
-`cra-eval report --repo … --since 7d` 本地定时跑：从 GitHub API 拉账本聚合（双端点合并，05§2.3；周频低量，限流无虞——评测 job 本身用离线 fixture，不拉 GitHub）。
+`cra-eval report --repo … --since 7d` 本地定时跑：经 `CommentSource` 端口（05§2.1，ADR-0005）拉账本与处置信号聚合（双端点合并，05§2.3；周频低量，限流无虞——评测 job 本身用离线 fixture，不拉 GitHub）。
 
 核心指标与**最小样本量门槛（v1.2 新增——个人项目月均几十条 finding，小样本指标在噪声内掷硬币）**：
 
