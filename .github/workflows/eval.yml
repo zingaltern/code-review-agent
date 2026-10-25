@@ -27,8 +27,8 @@ jobs:
           distribution: temurin
           java-version: '17'
           cache: maven
-      - name: 构建被测 CLI 与评测 jar
-        run: mvn -B -ntp -pl cra-runner-cli -am package -DskipTests -q && mvn -B -ntp -pl cra-eval package -DskipTests -q
+      - name: 构建被测 CLI 与评测 jar（整仓 reactor：package 不入本地仓，拆 -pl 会丢 reactor 依赖）
+        run: mvn -B -ntp package -DskipTests -q
       - name: 下载并解包数据集快照（release 资产，06§3 不入 git）
         run: |
           curl -sfL -o /tmp/dataset-snapshots-m1.tar \
