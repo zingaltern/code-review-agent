@@ -12,6 +12,7 @@ target/
 
 # Runtime artifacts
 runs/
+.cra/
 *.db
 *.sqlite
 logs/

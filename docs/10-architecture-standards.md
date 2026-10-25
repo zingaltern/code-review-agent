@@ -1,5 +1,6 @@
 # 10 · 架构规范
 
+> 文档版本：v1.0.2（2026-10-25，M0 实现撞墙定点修订：R1 片段 Infra 行补 Eval——10§2 矩阵与 ADR-0005 放开的 cra-eval→git(+git-gh) ✅ 会被旧片段层规则误判红，矩阵是单一事实源）
 > 文档版本：v1.0.1（2026-10-25，并入 v1 基线：第五轮缺陷①③⑤——eval 矩阵行放开取数、源码扫描并入 cra-archtest、R1-R8 自 M0 required；附录增 ADR-0005）
 > 前置阅读：`02-architecture-design.md` §1/§3、`03-multi-agent-design.md` §1、`05-data-and-integration.md` §2
 > 定位：**02 是架构设计（是什么），本文是架构的"守则与守护"（怎么保住它）**——模块依赖规则、包结构、DI 约定、ArchUnit 守护清单、ADR 与豁免流程。目标是个人项目的一句话版本：**让依赖方向永远不烂**，不是企业级治理。代码怎么写归 09，测试怎么跑归 08，扩展点登记归 11；模块怎么依赖、谁来守护，归本文。
@@ -104,7 +105,7 @@ layeredArchitecture().consideringAllDependencies()
     .whereLayer("Core").mayOnlyBeAccessedByLayers("Shell")
     .whereLayer("Agents").mayOnlyBeAccessedByLayers("Core", "Shell")
     .whereLayer("Store").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval")
-    .whereLayer("Infra").mayOnlyBeAccessedByLayers("Core", "Shell");
+    .whereLayer("Infra").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval")   // v1.0.2：补 Eval（ADR-0005 eval→git(+git-gh) 仅 api 取数；eval→llm/context 仍被矩阵逐对规则封死）;
 ```
 
    矩阵中未被层规则覆盖的 ❌ 单元（如 eval→llm、git-gh→store）由表驱动逐对生成补齐：一条 ❌ = 一条 `noClasses("org.cra.<a>..").should().dependOnClassesThat().resideInAPackage("org.cra.<b>..")`——矩阵是单一事实源，规则循环生成（约 30 行），不做第二份手写清单；

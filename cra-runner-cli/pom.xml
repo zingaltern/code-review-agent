@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.cra</groupId>
+    <artifactId>code-review-agent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>cra-runner-cli</artifactId>
+  <name>cra-runner-cli</name>
+  <description>CLI 入口与唯一组合根（M0–M3）：`cra review` 参数解析、退出码、装配（05§3、10§4）；Spring 仅 DI/配置</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-llm</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git-github</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-context</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-agents</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-store</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-core</artifactId>
+    </dependency>
+    <!-- Spring 仅 DI/配置且仅在本模块（10§5 R6/R7） -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+    </dependency>
+    <!-- 结构化 JSON 日志（09§5） -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>net.logstash.logback</groupId>
+      <artifactId>logstash-logback-encoder</artifactId>
+      <version>${logstash-logback-encoder.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

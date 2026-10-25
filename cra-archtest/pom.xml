@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.cra</groupId>
+    <artifactId>code-review-agent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>cra-archtest</artifactId>
+  <name>cra-archtest</name>
+  <description>构建期架构守护（10§5）：ArchUnit R1–R8 + 源码文本扫描（09§1）；仅测试代码、无主代码、不被任何模块依赖、不进运行时依赖图</description>
+
+  <dependencies>
+    <!-- test 依赖全部模块以获得完整类视图（10§5） -->
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-common</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-llm</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git-github</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-context</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-agents</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-store</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-runner-cli</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-eval</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit5</artifactId>
+      <version>${archunit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
