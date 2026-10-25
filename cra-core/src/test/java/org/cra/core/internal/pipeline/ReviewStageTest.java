@@ -147,6 +147,54 @@ class ReviewStageTest {
   }
 
   @Test
+  void persistBriefNormalizesPathLikeChunkKey() {
+    // M2 验收 8 pre-PR 实跑缺陷回归：chunk key 为路径前两段（如 cra-runner-cli/src）时
+    // 文件名不得拼出子目录（否则 brief 落盘失败 → 全部代理隔离失败但 run 静默成功）
+    AgentBudget bh = new AgentBudget(24_000, 2_000, 3, 240_000);
+    var agent = stubAgent("bug-hunter/dataflow", bh);
+    var brief =
+        agent.buildBrief(
+            new ReviewAgentInput("PR #1", "", "d", "w", "s", "", "", java.util.Set.of()));
+    java.nio.file.Path persisted = trace.persistBrief(brief, "cra-runner-cli/src");
+    org.assertj.core.api.Assertions.assertThat(persisted.getFileName().toString())
+        .isEqualTo("bug-hunter_dataflow-cra-runner-cli_src.md");
+    org.assertj.core.api.Assertions.assertThat(java.nio.file.Files.exists(persisted)).isTrue();
+  }
+
+  @Test
+  void allAgentsFailedMarksAllFailedDegradation() {
+    AgentBudget bh = new AgentBudget(24_000, 2_000, 3, 240_000);
+    AgentRole role = new AgentRole("bug-hunter/dataflow", "bh");
+    SubAgent<ReviewAgentInput> broken =
+        new SubAgent<>() {
+          @Override
+          public AgentRole role() {
+            return role;
+          }
+
+          @Override
+          public AgentBrief buildBrief(ReviewAgentInput input) {
+            throw new IllegalStateException("brief 组装失败（模拟落盘/上下文异常）");
+          }
+
+          @Override
+          public ToolWhitelist tools() {
+            return ToolWhitelist.NONE;
+          }
+
+          @Override
+          public AgentBudget budget() {
+            return bh;
+          }
+        };
+    ReviewCrew crew = ReviewCrew.ofBugHunters(List.of(broken));
+    ReviewStage.StageOutcome outcome =
+        runStage(crew, new ScriptedGateway(), Depth.QUICK, PipelineOptions.defaults(), 1);
+    org.assertj.core.api.Assertions.assertThat(outcome.degradations())
+        .contains("all-review-agents-failed");
+  }
+
+  @Test
   void routePerspectivesFollowsDepthTable() {
     // 02§4.3：quick 1 / standard 2 / deep 3–4
     assertThat(ReviewStage.routePerspectives(Depth.QUICK))

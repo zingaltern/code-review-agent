@@ -85,8 +85,13 @@ public final class TraceWriter {
     Map<String, Object> fields = new LinkedHashMap<>();
     // M2 角色标识含斜杠（bug-hunter/dataflow，03§2.2）——文件名内归一为下划线，避免拼出子目录
     String roleId = brief.role().id().replace('/', '_');
+    // chunk key 为路径前两段（如 cra-runner-cli/src，02§4.3 模块分组）——文件名归一防拼出子目录
+    // （M2 验收 8 pre-PR 实跑发现：多级目录 chunk 时 brief 落盘失败 → 全部代理隔离失败）
+    String safeSuffix = suffix == null ? null : suffix.replace('/', '_').replace('\\', '_');
     String name =
-        suffix == null || suffix.isBlank() ? roleId + ".md" : roleId + "-" + suffix + ".md";
+        safeSuffix == null || safeSuffix.isBlank()
+            ? roleId + ".md"
+            : roleId + "-" + safeSuffix + ".md";
     Path path = runDir.resolve("briefs").resolve(name);
     String content = "# system\n" + brief.systemPrompt() + "\n\n# user\n" + brief.userPrompt();
     try {

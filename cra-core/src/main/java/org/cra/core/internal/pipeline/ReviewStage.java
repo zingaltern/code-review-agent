@@ -470,6 +470,15 @@ public final class ReviewStage {
     }
     // 失败隔离语义（02§4.2）：全部代理 LLM 不可得 = 全局故障 → run FAILED；部分缺失 = DEGRADED 声明
     boolean llmUnavailable = !collected.isEmpty() && unavailableCount == collected.size();
+    long failedCount =
+        collected.stream()
+            .filter(o -> o.degradations().stream().anyMatch(d -> d.startsWith("agent-failed:")))
+            .count();
+    if (!collected.isEmpty() && failedCount == collected.size() && !llmUnavailable) {
+      // 全部代理执行失败（异常/brief 落盘等，非 LLM 不可得）= 无可信评审产出——不得静默 SUCCESS
+      degradations.add("all-review-agents-failed");
+      contextNotes.add("全部 " + collected.size() + " 个评审代理执行失败（失败隔离已吸收，02§4.2），本次无可信评审产出");
+    }
     if (unavailableCount > 0 && !llmUnavailable) {
       degradations.add("llm-unavailable-agents:" + unavailableCount);
       contextNotes.add(unavailableCount + " 个评审代理因 LLM 不可得缺失（失败隔离，02§4.2），其余代理产出照常汇聚");

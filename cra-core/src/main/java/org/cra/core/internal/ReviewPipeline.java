@@ -346,6 +346,10 @@ public final class ReviewPipeline implements Orchestrator {
       if (outcome.stoppedByBudget()) {
         degraded = true;
       }
+      if (outcome.degradations().contains("all-review-agents-failed")) {
+        // 全代理执行失败（非 LLM 不可得）：零候选可信产出，降级收尾并声明（02§4.2 失败隔离语义）
+        degraded = true;
+      }
 
       // T2.8：run 内精确去重 merge（03§4.5：同 file ±3 行同 category；语义去重留 M3）
       ExactDedupMerger.Result merged = ExactDedupMerger.merge(outcome.findings());
