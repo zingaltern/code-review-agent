@@ -7,11 +7,11 @@
   "project": null,
   "bug_id": null,
   "report_id": null,
-  "base_sha": "5fab7bd6644fd76019ea1df8685fbf5aa759fd73",
-  "head_sha": "6372d255d07dbb6ac0a2e2b14940d5393470f188",
+  "base_sha": "778a74d7b5b5a56899a5329d8c12e6db6432ad46",
+  "head_sha": "8c60b28bfbce5ffeaa6b3cdc7ee6335603c777eb",
   "snapshot": {
     "file": "repo_snapshot.tgz",
-    "sha256": "99c246c29009ae3de289d364bbffba532c03b911fd9b6f5608a707cde766b007",
+    "sha256": "e43efecdca9a5e39df2360ea1896c7772e14ee7e88d550909c047931a3347e52",
     "crop_root": "."
   },
   "review_request": {

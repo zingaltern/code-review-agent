@@ -1,10 +1,11 @@
 diff --git a/src/main/java/com/example/jobs/ReportExportJob.java b/src/main/java/com/example/jobs/ReportExportJob.java
+index c390ecb..3754849 100644
 --- a/src/main/java/com/example/jobs/ReportExportJob.java
 +++ b/src/main/java/com/example/jobs/ReportExportJob.java
-@@ -6,7 +6,7 @@
+@@ -6,7 +6,7 @@ import java.time.Duration;
  public final class ReportExportJob {
  
-   /** 单次导出的等待上限。 */
+   /** 单次导出的等待上限：企业会话硬上限 30 分钟，任务必须在会话内跑完（INC-2087/commit 9c41d2a）。 */
 -  private static final Duration WAIT_LIMIT = Duration.ofMinutes(10);
 +  private static final Duration WAIT_LIMIT = Duration.ofMinutes(45);
  
