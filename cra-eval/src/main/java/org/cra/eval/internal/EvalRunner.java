@@ -76,7 +76,7 @@ public final class EvalRunner {
               workDir.toAbsolutePath(),
               stdoutLog,
               stderrLog);
-      return observe(meta, runIndex, server, exitCode, stdoutLog, stderrLog);
+      return observe(meta, runIndex, server, exitCode, stdoutLog, stderrLog, runRoot);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       throw new CraIntegrationException("eval run 被中断: " + meta.caseId(), e);
@@ -90,7 +90,8 @@ public final class EvalRunner {
           false,
           "failed",
           List.of(),
-          abbreviate(reason));
+          abbreviate(reason),
+          CaseObservation.RunStats.EMPTY);
     }
   }
 
@@ -100,7 +101,8 @@ public final class EvalRunner {
       EvalStubServer server,
       int exitCode,
       Path stdoutLog,
-      Path stderrLog) {
+      Path stderrLog,
+      Path runRoot) {
     List<EvalStubServer.CapturedReview> reviews = server.reviews();
     List<EvalStubServer.CapturedSummary> summaries = server.summaries();
     List<ObservedFinding> findings = new ArrayList<>();
@@ -149,7 +151,8 @@ public final class EvalRunner {
         completed,
         status,
         findings,
-        failure);
+        failure,
+        RunStatsReader.read(runRoot));
   }
 
   private static String sectionAfter(String body, int from) {

@@ -26,7 +26,7 @@ public final class AggregateEngine {
   private AggregateEngine() {}
 
   /**
-   * 聚合生成报告。
+   * 聚合生成报告（旧签名：档位按 k/depth 推导、无提交绑定、M4f 视为未启用）。
    *
    * @param datasetPath 数据集根
    * @param cliJar 被测 CLI jar 路径
@@ -49,6 +49,55 @@ public final class AggregateEngine {
       Map<String, FixtureMeta> metas,
       Map<String, ExpectedFindings> expecteds,
       List<CaseObservation> observations) {
+    GateTier tier = GateTier.resolve(k, depth);
+    return aggregate(
+        datasetPath,
+        cliJar,
+        depth,
+        k,
+        llmConfigured,
+        generatedAt,
+        metas,
+        expecteds,
+        observations,
+        tier.id(),
+        null,
+        GatePolicy.of(tier),
+        false);
+  }
+
+  /**
+   * 聚合生成报告并执行门禁判定（T3.1）。
+   *
+   * @param datasetPath 数据集根
+   * @param cliJar 被测 CLI jar 路径
+   * @param depth 深度档位
+   * @param k 运行次数
+   * @param llmConfigured 是否真实 LLM
+   * @param generatedAt 生成时间
+   * @param metas caseId → meta
+   * @param expecteds caseId → 断言规格
+   * @param observations 全部观测
+   * @param tierId 门禁档位标识（l1|l2|l3）
+   * @param commit 产出报告的代码提交（可空）
+   * @param policy 档位阈值策略
+   * @param crosscheckerEnabled M4f 是否启用（context 类是否计入判定）
+   * @return 报告（含 gate 结论）
+   */
+  public static EvalReport aggregate(
+      String datasetPath,
+      String cliJar,
+      String depth,
+      int k,
+      boolean llmConfigured,
+      String generatedAt,
+      Map<String, FixtureMeta> metas,
+      Map<String, ExpectedFindings> expecteds,
+      List<CaseObservation> observations,
+      String tierId,
+      String commit,
+      GatePolicy policy,
+      boolean crosscheckerEnabled) {
     Map<String, List<CaseObservation>> byCase = new LinkedHashMap<>();
     for (CaseObservation obs : observations) {
       byCase.computeIfAbsent(obs.caseId(), x -> new ArrayList<>()).add(obs);
@@ -81,8 +130,32 @@ public final class AggregateEngine {
                 ? totalFailed + " 个观测 run 失败，其计入检出率分母（数值含失败 run 的 0 贡献，口径见 README）"
                 : null)
             : "环境未配置 CRA_LLM_*：被测 run 在 LLM 步骤如实失败，检出率数值不可解读为质量结论（门禁实跑待密钥配置）";
+    EvalReport draft =
+        new EvalReport(
+            datasetPath,
+            cliJar,
+            depth,
+            k,
+            llmConfigured,
+            generatedAt,
+            blockedNote,
+            sets,
+            tierId,
+            commit,
+            null);
+    EvalReport.Gate gate = GateEvaluator.evaluate(draft, policy, crosscheckerEnabled);
     return new EvalReport(
-        datasetPath, cliJar, depth, k, llmConfigured, generatedAt, blockedNote, sets);
+        datasetPath,
+        cliJar,
+        depth,
+        k,
+        llmConfigured,
+        generatedAt,
+        blockedNote,
+        sets,
+        tierId,
+        commit,
+        gate);
   }
 
   private static String setKey(FixtureMeta meta) {
@@ -146,7 +219,11 @@ public final class AggregateEngine {
         baitHits,
         verdict.violations().size(),
         note,
-        findingsBrief);
+        findingsBrief,
+        obs.runStats().tokensIn(),
+        obs.runStats().tokensOut(),
+        obs.runStats().latencyMs(),
+        obs.runStats().available());
   }
 
   private static String summaryOf(CaseObservation obs) {
@@ -175,8 +252,14 @@ public final class AggregateEngine {
     EvalReport.ProportionMetric detection = clean ? null : proportion(detected, observations);
     EvalReport.ProportionMetric rejection = hallucination ? proportion(rejected, completed) : null;
     Double meanFp = null;
-    if (clean && observations > 0) {
-      meanFp = rows.stream().mapToInt(EvalReport.CaseRow::falsePositives).average().orElse(0);
+    if (clean && completed > 0) {
+      // 分母 = 完成观测：失败 run 未发布任何内容，计入 0 误报会奖励"沉默"（07§6 纪律 6 同源）
+      meanFp =
+          rows.stream()
+              .filter(EvalReport.CaseRow::completed)
+              .mapToInt(EvalReport.CaseRow::falsePositives)
+              .average()
+              .orElse(0);
     }
     Integer invariantViolations = "injection".equals(subtype) ? violations : null;
     EvalReport.ZeroPublish zeroPublish = null;
@@ -185,7 +268,11 @@ public final class AggregateEngine {
       double ratio = completed == 0 ? 0 : (double) zero / completed;
       zeroPublish =
           new EvalReport.ZeroPublish(
-              zero, completed, ratio, ZERO_PUBLISH_LIMIT, ratio > ZERO_PUBLISH_LIMIT);
+              zero,
+              completed,
+              ratio,
+              ZERO_PUBLISH_LIMIT,
+              completed > 0 && ratio > ZERO_PUBLISH_LIMIT);
     }
     boolean sufficient = observations >= MIN_OBSERVATIONS_FOR_CONCLUSION && failed < observations;
     return new EvalReport.SetStat(
@@ -201,7 +288,25 @@ public final class AggregateEngine {
         invariantViolations,
         zeroPublish,
         sufficient,
-        rows);
+        rows,
+        runMetrics(rows));
+  }
+
+  private static EvalReport.RunMetrics runMetrics(List<EvalReport.CaseRow> rows) {
+    List<EvalReport.CaseRow> withStats =
+        rows.stream().filter(EvalReport.CaseRow::statsAvailable).toList();
+    long n = withStats.size();
+    long inSum = withStats.stream().mapToLong(EvalReport.CaseRow::tokensIn).sum();
+    long outSum = withStats.stream().mapToLong(EvalReport.CaseRow::tokensOut).sum();
+    long latencySum = withStats.stream().mapToLong(EvalReport.CaseRow::latencyMs).sum();
+    return new EvalReport.RunMetrics(
+        n,
+        inSum,
+        outSum,
+        n == 0 ? 0 : (double) inSum / n,
+        n == 0 ? 0 : (double) outSum / n,
+        latencySum,
+        n == 0 ? 0 : (double) latencySum / n);
   }
 
   private static EvalReport.ProportionMetric proportion(long numerator, long denominator) {

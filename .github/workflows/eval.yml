@@ -29,11 +29,17 @@ on:
         required: false
         default: ''
       set:
-        description: '集合过滤（L2 基线/复核口径 = bad；空或 all = 全量）'
+        description: '集合过滤（L2 口径 = l2；L3 全量 = all；bad = 仅检出复核）'
         required: false
         default: 'all'
         type: choice
-        options: [all, bad, clean, adversarial, adv-injection, adv-hallucination, adv-refusal]
+        options: [all, l2, bad, clean, adversarial, adv-injection, adv-hallucination, adv-refusal]
+      tier:
+        description: '门禁档位（auto=按 k/depth 推导；L2 复核 = l2；L3 里程碑 = l3）'
+        required: false
+        default: 'auto'
+        type: choice
+        options: [auto, l1, l2, l3]
 
 permissions:
   contents: read
@@ -57,7 +63,7 @@ jobs:
             "https://github.com/${{ github.repository }}/releases/download/v0.1.0/dataset-snapshots-m1.tar"
           tar -xf /tmp/dataset-snapshots-m1.tar -C cra-eval/dataset
           find cra-eval/dataset -name repo_snapshot.tgz | wc -l
-      - name: 评测（集合/k/depth 可配：L2 复核 = set=bad,k=2,quick；L3 全量 = set=all,k=3,standard）
+      - name: 评测（集合/k/depth/tier 可配：L2 复核 = set=l2,k=2,quick,l2；L3 全量 = set=all,k=3,standard,l3）
         if: inputs.runs == 'all'
         env:
           CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
@@ -66,8 +72,10 @@ jobs:
         run: |
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set ${{ inputs.set }} --k ${{ inputs.k }} --depth ${{ inputs.depth }} \
+            --tier ${{ inputs.tier }} --commit "$GITHUB_SHA" --fail-on-red \
             ${{ inputs.cases != '' && format('--case {0}', inputs.cases) || '' }} \
             --work-dir cra-eval-work --json cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json \
+            --sha256-out cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json.sha256 \
             --timeout-sec 600
       - name: 对抗集 3 连（07§2 验收 6 / 07§3 验收 1+4：注入负向不变量与幻觉拒绝率）
         if: inputs.cases == '' && inputs.runs == 'all' && inputs.set == 'all'
@@ -80,6 +88,13 @@ jobs:
             --dataset cra-eval/dataset --set adversarial --k 3 --depth ${{ inputs.depth }} \
             --work-dir cra-eval-work-adv --json cra-eval-work-adv/report-adv-k3.json \
             --timeout-sec 600
+      - name: 记录报告哈希（验收证据；artifact 同时保留 .sha256 文件）
+        if: always()
+        run: |
+          for f in cra-eval-work/report-*.json; do
+            [ -f "$f" ] || continue
+            shasum -a 256 "$f" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
       - name: 上传评测工件
         if: always()
         uses: actions/upload-artifact@v4
@@ -87,6 +102,7 @@ jobs:
           name: eval-reports-${{ github.run_id }}
           path: |
             cra-eval-work/report-*.json
+            cra-eval-work/report-*.json.sha256
             cra-eval-work-adv/report-adv-k3.json
             cra-eval-work/cases/**/trace.ndjson
             cra-eval-work/cases/**/findings*.json

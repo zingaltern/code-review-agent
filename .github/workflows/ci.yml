@@ -32,3 +32,126 @@ jobs:
             echo "::error::CI 时长超过 10min——门禁事故，按 08§4 处置次序处理"
             exit 1
           fi
+
+  # L1 快检（04§2.4：对抗微型 fixture 子集 = 注入 3 + 幻觉 2，k=1 quick，~3min）。
+  # 判定 = 负向不变量零容忍 + 幻觉拒绝率 ≥80% + 固定子集完整性；seed 是 best-effort（04§2.4 v1.2.1），
+  # 不做输出快照全等。**红了不阻塞、只升级**：continue-on-error 让本 job 的红不直接定 PR 命运，
+  # eval-l2 依据 needs.eval-l1.result == 'failure' 进入复核。
+  eval-l1:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    env:
+      CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
+      CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
+      CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 记录开始时间
+        run: date +%s > /tmp/l1_start
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: 无密钥时跳过（fork PR 无 secrets——如实跳过，不伪装绿）
+        if: env.CRA_LLM_API_KEY == ''
+        run: echo "::warning::CRA_LLM_API_KEY 不可得（fork PR？）——L1 快检跳过，门禁不判定"
+      - name: 构建 CLI 与评测 jar
+        if: env.CRA_LLM_API_KEY != ''
+        run: mvn -B -ntp package -DskipTests -q
+      - name: 下载并解包数据集快照（release 资产，06§3 不入 git）
+        if: env.CRA_LLM_API_KEY != ''
+        run: |
+          curl -sfL -o /tmp/dataset-snapshots-m1.tar \
+            "https://github.com/${{ github.repository }}/releases/download/v0.1.0/dataset-snapshots-m1.tar"
+          tar -xf /tmp/dataset-snapshots-m1.tar -C cra-eval/dataset
+      - name: L1 快检（注入 3 + 幻觉 2，k=1 quick；红 → 退出码 5 → 升级 L2）
+        if: env.CRA_LLM_API_KEY != ''
+        run: |
+          java -jar cra-eval/target/cra-eval-0.1.0.jar run \
+            --dataset cra-eval/dataset --set adversarial \
+            --case adv-inj-01,adv-inj-02,adv-inj-03,adv-hal-01,adv-hal-02 \
+            --k 1 --depth quick --tier l1 --commit "$GITHUB_SHA" --fail-on-red \
+            --work-dir cra-eval-work-l1 --json cra-eval-work-l1/report-l1.json \
+            --sha256-out cra-eval-work-l1/report-l1.json.sha256 --timeout-sec 600
+      - name: 上传 L1 工件（红绿都留证据）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-l1-${{ github.run_id }}
+          path: |
+            cra-eval-work-l1/report-l1.json
+            cra-eval-work-l1/report-l1.json.sha256
+            cra-eval-work-l1/cases/**/trace.ndjson
+          if-no-files-found: warn
+      - name: 时长守护（>10min 即门禁事故，08§4）
+        if: always()
+        run: |
+          elapsed=$(( $(date +%s) - $(cat /tmp/l1_start) ))
+          echo "L1 elapsed: ${elapsed}s"
+          if [ "$elapsed" -gt 600 ]; then
+            echo "::error::L1 时长超过 10min——门禁事故，按 08§4 处置次序处理"
+            exit 1
+          fi
+
+  # L2 复核（04§2.4：本地跑 + CI 校验报告哈希，荣誉制——防篡改不防伪造）。
+  # 触发：L1 红（needs.eval-l1.result == 'failure'）或 prompt/模型/编排路径改动。
+  # **L1 红不阻塞、L2 也红才整体失败**：本 job 是最后裁决者；README 口径见 docs/04§2.4。
+  eval-l2:
+    needs: eval-l1
+    if: always() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 判定是否要求 L2（L1 红或 prompt/模型/编排改动）
+        id: require
+        run: |
+          set -euo pipefail
+          l1_red="false"
+          if [ "${{ needs.eval-l1.result }}" = "failure" ]; then l1_red="true"; fi
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          git fetch --depth=1 origin "$base_sha" || true
+          changed=$(git diff --name-only "$base_sha" HEAD || true)
+          prompt_changed="false"
+          if echo "$changed" | grep -Eq '^(cra-agents/src/main/resources/prompts/|cra-core/src/main/java/|cra-llm/src/main/java/|cra-runner-cli/src/main/java/org/cra/runner/cli/(LlmConfigFactory|LocalAppConfig)\.java)'; then
+            prompt_changed="true"
+          fi
+          echo "L1 结果: ${{ needs.eval-l1.result }}（红=$l1_red）；prompt/模型/编排改动=$prompt_changed"
+          if [ "$l1_red" = "true" ] || [ "$prompt_changed" = "true" ]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::L1 绿且无 prompt/模型/编排改动——L2 报告校验跳过"
+          fi
+      - name: 校验本地 L2 报告（存在性 + sha256 + 门禁绿 + commit 绑定）
+        if: steps.require.outputs.required == 'true'
+        run: |
+          set -euo pipefail
+          report="eval/l2/report.json"
+          hash="eval/l2/report.json.sha256"
+          if [ ! -f "$report" ] || [ ! -f "$hash" ]; then
+            echo "::error::L1 红或无 L2 报告——需本地跑 L2 并提交报告与哈希（04§2.4）："
+            echo "  cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \\"
+            echo "    --commit \$(git rev-parse HEAD) --fail-on-red \\"
+            echo "    --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256"
+            exit 1
+          fi
+          cd "${GITHUB_WORKSPACE}"
+          mvn -B -ntp -pl cra-eval -am package -DskipTests -q
+          java -jar cra-eval/target/cra-eval-0.1.0.jar verify \
+            --report "$report" --sha256-file "$hash" --tier l2 \
+            --expect-commit "${{ github.event.pull_request.head.sha }}"
+      - name: 上传校验记录
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-l2-verify-${{ github.run_id }}
+          path: |
+            eval/l2/report.json
+            eval/l2/report.json.sha256
+          if-no-files-found: warn

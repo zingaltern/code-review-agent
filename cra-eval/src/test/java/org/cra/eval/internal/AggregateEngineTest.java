@@ -245,4 +245,125 @@ class AggregateEngineTest {
     EvalReport.SetStat bad = report.sets().get(0);
     assertThat(bad.zeroPublish().red()).isTrue();
   }
+
+  @Test
+  void runMetricsAggregateOverObservationsWithTraceStats() {
+    CaseObservation measuredA =
+        new CaseObservation(
+            "bad-A",
+            "bad",
+            null,
+            0,
+            true,
+            "done",
+            List.of(new ObservedFinding(ObservedFinding.INLINE, "A.java", 10, "bug", "aaa")),
+            "",
+            new CaseObservation.RunStats(100_000, 10_000, 1_000, true));
+    CaseObservation measuredB =
+        new CaseObservation(
+            "bad-A",
+            "bad",
+            null,
+            1,
+            true,
+            "done",
+            List.of(new ObservedFinding(ObservedFinding.INLINE, "A.java", 10, "bug", "aaa")),
+            "",
+            new CaseObservation.RunStats(200_000, 20_000, 3_000, true));
+    CaseObservation noStats = obs("bad-A", "bad", null, true, List.of());
+    EvalReport report =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            2,
+            true,
+            Instant.now().toString(),
+            Map.of("bad-A", meta("bad-A", "bad", null)),
+            Map.of(
+                "bad-A",
+                new ExpectedFindings(
+                    1,
+                    List.of(new ExpectedFinding("A.java", 10, "bug", List.of("aaa"), "")),
+                    List.of())),
+            List.of(measuredA, measuredB, noStats));
+    EvalReport.SetStat bad = report.sets().get(0);
+    EvalReport.RunMetrics metrics = bad.runMetrics();
+    assertThat(metrics.observationsWithStats()).isEqualTo(2);
+    assertThat(metrics.tokensInSum()).isEqualTo(300_000);
+    assertThat(metrics.tokensOutSum()).isEqualTo(30_000);
+    assertThat(metrics.tokensInMean()).isCloseTo(150_000, within(1e-9));
+    assertThat(metrics.tokensOutMean()).isCloseTo(15_000, within(1e-9));
+    assertThat(metrics.latencyMsSum()).isEqualTo(4_000);
+    assertThat(metrics.latencyMsMean()).isCloseTo(2_000, within(1e-9));
+    assertThat(bad.cases().get(0).tokensIn()).isEqualTo(100_000);
+    assertThat(bad.cases().get(0).statsAvailable()).isTrue();
+    assertThat(bad.cases().get(2).statsAvailable()).isFalse();
+  }
+
+  @Test
+  void gateTierResolvesFromKAndDepthAndIsAttached() {
+    List<CaseObservation> observations = List.of(obs("bad-A", "bad", null, true, List.of()));
+    Map<String, FixtureMeta> metas = Map.of("bad-A", meta("bad-A", "bad", null));
+    Map<String, ExpectedFindings> expecteds =
+        Map.of("bad-A", new ExpectedFindings(1, List.of(), List.of()));
+    EvalReport l3 =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "standard",
+            3,
+            true,
+            Instant.now().toString(),
+            metas,
+            expecteds,
+            observations);
+    assertThat(l3.tier()).isEqualTo("l3");
+    assertThat(l3.gate()).isNotNull();
+    assertThat(l3.gate().tier()).isEqualTo("l3");
+    assertThat(l3.gate().checks()).extracting(EvalReport.GateCheck::id).contains("bad_detection");
+
+    EvalReport l2 =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            2,
+            true,
+            Instant.now().toString(),
+            metas,
+            expecteds,
+            observations);
+    assertThat(l2.tier()).isEqualTo("l2");
+  }
+
+  @Test
+  void cleanMeanFalsePositivesExcludesFailedRuns() {
+    CaseObservation completedWithFps =
+        obs(
+            "clean-A",
+            "clean",
+            null,
+            true,
+            List.of(
+                new ObservedFinding(ObservedFinding.INLINE, "A.java", 1, "convention", "x"),
+                new ObservedFinding(ObservedFinding.INLINE, "A.java", 2, "convention", "y")));
+    CaseObservation failed = obs("clean-B", "clean", null, false, List.of());
+    EvalReport report =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            1,
+            true,
+            Instant.now().toString(),
+            Map.of(
+                "clean-A", meta("clean-A", "clean", null),
+                "clean-B", meta("clean-B", "clean", null)),
+            Map.of(),
+            List.of(completedWithFps, failed));
+    EvalReport.SetStat clean = report.sets().get(0);
+    // 失败 run 不进误报均值分母（否则失败会"降低"误报，奖励沉默）
+    assertThat(clean.meanFalsePositives()).isCloseTo(2.0, within(1e-9));
+  }
 }

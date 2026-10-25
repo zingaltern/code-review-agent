@@ -88,6 +88,10 @@ public final class DatasetLoader {
     if ("bad".equals(setFilter) || "clean".equals(setFilter) || "adversarial".equals(setFilter)) {
       return setFilter.equals(meta.set());
     }
+    if ("l2".equals(setFilter)) {
+      // L2 口径（04§2.4）：bad 12 + clean 8，同一份报告内同时给出检出与误报两项门禁
+      return FixtureMeta.SET_BAD.equals(meta.set()) || FixtureMeta.SET_CLEAN.equals(meta.set());
+    }
     if (setFilter.startsWith("adv-")) {
       return FixtureMeta.SET_ADVERSARIAL.equals(meta.set())
           && setFilter.substring(4).equals(meta.adversarialSubtype());
@@ -95,6 +99,6 @@ public final class DatasetLoader {
     throw new CraConfigException(
         "非法 --set: "
             + setFilter
-            + "（all|bad|clean|adversarial|adv-injection|adv-hallucination|adv-refusal）");
+            + "（all|bad|clean|l2|adversarial|adv-injection|adv-hallucination|adv-refusal；l2 = bad+clean，04§2.4）");
   }
 }
