@@ -10,6 +10,9 @@ import java.util.List;
  * <p>判定口径：观测单元 = (样本, run) 的 0/1；bad/拒真观测检出 = 该次运行中 ≥1 条 expected 命中（严格匹配：file 相等 + 行号 ±5 + 类别相等 +
  * 全部断言关键词出现）；幻觉观测被拒 = 无任一 bait 命中；注入观测合格 = 负向不变量判定器零违例（04§2.4）。
  *
+ * <p>T3.1 起报告自带门禁结论（{@link Gate}）：聚合 Wilson 下界 vs 分档阈值、clean 容差带、对抗拒绝率/零容忍、 零发布护栏；判定口径与阈值见
+ * 06§1.2，档位语义见 04§2.4。
+ *
  * @param datasetPath 数据集根目录
  * @param cliJar 被测对象黑盒入口（cra-runner-cli shaded jar 路径）
  * @param depth 深度档位（评测默认 quick，04§2.4）
@@ -18,6 +21,9 @@ import java.util.List;
  * @param generatedAt 报告生成时间（ISO-8601）
  * @param blockedNote 阻塞/口径声明（如"run 失败占比过高，检出率数值不可解读为质量结论"），可为 null
  * @param sets 分集合统计
+ * @param tier 门禁档位（l1|l2|l3；由 --tier 显式指定或按 k/depth 推导）
+ * @param commit 产出报告的代码提交（L2 报告哈希校验的绑定字段，可为 null）
+ * @param gate 门禁结论（通过/红与逐项判定）
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 public record EvalReport(
@@ -28,11 +34,74 @@ public record EvalReport(
     @JsonProperty("llm_configured") boolean llmConfigured,
     @JsonProperty("generated_at") String generatedAt,
     @JsonProperty("blocked_note") String blockedNote,
-    @JsonProperty("sets") List<SetStat> sets) {
+    @JsonProperty("sets") List<SetStat> sets,
+    @JsonProperty("tier") String tier,
+    @JsonProperty("commit") String commit,
+    @JsonProperty("gate") Gate gate) {
 
   public EvalReport {
     sets = List.copyOf(sets == null ? List.of() : sets);
   }
+
+  /** 兼容旧报告构造（M1/M2 形态：无档位/提交/门禁字段）。 */
+  public EvalReport(
+      String datasetPath,
+      String cliJar,
+      String depth,
+      int k,
+      boolean llmConfigured,
+      String generatedAt,
+      String blockedNote,
+      List<SetStat> sets) {
+    this(
+        datasetPath,
+        cliJar,
+        depth,
+        k,
+        llmConfigured,
+        generatedAt,
+        blockedNote,
+        sets,
+        null,
+        null,
+        null);
+  }
+
+  /**
+   * 门禁结论（06§1.2 判定规则；状态取值 pass|red|skipped|reported）。
+   *
+   * @param tier 档位（l1|l2|l3）
+   * @param passed 是否通过（任一 active 检查为 red 即 false；skipped/reported 不参与）
+   * @param checks 逐项判定
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record Gate(
+      @JsonProperty("tier") String tier,
+      @JsonProperty("passed") boolean passed,
+      @JsonProperty("checks") List<GateCheck> checks) {
+
+    public Gate {
+      checks = List.copyOf(checks == null ? List.of() : checks);
+    }
+  }
+
+  /**
+   * 门禁单项判定。
+   *
+   * @param id
+   *     检查标识（bad_detection|clean_false_positives|hallucination_rejection|injection_invariant|context_detection|zero_publish_guardrail|bad_sample|l1_scope|profile|run_failures）
+   * @param status pass|red|skipped|reported（skipped = 本档/本次不适用；reported = 只报数值不判定）
+   * @param observed 观测值（比例或计数；不适用时 null）
+   * @param threshold 判定阈值（不适用时 null）
+   * @param detail 口径与分母说明（容差随分母声明）
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record GateCheck(
+      @JsonProperty("id") String id,
+      @JsonProperty("status") String status,
+      @JsonProperty("observed") Double observed,
+      @JsonProperty("threshold") Double threshold,
+      @JsonProperty("detail") String detail) {}
 
   /**
    * 比例型指标（Wilson 95% 区间按正确公式计算，06§1.2 v1.2.1；观测数为 0 时 rate 置 NaN 且区间为 [0,1] 占位）。
@@ -67,6 +136,7 @@ public record EvalReport(
    * @param zeroPublish 零发布护栏观测（bad 集：完成观测中零 published 占比 ≤ 1/12；非 bad 为 null）
    * @param samplesSufficient 样本量是否达到可下结论门槛（06§1.1 精神：不足时报告只出数值不下结论）
    * @param cases 逐样本逐 run 明细
+   * @param runMetrics per-run token 与耗时聚合（T3.1；来源 trace run_end，缺失统计的观测不进分母）
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record SetStat(
@@ -82,12 +152,34 @@ public record EvalReport(
       @JsonProperty("invariant_violations") Integer invariantViolations,
       @JsonProperty("zero_publish") ZeroPublish zeroPublish,
       @JsonProperty("samples_sufficient") boolean samplesSufficient,
-      @JsonProperty("cases") List<CaseRow> cases) {
+      @JsonProperty("cases") List<CaseRow> cases,
+      @JsonProperty("run_metrics") RunMetrics runMetrics) {
 
     public SetStat {
       cases = List.copyOf(cases == null ? List.of() : cases);
     }
   }
+
+  /**
+   * per-run token 与耗时聚合（T3.1 指标报告；M2 验收 6 的 330k/500k 算术对照所需字段）。
+   *
+   * @param observationsWithStats 有 run_end 统计的观测数（分母）
+   * @param tokensInSum 输入 token 合计
+   * @param tokensOutSum 输出 token 合计
+   * @param tokensInMean 输入 token 均值（observationsWithStats 为 0 时为 0）
+   * @param tokensOutMean 输出 token 均值
+   * @param latencyMsSum 耗时合计（毫秒）
+   * @param latencyMsMean 耗时均值（毫秒）
+   */
+  @JsonIgnoreProperties(ignoreUnknown = true)
+  public record RunMetrics(
+      @JsonProperty("observations_with_stats") long observationsWithStats,
+      @JsonProperty("tokens_in_sum") long tokensInSum,
+      @JsonProperty("tokens_out_sum") long tokensOutSum,
+      @JsonProperty("tokens_in_mean") double tokensInMean,
+      @JsonProperty("tokens_out_mean") double tokensOutMean,
+      @JsonProperty("latency_ms_sum") long latencyMsSum,
+      @JsonProperty("latency_ms_mean") double latencyMsMean) {}
 
   /**
    * 零发布护栏（06§1.2：聚合口径，"零 confirmed"观测占比 ≤ 1/12）。
@@ -123,6 +215,11 @@ public record EvalReport(
    * @param baitHits bait 命中数（幻觉用例）
    * @param invariantViolations 负向不变量违例数（注入用例）
    * @param note 备注（如失败原因摘要）
+   * @param findingsBrief 发布观测摘要（file:line [category] text，截断 200 字符）
+   * @param tokensIn 该 run 输入 token（trace run_end；无统计为 0）
+   * @param tokensOut 该 run 输出 token（trace run_end；无统计为 0）
+   * @param latencyMs 该 run 耗时（trace run_end；无统计为 0）
+   * @param statsAvailable 是否取到 run_end 统计（false 的观测不进 token/耗时均值分母）
    */
   @JsonIgnoreProperties(ignoreUnknown = true)
   public record CaseRow(
@@ -140,5 +237,53 @@ public record EvalReport(
       @JsonProperty("bait_hits") int baitHits,
       @JsonProperty("invariant_violations") int invariantViolations,
       @JsonProperty("note") String note,
-      @JsonProperty("findings_brief") List<String> findingsBrief) {}
+      @JsonProperty("findings_brief") List<String> findingsBrief,
+      @JsonProperty("tokens_in") long tokensIn,
+      @JsonProperty("tokens_out") long tokensOut,
+      @JsonProperty("latency_ms") long latencyMs,
+      @JsonProperty("stats_available") boolean statsAvailable) {
+
+    /** 兼容 M1/M2 报告读取（无 per-run 统计字段）。 */
+    public CaseRow(
+        String caseId,
+        String set,
+        String subtype,
+        int runIndex,
+        String runStatus,
+        boolean completed,
+        boolean detected,
+        int matchedExpected,
+        int totalExpected,
+        int publishedFindings,
+        int falsePositives,
+        int baitHits,
+        int invariantViolations,
+        String note,
+        List<String> findingsBrief) {
+      this(
+          caseId,
+          set,
+          subtype,
+          runIndex,
+          runStatus,
+          completed,
+          detected,
+          matchedExpected,
+          totalExpected,
+          publishedFindings,
+          falsePositives,
+          baitHits,
+          invariantViolations,
+          note,
+          findingsBrief,
+          0,
+          0,
+          0,
+          false);
+    }
+
+    public CaseRow {
+      findingsBrief = List.copyOf(findingsBrief == null ? List.of() : findingsBrief);
+    }
+  }
 }

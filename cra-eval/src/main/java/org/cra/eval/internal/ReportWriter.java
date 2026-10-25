@@ -39,8 +39,14 @@ public final class ReportWriter {
             + report.k()
             + "  llm_configured: "
             + report.llmConfigured());
+    if (report.commit() != null) {
+      OUT.println("代码提交: " + report.commit());
+    }
     if (report.blockedNote() != null && !report.blockedNote().isBlank()) {
       OUT.println("⚠ " + report.blockedNote());
+    }
+    if (report.gate() != null) {
+      renderGate(report.gate());
     }
     for (EvalReport.SetStat s : report.sets()) {
       OUT.println();
@@ -80,7 +86,21 @@ public final class ReportWriter {
             r.wilsonHigh());
       }
       if (s.meanFalsePositives() != null) {
-        OUT.printf(Locale.ROOT, "每 run 平均误报 %.2f 条%n", s.meanFalsePositives());
+        OUT.printf(
+            Locale.ROOT, "每 run 平均误报 %.2f 条（分母 %d 个完成观测）%n", s.meanFalsePositives(), s.completed());
+      }
+      if (s.runMetrics() != null && s.runMetrics().observationsWithStats() > 0) {
+        EvalReport.RunMetrics m = s.runMetrics();
+        OUT.printf(
+            Locale.ROOT,
+            "run 统计（%d 个观测有 run_end 记录）: tokens_in sum=%d mean=%.0f  tokens_out sum=%d mean=%.0f"
+                + "  latency mean=%.0fms%n",
+            m.observationsWithStats(),
+            m.tokensInSum(),
+            m.tokensInMean(),
+            m.tokensOutSum(),
+            m.tokensOutMean(),
+            m.latencyMsMean());
       }
       if (s.invariantViolations() != null) {
         OUT.println(
@@ -135,6 +155,14 @@ public final class ReportWriter {
       return "集合 " + s.set();
     }
     return "集合 " + s.set() + "/" + s.subtype();
+  }
+
+  static void renderGate(EvalReport.Gate gate) {
+    OUT.println();
+    OUT.println("门禁: " + (gate.passed() ? "绿" : "红") + "（tier=" + gate.tier() + "，06§1.2）");
+    for (EvalReport.GateCheck c : gate.checks()) {
+      OUT.println("  [" + c.status() + "] " + c.id() + " — " + c.detail());
+    }
   }
 
   /**

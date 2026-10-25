@@ -90,6 +90,7 @@ class DatasetLoaderTest {
     Files.createDirectories(root.resolve("bad/broken"));
     assertThat(DatasetLoader.listCases(root, "bad")).hasSize(2);
     assertThat(DatasetLoader.listCases(root, "clean")).hasSize(1);
+    assertThat(DatasetLoader.listCases(root, "l2")).hasSize(3); // L2 口径 = bad + clean（04§2.4）
     assertThat(DatasetLoader.listCases(root, null)).hasSize(3);
     assertThat(DatasetLoader.listCases(root, "all")).hasSize(3);
     assertThatThrownBy(() -> DatasetLoader.listCases(root, "nope"))

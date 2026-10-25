@@ -229,6 +229,27 @@ cra-eval report --repo zingaltern/code-review-agent --since 7d
 
 退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）；**`4` 本地 pre-PR 实跑构建/测试失败**（v1.3.2 撞墙定点修订：v1 基线只定义了 0/2/3，而 07 T2.10 验收 8 要求"报告如实展示测试失败输出且退出码非零"——需一个区别于"工具自身故障"的确定性信号。优先级高于评审结论：构建失败时评审照常运行、结果入报告，但退出码恒为 4）。
 
+### 3.1 cra-eval 评测命令契约（T3.1/T3.3 落地，2026-10-25）
+
+```bash
+# 评测运行（本地/CI 通用）。--set l2 = bad 12 + clean 8（04§2.4 的 L2 口径），
+# --tier 缺省 auto：k≥3 或 depth=standard → l3，k≥2 → l2，否则 l1。
+cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
+  --commit "$(git rev-parse HEAD)" --fail-on-red \
+  --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256
+
+# 报告校验（CI 的 L2 门禁：哈希 + 门禁结论为绿 + commit 绑定；荣誉制，04§2.4）
+cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.sha256 \
+  --tier l2 --expect-commit "$PR_HEAD_SHA"
+
+# 离线重判（阈值/检查项变更后用同一批观测重算门禁；不重跑 LLM）
+cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256-out PATH]
+```
+
+`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` 或 `--sha256-file <path>`（二选一）、`--tier`、`--expect-commit`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
+
+退出码：`0` 正常完成或 verify/gate 通过；`2` 自身故障（参数/数据集/被测对象启动失败）；**`5` 门禁红或 verify 校验失败**（`--fail-on-red` / `gate` 生效时；CI 的 L1/L2 job 以此判定，04§2.4）。门禁结论同时写入 JSON 报告的 `gate` 字段（`passed` + 逐项 `checks`），文本报告头部输出同一结论。`gate` 重判不修改源报告；`--json-out` 另行落盘重判结果（含新 gate 与哈希），用于阈值变更后的取证（评测重跑范围纪律：只重判、不整轮重跑）。
+
 ## 4. GitHub Actions 集成（v1.2：draft 过滤 + 分发方案 + 限制声明）
 
 **已知平台限制（显式声明，见 02§5 触发边界表）**：冲突 PR（mergeable=conflicting）的 `pull_request` workflow **不触发**（GitHub 官方行为）——该场景静默无评审，冲突解决后的 synchronize 会正常触发；fork PR 无 secrets 访问（当前个人仓库无碍，多协作者时引入 App token）。
