@@ -246,7 +246,7 @@ cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.s
 cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256-out PATH]
 ```
 
-`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` 或 `--sha256-file <path>`（二选一）、`--tier`、`--expect-commit`。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
+`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` 或 `--sha256-file <path>`（二选一）、`--tier`、`--expect-commit`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
 
 退出码：`0` 正常完成或 verify/gate 通过；`2` 自身故障（参数/数据集/被测对象启动失败）；**`5` 门禁红或 verify 校验失败**（`--fail-on-red` / `gate` 生效时；CI 的 L1/L2 job 以此判定，04§2.4）。门禁结论同时写入 JSON 报告的 `gate` 字段（`passed` + 逐项 `checks`），文本报告头部输出同一结论。`gate` 重判不修改源报告；`--json-out` 另行落盘重判结果（含新 gate 与哈希），用于阈值变更后的取证（评测重跑范围纪律：只重判、不整轮重跑）。
 

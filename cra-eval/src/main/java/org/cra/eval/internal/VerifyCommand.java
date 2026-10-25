@@ -57,23 +57,28 @@ public final class VerifyCommand {
     }
 
     EvalReport report = Json.read(reportPath, EvalReport.class, "评测报告");
-    EvalReport.Gate gate = report.gate();
-    if (gate == null) {
-      failures.add("报告缺少 gate 结论（旧版报告不可用于门禁）");
-    } else {
-      lines.add(
-          String.format(Locale.ROOT, "门禁: %s（tier=%s）", gate.passed() ? "绿" : "红", gate.tier()));
-      if (!gate.passed()) {
-        for (EvalReport.GateCheck c : gate.checks()) {
-          if (GateEvaluator.RED.equals(c.status())) {
-            lines.add("  [红] " + c.id() + " — " + c.detail());
-          }
+    EvalReport.Gate stored = report.gate();
+    GateTier tier =
+        args.tier() != null && !args.tier().isBlank()
+            ? GateTier.parse(args.tier(), report.k(), report.depth())
+            : stored != null && stored.tier() != null
+                ? GateTier.parse(stored.tier(), report.k(), report.depth())
+                : GateTier.resolve(report.k(), report.depth());
+    // 按**当前**阈值重算：报告是数据产物、门禁是策略——阈值变更后旧报告不得凭陈旧 gate 通过
+    EvalReport.Gate gate = GateEvaluator.evaluate(report, GatePolicy.of(tier), false);
+    lines.add(
+        String.format(
+            Locale.ROOT, "门禁: %s（tier=%s；按当前阈值重算）", gate.passed() ? "绿" : "红", gate.tier()));
+    if (stored != null && stored.passed() != gate.passed()) {
+      lines.add("（存量 gate=" + (stored.passed() ? "绿" : "红") + "，与当前阈值判定不一致——以重算结果为准，报告产出于旧阈值）");
+    }
+    if (!gate.passed()) {
+      for (EvalReport.GateCheck c : gate.checks()) {
+        if (GateEvaluator.RED.equals(c.status())) {
+          lines.add("  [红] " + c.id() + " — " + c.detail());
         }
-        failures.add("报告门禁结论为红");
       }
-      if (args.tier() != null && !args.tier().isBlank() && !args.tier().equals(gate.tier())) {
-        failures.add("报告档位 " + gate.tier() + " ≠ 要求档位 " + args.tier());
-      }
+      failures.add("报告门禁结论为红");
     }
     if (args.expectCommit() != null && !args.expectCommit().isBlank()) {
       String commit = report.commit();
