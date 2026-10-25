@@ -64,6 +64,20 @@ public interface GitPlatformAdapter {
   CommentLedger fetchBotComments(RepoRef repo, int prNumber);
 
   /**
+   * 编辑 Summary issue comment 正文（05§2.2/§2.3：PATCH /repos/{o}/{r}/issues/comments/{id}，issue comment
+   * 可编辑而 PR review body 不可）。两个消费方：过期收尾（02§5 加取代前缀）与幂等闸命中后的 Summary 处置。平台不支持评论编辑时以
+   * UnsupportedOperationException 拒绝（不可得语义，11§4 第 5 条）， 调用方按降级处置。
+   *
+   * @param repo 仓库引用
+   * @param prNumber PR 编号（URL 路径含 PR 便于校验）
+   * @param commentId Summary issue comment id
+   * @param body 编辑后的完整正文（整包替换语义，非增量）
+   */
+  default void updateSummaryComment(RepoRef repo, int prNumber, long commentId, String body) {
+    throw new UnsupportedOperationException("comment editing unsupported by this adapter");
+  }
+
+  /**
    * 拉取处置信号（06§1.1 周报数据面；M0 不采，返回空数组——不可得语义，11§4 第 5 条）。
    *
    * @param repo 仓库引用

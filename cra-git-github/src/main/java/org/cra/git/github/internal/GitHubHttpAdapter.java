@@ -254,6 +254,23 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     }
   }
 
+  @Override
+  public void updateSummaryComment(RepoRef repo, int prNumber, long commentId, String body) {
+    // 过期收尾（02§5）：PATCH issue comments 端点（05§2.3 端点清单），issue comment 可编辑而
+    // PR review body 不可。失败以 CraIntegrationException 上抛，调用方按降级处置（run 已完整发布，
+    // 收尾失败不回滚完成标记）
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("body", body);
+    String path = "/repos/" + repo.owner() + "/" + repo.repo() + "/issues/comments/" + commentId;
+    HttpRequest request =
+        request(path)
+            .header("Accept", "application/vnd.github+json")
+            .header("Content-Type", "application/json")
+            .method("PATCH", HttpRequest.BodyPublishers.ofString(payload.toString()))
+            .build();
+    execute(request, path);
+  }
+
   private record PostedReview(String reviewId, List<Long> commentIds) {}
 
   // ---------- 账本：bot 评论 + 标记解析（05§1.3） ----------

@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.SplittableRandom;
 import java.util.stream.Collectors;
 import org.cra.agents.api.AgentBrief;
@@ -24,12 +23,14 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
+import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
 import org.cra.common.git.RepoRef;
+import org.cra.common.git.ReviewItemResult;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
@@ -44,7 +45,8 @@ import org.cra.store.api.ReviewLedger;
  *
  * <ul>
  *   <li>第一道闸：commit 级幂等，只认账本中该 commit 的 DONE/DEGRADED 完成标记（02§4.1）；
- *   <li>第二道闸：指纹级 exact 去重（滑窗容错随 M1）——发布中途掐断的 run 无完成标记，重跑按 指纹补发缺失条目、已发布不重发（07§1 验收 3）；
+ *   <li>第二道闸：指纹级去重 exact → ±5 滑窗容错 → possible_duplicate 入 trace（02§4.1，{@link
+ *       FingerprintDeduper}）——发布中途掐断的 run 无完成标记，重跑按 指纹补发缺失条目、已发布不重发（07§1 验收 3）；
  *   <li>发布顺序：inline review → Summary issue comment（05§2.2）；锚定校验位置非法降级进 Summary（05§2.2）；正文 {@code
  *       <!--} 全量转义、标记行最后追加（05§1.3 规则 3）；
  *   <li>dry-run 全程零写（05§6）；run 级故障统一捕获落盘 FAILED（02§4.2）；trace 事件先行 （07§6.5）。
@@ -57,6 +59,12 @@ public final class ReviewPipeline implements Orchestrator {
   private static final SplittableRandom RANDOM = new SplittableRandom();
   private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
   private static final String MARKER_VERSION = "2.1";
+
+  /** 过期收尾前缀的判定起点（02§5：[已被 run_xxx 取代]；已收尾的评论不再叠加前缀）。 */
+  private static final String SUPERSEDED_PREFIX = "[已被 run_";
+
+  /** 可疑账本标记的 Summary 告警阈值（05§1.3 规则 2：同一 PR ≥3 次疑似注入尝试）。 */
+  private static final int LEDGER_SUSPECT_THRESHOLD = 3;
 
   private final GitPlatformAdapter adapter;
   private final ReviewLedger ledger;
@@ -92,7 +100,8 @@ public final class ReviewPipeline implements Orchestrator {
               "head", request.headSha(),
               "dry_run", request.dryRun()));
 
-      // 第一道闸：commit 级幂等（02§4.1，只认完整发布；M0 全量跳过不更新 Summary，收尾随 T1.2）
+      // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
+      // 保持历史原样，避免 CI 重跑反复 PATCH 旧评论；更新语义如有需要随流水线线统一加）
       Optional<LedgerRunMarker> completion =
           ledger.findCompletion(request.prNumber(), request.headSha());
       trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
@@ -110,11 +119,25 @@ public final class ReviewPipeline implements Orchestrator {
                 + "），全量跳过");
       }
 
-      // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）
-      Set<String> knownFingerprints =
-          ledger.publishedFindings(request.prNumber()).stream()
-              .map(LedgerFindingMarker::fingerprint)
-              .collect(Collectors.toSet());
+      // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）+ 账本解析分层（05§1.3 规则 5）
+      List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.prNumber());
+      List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.prNumber());
+      int suspectCount = ledger.suspectMarkerCount(request.prNumber());
+      boolean anyValidMarker = !publishedMarkers.isEmpty() || !completedRuns.isEmpty();
+      trace.emit(
+          "ledger_parse",
+          Map.of(
+              "valid",
+              publishedMarkers.size() + completedRuns.size(),
+              "suspect",
+              suspectCount,
+              "fallback",
+              anyValidMarker ? "none" : "commit-gate"));
+      // 规则 2（05§1.3）：可疑标记 ≥3 时 Summary 告警疑似注入尝试
+      String suspectWarning =
+          suspectCount >= LEDGER_SUSPECT_THRESHOLD
+              ? "检测到 " + suspectCount + " 个可疑账本标记（LEDGER_SUSPECT），疑似注入尝试"
+              : "";
 
       // assemble（L0：diff + 变更说明；L1 窗口/REVIEW.md 随 T1.3/T1.4 接入）
       DiffResult diff =
@@ -169,25 +192,50 @@ public final class ReviewPipeline implements Orchestrator {
         degraded = true;
       }
 
-      // 去重（指纹 exact）+ 锚定校验（05§2.2）
+      // 去重（指纹 exact → ±5 滑窗 → possible_duplicate，02§4.1）+ 锚定校验（05§2.2）
       List<ScoredFinding> publishable = new ArrayList<>();
       int skippedDuplicate = 0;
-      Map<String, String> fileCache = new HashMap<>();
+      Map<String, Optional<String>> contentCache = new HashMap<>();
       for (CandidateFinding finding : outcome.findings()) {
-        String fingerprint = fingerprintOf(finding, request, fileCache);
-        if (knownFingerprints.contains(fingerprint)) {
+        List<String> lines =
+            contentOf(finding.file(), request.headSha(), request, contentCache)
+                .map(text -> List.of(text.split("\n", -1)))
+                .orElse(List.of(""));
+        FingerprintDeduper.Decision decision =
+            FingerprintDeduper.evaluate(
+                finding.file(),
+                categoryOf(finding),
+                finding.line(),
+                lines,
+                publishedMarkers,
+                marker -> oldAnchorHashOf(marker, request, contentCache));
+        String matchValue =
+            switch (decision.match()) {
+              case EXACT -> "exact";
+              case SLIDING_WINDOW -> "sliding-window";
+              case NONE -> decision.possibleDuplicate() ? "possible_duplicate" : "none";
+            };
+        trace.emit("dedup", Map.of("finding_id", finding.id(), "match", matchValue));
+        if (decision.match() != FingerprintDeduper.Match.NONE) {
           skippedDuplicate++;
-          trace.emit("dedup", Map.of("finding_id", finding.id(), "match", "exact"));
           continue;
         }
         AnchorStatus anchor = anchorStatus(diff, finding);
         trace.emit("anchor_check", Map.of("finding_id", finding.id(), "status", anchor.name()));
-        publishable.add(new ScoredFinding(finding, fingerprint, anchor));
+        publishable.add(new ScoredFinding(finding, decision.fingerprint(), anchor));
       }
 
       // publish（dry-run 零写）；重试类事件入 stats 但不降级——降级语义 = 未按预期完整发布
       int publishedCount =
-          publish(request, runId, trace, publishable, skippedDuplicate, degradations);
+          publish(
+              request,
+              runId,
+              trace,
+              publishable,
+              skippedDuplicate,
+              degradations,
+              degraded,
+              suspectWarning);
       int fallbackCount =
           (int)
               publishable.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).count();
@@ -263,7 +311,9 @@ public final class ReviewPipeline implements Orchestrator {
       TraceWriter trace,
       List<ScoredFinding> publishable,
       int skippedDuplicate,
-      List<String> degradations) {
+      List<String> degradations,
+      boolean degraded,
+      String suspectWarning) {
     List<ScoredFinding> fallbacks =
         publishable.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList();
     List<InlineComment> inline =
@@ -279,9 +329,17 @@ public final class ReviewPipeline implements Orchestrator {
                         s.finding().id()))
             .toList();
     String summaryBody =
-        summaryBody(request, runId, publishable, fallbacks, skippedDuplicate, degradations);
+        summaryBody(
+            request,
+            runId,
+            publishable,
+            fallbacks,
+            skippedDuplicate,
+            degradations,
+            degraded,
+            suspectWarning);
     if (request.dryRun()) {
-      // dry-run：全程零写（05§6），发布器不触达 adapter
+      // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧
       trace.emit(
           "publish",
           Map.of(
@@ -337,7 +395,111 @@ public final class ReviewPipeline implements Orchestrator {
             0,
             "done_marker",
             result.summaryCommentId().isPresent()));
+    if (result.summaryCommentId().isEmpty()) {
+      // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾，重跑走指纹级补发（02§4.1）
+      return (int) (publishedActual + fallbackActual);
+    }
+    recordToLedger(request, runId, publishable, result, skippedDuplicate, degraded);
+    int supersedeFailures = supersedePreviousSummaries(request, runId, trace);
+    if (supersedeFailures > 0) {
+      degradations.add("summary-supersede-failed:x" + supersedeFailures);
+    }
     return (int) (publishedActual + fallbackActual);
+  }
+
+  // ---------- 账本写侧与过期收尾（02§5） ----------
+
+  /**
+   * 发布成功后账本化登记：完成标记 + 全部应发 finding（含 Summary 降级条目 commentId=0）。GitHub 形态 下为无操作（标记已内嵌评论）；SQLite
+   * 形态由此获得幂等闸与补发的事实源（02§4.1/05§1.5）。
+   */
+  private void recordToLedger(
+      ReviewRequest request,
+      String runId,
+      List<ScoredFinding> publishable,
+      PrReviewResult result,
+      int skippedDuplicate,
+      boolean degraded) {
+    String status = degraded ? LedgerRunMarker.STATUS_DEGRADED : LedgerRunMarker.STATUS_DONE;
+    long summaryCommentId = result.summaryCommentId().orElseThrow();
+    ledger.recordRunCompletion(
+        request.prNumber(),
+        new LedgerRunMarker(
+            runId,
+            request.headSha(),
+            status,
+            publishable.size(),
+            skippedDuplicate,
+            summaryCommentId));
+    Map<String, Long> commentIds =
+        result.items().stream()
+            .filter(i -> i.commentId() != null)
+            .collect(
+                Collectors.toMap(
+                    ReviewItemResult::findingId, ReviewItemResult::commentId, (a, b) -> a));
+    for (ScoredFinding s : publishable) {
+      ledger.recordPublishedFinding(
+          request.prNumber(),
+          new LedgerFindingMarker(
+              s.fingerprint(),
+              s.finding().file(),
+              s.finding().line(),
+              categoryOf(s.finding()),
+              s.finding().id(),
+              runId,
+              request.headSha(),
+              commentIds.getOrDefault(s.finding().id(), 0L)));
+    }
+  }
+
+  /**
+   * 过期收尾（02§5）：新 run 发布成功后，对同 PR 旧 head_sha 的 bot Summary issue comment 加前缀 {@code [已被 run_xxx
+   * 取代]}（PATCH 端点，inline 评论不删——GitHub 自动标 outdated，处置采集依赖其在）。 幂等：已带取代前缀的不再叠加；body 不可得（SQLite 形态）或
+   * PATCH 失败只入 trace/degradation， 不回滚完成标记（run 已完整发布）。
+   *
+   * @return PATCH 失败次数
+   */
+  private int supersedePreviousSummaries(ReviewRequest request, String runId, TraceWriter trace) {
+    int failures = 0;
+    for (LedgerRunMarker old : ledger.completedRuns(request.prNumber())) {
+      if (old.commitSha().equalsIgnoreCase(request.headSha()) || old.commentId() <= 0) {
+        continue;
+      }
+      String body =
+          ledger.comment(request.prNumber(), old.commentId()).map(LedgerComment::body).orElse(null);
+      if (body == null) {
+        trace.emit(
+            "summary_supersede", Map.of("comment_id", old.commentId(), "status", "unavailable"));
+        continue;
+      }
+      if (body.startsWith(SUPERSEDED_PREFIX)) {
+        trace.emit("summary_supersede", Map.of("comment_id", old.commentId(), "status", "skipped"));
+        continue;
+      }
+      try {
+        adapter.updateSummaryComment(
+            new RepoRef(request.repoOwner(), request.repoName()),
+            request.prNumber(),
+            old.commentId(),
+            "[已被 " + runId + " 取代]\n\n" + body);
+        trace.emit(
+            "summary_supersede",
+            Map.of("comment_id", old.commentId(), "status", "patched", "superseded_by", runId));
+      } catch (RuntimeException e) {
+        // 收尾失败不回滚完成标记（降级写状态，09§4）；次数计入 stats 供 Summary/健康度可见
+        trace.emit(
+            "summary_supersede",
+            Map.of(
+                "comment_id",
+                old.commentId(),
+                "status",
+                "failed",
+                "error",
+                String.valueOf(e.getMessage())));
+        failures++;
+      }
+    }
+    return failures;
   }
 
   // ---------- 组装：inline 评论与 Summary 正文 ----------
@@ -387,7 +549,9 @@ public final class ReviewPipeline implements Orchestrator {
       List<ScoredFinding> publishable,
       List<ScoredFinding> fallbacks,
       int skippedDuplicate,
-      List<String> degradations) {
+      List<String> degradations,
+      boolean degraded,
+      String suspectWarning) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
     body.append("变更：PR #")
@@ -397,6 +561,10 @@ public final class ReviewPipeline implements Orchestrator {
         .append("..")
         .append(shortSha(request.headSha()))
         .append("\n\n");
+    if (!suspectWarning.isEmpty()) {
+      // 05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试
+      body.append("> ⚠️ ").append(suspectWarning).append("\n\n");
+    }
     List<ScoredFinding> important = bySeverity(publishable, Severity.IMPORTANT);
     List<ScoredFinding> nits = bySeverity(publishable, Severity.NIT);
     if (important.isEmpty() && nits.isEmpty() && fallbacks.isEmpty()) {
@@ -444,7 +612,7 @@ public final class ReviewPipeline implements Orchestrator {
     if (!degradations.isEmpty()) {
       body.append("- 降级事件：").append(String.join("、", degradations)).append("\n");
     }
-    // run 完成标记（05§1.3）：DEGRADED 也是完整发布（02§4.1）
+    // run 完成标记（05§1.3）：DEGRADED 也是完整发布（02§4.1）；suppressed = 指纹抑制计数
     body.append("\n<!-- cra:v=")
         .append(MARKER_VERSION)
         .append(" | run=")
@@ -452,10 +620,12 @@ public final class ReviewPipeline implements Orchestrator {
         .append(" | commit=")
         .append(request.headSha())
         .append(" | status=")
-        .append(degradations.contains("schema-violation-all-dropped") ? "DEGRADED" : "DONE")
+        .append(degraded ? "DEGRADED" : "DONE")
         .append(" | findings=")
         .append(publishable.size())
-        .append(" | suppressed=0 -->");
+        .append(" | suppressed=")
+        .append(skippedDuplicate)
+        .append(" -->");
     return body.toString();
   }
 
@@ -471,28 +641,39 @@ public final class ReviewPipeline implements Orchestrator {
 
   // ---------- 去重与锚定 ----------
 
-  private String fingerprintOf(
-      CandidateFinding finding, ReviewRequest request, Map<String, String> fileCache) {
-    String content =
-        fileCache.computeIfAbsent(
-            finding.file(),
-            p -> {
-              try {
-                FileContent file =
-                    adapter.readFile(
-                        new RepoRef(request.repoOwner(), request.repoName()), request.headSha(), p);
-                return file.binary() ? "" : file.text();
-              } catch (RuntimeException e) {
-                return ""; // 文件不可读（删除/权限）：空内容锚仍确定性
-              }
-            });
-    List<String> lines = List.of(content.split("\n", -1));
-    int line = finding.line();
-    String anchor = line >= 1 && line <= lines.size() ? lines.get(line - 1) : "";
-    int from = Math.min(Math.max(0, line - 3), lines.size());
-    int to = Math.min(Math.max(from, line + 2), lines.size());
-    List<String> context = lines.subList(from, to);
-    return FingerprintCalculator.fingerprint(finding.file(), categoryOf(finding), anchor, context);
+  /**
+   * 文件内容缓存读取（新代码与旧代码共用，key = path|sha）：二进制/不可得为 empty——空内容锚仍确定性， 该 finding 走 possible_duplicate
+   * 分支而非崩溃（09§4 降级写状态）。
+   */
+  private Optional<String> contentOf(
+      String path, String sha, ReviewRequest request, Map<String, Optional<String>> cache) {
+    return cache.computeIfAbsent(
+        path + "|" + sha,
+        k -> {
+          try {
+            FileContent file =
+                adapter.readFile(new RepoRef(request.repoOwner(), request.repoName()), sha, path);
+            return file.binary() || file.text() == null
+                ? Optional.empty()
+                : Optional.of(file.text());
+          } catch (RuntimeException e) {
+            return Optional.empty();
+          }
+        });
+  }
+
+  /**
+   * 账本标记的发布时锚行内容哈希（按标记 commit_sha 取旧文件内容重算——滑窗匹配键，02§4.1 M1 实现口径）。 旧内容不可得（force-push/删除）时为
+   * empty：该标记不参与滑窗，仅保留 exact 与 possible_duplicate。
+   */
+  private Optional<String> oldAnchorHashOf(
+      LedgerFindingMarker marker, ReviewRequest request, Map<String, Optional<String>> cache) {
+    return contentOf(marker.file(), marker.commitSha(), request, cache)
+        .map(
+            text ->
+                FingerprintCalculator.sha256(
+                    FingerprintDeduper.lineAt(List.of(text.split("\n", -1)), marker.line())
+                        .strip()));
   }
 
   private static AnchorStatus anchorStatus(DiffResult diff, CandidateFinding finding) {

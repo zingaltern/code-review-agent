@@ -4,6 +4,8 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.containing;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
+import static com.github.tomakehurst.wiremock.client.WireMock.patch;
+import static com.github.tomakehurst.wiremock.client.WireMock.patchRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
@@ -135,6 +137,31 @@ class GitHubHttpAdapterWireMockTest {
     assertThat(adapter.listFiles(REPO, "head2", "src/**/*.java"))
         .containsExactly("src/main/java/A.java", "src/test/B.java");
     assertThat(adapter.listFiles(REPO, "head2", "docs/*")).containsExactly("docs/readme.md");
+  }
+
+  @Test
+  void updateSummaryCommentPatchesIssueCommentsEndpoint() {
+    // 07§2 验收 3（过期收尾端点契约，05§2.3 端点清单"Summary 发布/收尾编辑"行）：
+    // PATCH /repos/{o}/{r}/issues/comments/{id}，载荷为编辑后的完整 body
+    wm.stubFor(
+        patch(urlEqualTo("/repos/o/r/issues/comments/9500"))
+            .withRequestBody(matchingJsonPath("$.body", containing("[已被 run_x 取代]")))
+            .willReturn(okJson("{\"id\":9500}")));
+    adapter.updateSummaryComment(REPO, 7, 9500L, "[已被 run_x 取代]\n\n旧 Summary 正文");
+    wm.verify(
+        patchRequestedFor(urlEqualTo("/repos/o/r/issues/comments/9500"))
+            .withRequestBody(matchingJsonPath("$.body", containing("旧 Summary 正文"))));
+  }
+
+  @Test
+  void updateSummaryCommentSurfacesIntegrationFailure() {
+    // 404（评论已删/无权限）不吞：上抛 CraIntegrationException，由调用方降级（收尾失败不回滚完成标记）
+    wm.stubFor(
+        patch(urlEqualTo("/repos/o/r/issues/comments/4040"))
+            .willReturn(aResponse().withStatus(404).withBody("{\"message\":\"Not Found\"}")));
+    assertThatThrownBy(() -> adapter.updateSummaryComment(REPO, 7, 4040L, "any"))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("404");
   }
 
   @Test

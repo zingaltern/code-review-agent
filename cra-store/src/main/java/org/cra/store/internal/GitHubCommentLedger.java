@@ -4,14 +4,16 @@ import java.util.List;
 import java.util.Optional;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.CommentSource;
+import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.RepoRef;
 import org.cra.store.api.ReviewLedger;
 
 /**
- * GitHub 评论账本（ADR-0005、02§5：bot 自身发布的 PR 评论即事实源）。只读视图—— 写入由发布动作内嵌标记完成（05§1.3 规则 3），本类不写评论（11§8 反模式
- * 3）。 解析与兜底分层由取数端口返回的 {@link CommentLedger} 承载（05§1.3 规则 5）。
+ * GitHub 评论账本（ADR-0005、02§5：bot 自身发布的 PR 评论即事实源）。读侧视图—— 写入由发布动作内嵌标记完成（05§1.3 规则 3），本类不写评论（11§8 反模式
+ * 3）；写侧 default 方法在此保持无操作（{@link ReviewLedger} 约定）。 解析与兜底分层由取数端口返回的 {@link CommentLedger} 承载（05§1.3
+ * 规则 5）。
  */
 public class GitHubCommentLedger implements ReviewLedger {
 
@@ -40,5 +42,24 @@ public class GitHubCommentLedger implements ReviewLedger {
   @Override
   public List<LedgerFindingMarker> publishedFindings(int prNumber) {
     return source.fetchBotComments(repo, prNumber).findingMarkers();
+  }
+
+  @Override
+  public List<LedgerRunMarker> completedRuns(int prNumber) {
+    return source.fetchBotComments(repo, prNumber).runMarkers().stream()
+        .filter(LedgerRunMarker::isCompletion)
+        .toList();
+  }
+
+  @Override
+  public int suspectMarkerCount(int prNumber) {
+    return source.fetchBotComments(repo, prNumber).suspectCount();
+  }
+
+  @Override
+  public Optional<LedgerComment> comment(int prNumber, long commentId) {
+    return source.fetchBotComments(repo, prNumber).comments().stream()
+        .filter(c -> c.id() == commentId)
+        .findFirst();
   }
 }

@@ -3,7 +3,11 @@ package org.cra.core.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -12,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -22,6 +27,7 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffHunk;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
+import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostReviewCommand;
@@ -175,6 +181,257 @@ class ReviewPipelineTest {
     verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().inlineComments()).hasSize(1);
     assertThat(captor.getValue().inlineComments().get(0).findingId()).isNotEqualTo("f_old");
+  }
+
+  @Test
+  void slidingWindowSuppressesAfterNeighborEdit() {
+    // 08§5 场景 8 漂移 2：改锚行 ±2 内非锚行 → 滑窗命中抑制（exact 因上下文失配，02§4.1）
+    String driftedFp =
+        FingerprintCalculator.fingerprint(
+            FILE,
+            "bug",
+            FILE_CONTENT.split("\n")[3],
+            List.of(
+                "changed-a", "changed-b", FILE_CONTENT.split("\n")[3], "changed-d", "changed-e"));
+    when(ledger.publishedFindings(7))
+        .thenReturn(
+            List.of(
+                new LedgerFindingMarker(driftedFp, FILE, 4, "bug", "f_old", "run_old", HEAD, 42L)));
+    gatewayReturns(findingsJson("邻近行改动", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.stats().skippedDuplicate()).isEqualTo(1);
+    assertThat(result.stats().findingsPublished()).isZero();
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().inlineComments()).isEmpty();
+  }
+
+  @Test
+  void possibleDuplicatePublishedAndTraced() throws java.io.IOException {
+    // 08§5 场景 9：滑窗未命中（旧内容已变）但同 file 同 category 行距 ≤5 → 只记
+    // possible_duplicate 入 trace，不自动抑制（02§4.1）
+    when(ledger.publishedFindings(7))
+        .thenReturn(
+            List.of(
+                new LedgerFindingMarker(
+                    "deadbeefdeadbeef",
+                    FILE,
+                    4,
+                    "bug",
+                    "f_old",
+                    "run_old",
+                    "0ld4c0de00000000000000000000000000000000",
+                    42L)));
+    when(adapter.readFile(any(), eq("0ld4c0de00000000000000000000000000000000"), anyString()))
+        .thenReturn(
+            FileContent.ofText(
+                FILE, "old line 1\nold line 2\nold line 3\nold line 4\nold line 5\n"));
+    gatewayReturns(findingsJson("同行新内容", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.stats().skippedDuplicate()).isZero();
+    assertThat(result.stats().findingsPublished()).isEqualTo(1);
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().inlineComments()).hasSize(1);
+    Path runDir = Path.of(result.traceRef().substring("file://".length()));
+    assertThat(Files.readString(runDir.resolve("trace.ndjson"))).contains("possible_duplicate");
+  }
+
+  @Test
+  void ledgerParseFallbackTracedWhenNoValidMarkers() throws java.io.IOException {
+    // 05§1.3 规则 5 / 08§5 场景 4：无任何有效标记 → 兜底退 commit 闸（闸已查无 DONE），
+    // trace 记 fallback=commit-gate，评审照常进行——永不假装"账本为空"做无据全量重发
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    Path runDir = Path.of(result.traceRef().substring("file://".length()));
+    String trace = Files.readString(runDir.resolve("trace.ndjson"));
+    assertThat(trace).contains("\"event\":\"ledger_parse\"").contains("commit-gate");
+  }
+
+  @Test
+  void suspectMarkersTriggerSummaryWarningAtThreshold() {
+    // 07§2 验收 2 集成侧 / 05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试
+    when(ledger.suspectMarkerCount(7)).thenReturn(3);
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody()).contains("可疑账本标记").contains("疑似注入尝试");
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+  }
+
+  @Test
+  void suspectMarkersBelowThresholdStaySilent() {
+    // 阈值边界：2 个可疑标记不告警（05§1.3 规则 2 的"≥3"）
+    when(ledger.suspectMarkerCount(7)).thenReturn(2);
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody()).doesNotContain("疑似注入尝试");
+  }
+
+  @Test
+  void recordsCompletionAndFindingsAfterPublish() {
+    // T1.2 账本化：发布成功 → recordRunCompletion（DONE，suppressed=指纹抑制数）+ 逐条
+    // recordPublishedFinding（SQLite 形态的事实源；GitHub 形态为 no-op）
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    pipeline.run(request(false));
+    ArgumentCaptor<LedgerRunMarker> runCaptor = ArgumentCaptor.forClass(LedgerRunMarker.class);
+    verify(ledger).recordRunCompletion(eq(7), runCaptor.capture());
+    assertThat(runCaptor.getValue().commitSha()).isEqualTo(HEAD);
+    assertThat(runCaptor.getValue().status()).isEqualTo("DONE");
+    assertThat(runCaptor.getValue().findings()).isEqualTo(1);
+    assertThat(runCaptor.getValue().suppressed()).isEqualTo(0);
+    assertThat(runCaptor.getValue().commentId()).isEqualTo(9500L);
+    String expectedFp =
+        FingerprintCalculator.fingerprint(
+            FILE,
+            "bug",
+            FILE_CONTENT.split("\n")[3],
+            List.of(
+                FILE_CONTENT.split("\n")[1],
+                FILE_CONTENT.split("\n")[2],
+                FILE_CONTENT.split("\n")[3],
+                FILE_CONTENT.split("\n")[4],
+                FILE_CONTENT.split("\n")[5]));
+    ArgumentCaptor<LedgerFindingMarker> fpCaptor =
+        ArgumentCaptor.forClass(LedgerFindingMarker.class);
+    verify(ledger).recordPublishedFinding(eq(7), fpCaptor.capture());
+    assertThat(fpCaptor.getValue().fingerprint()).isEqualTo(expectedFp);
+    assertThat(fpCaptor.getValue().commentId()).isEqualTo(1L);
+  }
+
+  @Test
+  void recordsDegradedCompletionWhenSchemaDropsAll() {
+    // 降级完成也是完整发布（02§4.1）：完成标记以 DEGRADED 入账
+    when(gateway.complete(any()))
+        .thenReturn(LlmResponse.ok("a", 50, 5, 1, "glm-x"))
+        .thenReturn(LlmResponse.ok("b", 50, 5, 1, "glm-x"))
+        .thenReturn(LlmResponse.ok("c", 50, 5, 1, "glm-x"));
+    pipeline.run(request(false));
+    ArgumentCaptor<LedgerRunMarker> runCaptor = ArgumentCaptor.forClass(LedgerRunMarker.class);
+    verify(ledger).recordRunCompletion(eq(7), runCaptor.capture());
+    assertThat(runCaptor.getValue().status()).isEqualTo("DEGRADED");
+  }
+
+  @Test
+  void supersedesPreviousRoundSummaryAfterPublish() {
+    // 07§2 验收 3 编排侧 / 02§5：新 run 发布成功 → PATCH 上一轮 Summary issue comment
+    // 加 [已被 run_xxx 取代] 前缀（inline 不删——无删除调用）
+    when(ledger.completedRuns(7))
+        .thenReturn(
+            List.of(
+                new LedgerRunMarker(
+                    "run_old", "9999999000000000000000000000000000000000", "DONE", 1, 0, 88L)));
+    when(ledger.comment(7, 88L))
+        .thenReturn(
+            Optional.of(
+                new LedgerComment(
+                    88L,
+                    LedgerComment.KIND_ISSUE,
+                    "cra-bot",
+                    "旧 Summary 正文",
+                    Instant.now(),
+                    null)));
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+    verify(adapter).updateSummaryComment(any(), eq(7), eq(88L), bodyCaptor.capture());
+    assertThat(bodyCaptor.getValue()).startsWith("[已被 run_").contains("已被 ").contains("取代");
+    assertThat(bodyCaptor.getValue()).contains("旧 Summary 正文");
+  }
+
+  @Test
+  void supersedeSkipsSameCommitPrefixedAndUnavailable() {
+    // 幂等与降级：同 commit 轮、已带前缀轮、body 不可得轮——均不 PATCH
+    when(ledger.completedRuns(7))
+        .thenReturn(
+            List.of(
+                new LedgerRunMarker("run_same", HEAD, "DONE", 1, 0, 90L),
+                new LedgerRunMarker(
+                    "run_prefixed", "9999999000000000000000000000000000000000", "DONE", 1, 0, 91L),
+                new LedgerRunMarker(
+                    "run_gone", "8888888000000000000000000000000000000000", "DONE", 1, 0, 92L)));
+    when(ledger.comment(7, 90L))
+        .thenReturn(
+            Optional.of(
+                new LedgerComment(
+                    90L, LedgerComment.KIND_ISSUE, "cra-bot", "同 commit 轮", Instant.now(), null)));
+    when(ledger.comment(7, 91L))
+        .thenReturn(
+            Optional.of(
+                new LedgerComment(
+                    91L,
+                    LedgerComment.KIND_ISSUE,
+                    "cra-bot",
+                    "[已被 run_z 取代]\n\n旧",
+                    Instant.now(),
+                    null)));
+    when(ledger.comment(7, 92L)).thenReturn(Optional.empty());
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    verify(adapter, never()).updateSummaryComment(any(), anyInt(), anyLong(), anyString());
+  }
+
+  @Test
+  void supersedeFailureDegradesButRunCompletes() {
+    // 收尾 PATCH 失败不回滚完成标记（run 已完整发布，02§5）：run SUCCESS + degradation 可见
+    when(ledger.completedRuns(7))
+        .thenReturn(
+            List.of(
+                new LedgerRunMarker(
+                    "run_old", "9999999000000000000000000000000000000000", "DONE", 1, 0, 88L)));
+    when(ledger.comment(7, 88L))
+        .thenReturn(
+            Optional.of(
+                new LedgerComment(
+                    88L,
+                    LedgerComment.KIND_ISSUE,
+                    "cra-bot",
+                    "旧 Summary 正文",
+                    Instant.now(),
+                    null)));
+    doThrow(new org.cra.common.exception.CraIntegrationException("github 5xx"))
+        .when(adapter)
+        .updateSummaryComment(any(), anyInt(), anyLong(), anyString());
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(result.stats().degradations())
+        .anyMatch(d -> d.startsWith("summary-supersede-failed"));
+    verify(ledger).recordRunCompletion(eq(7), any());
+  }
+
+  @Test
+  void noLedgerWritesOnDryRun() {
+    // dry-run 零写（05§6）扩到账本写侧
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    pipeline.run(request(true));
+    verify(ledger, never()).recordRunCompletion(anyInt(), any());
+    verify(ledger, never()).recordPublishedFinding(anyInt(), any());
+    verify(adapter, never()).updateSummaryComment(any(), anyInt(), anyLong(), anyString());
+  }
+
+  @Test
+  void noLedgerWritesWhenSummaryPublishFails() {
+    // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾（重跑走补发，02§4.1）
+    doReturn(new PrReviewResult(7, Optional.of("9001"), Optional.empty(), List.of()))
+        .when(adapter)
+        .postReview(any());
+    when(ledger.completedRuns(7))
+        .thenReturn(
+            List.of(
+                new LedgerRunMarker(
+                    "run_old", "9999999000000000000000000000000000000000", "DONE", 1, 0, 88L)));
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    pipeline.run(request(false));
+    verify(ledger, never()).recordRunCompletion(anyInt(), any());
+    verify(ledger, never()).recordPublishedFinding(anyInt(), any());
+    verify(adapter, never()).updateSummaryComment(any(), anyInt(), anyLong(), anyString());
   }
 
   @Test

@@ -1,5 +1,6 @@
 package org.cra.store.api;
 
+import java.nio.file.Path;
 import org.cra.common.git.CommentSource;
 import org.cra.common.git.RepoRef;
 
@@ -17,5 +18,20 @@ public final class StoreAssembly {
    */
   public static ReviewLedger createGitHubLedger(CommentSource source, RepoRef repo) {
     return new org.cra.store.internal.GitHubCommentLedger(source, repo);
+  }
+
+  /**
+   * 创建本地 SQLite 账本（02§5 本地形态；M2 本地 pre-PR 模式组合根使用）。
+   *
+   * <p>注意：JDBC 驱动（org.xerial:sqlite-jdbc）由运行时 classpath 提供，cra-store 自身只依赖
+   * java.sql——本地模式装配时组合根须确保驱动在依赖清单（M1 由协调者统一合入，见 feat/m1-ledger 汇报）。
+   *
+   * @param repoOwner 仓库属主
+   * @param repoName 仓库名
+   * @param dbFile 数据库文件路径（如 ~/.cra/ledger.db）
+   * @return ReviewLedger
+   */
+  public static ReviewLedger createSqliteLedger(String repoOwner, String repoName, Path dbFile) {
+    return new org.cra.store.internal.sqlite.SqliteLedger(repoOwner, repoName, dbFile);
   }
 }
