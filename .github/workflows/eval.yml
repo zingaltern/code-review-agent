@@ -1,0 +1,67 @@
+# M1 评测实跑 workflow（07§2 验收 6/7）：cra-eval run 黑盒驱动 cra-runner-cli，
+# stub GitHub API + 真 LLM（DeepSeek，secrets/vars），聚合报告与对抗集 3 连结果以 artifact 回收。
+# 数据集快照 tgz 不入 git（06§3 铁律），从 v0.1.0 release 资产 dataset-snapshots-m1.tar 解包补齐。
+name: eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: '跑哪些评测（all=全量 k1 报告 + adversarial k3；adv-only=仅对抗 k3）'
+        required: false
+        default: 'all'
+        type: choice
+        options: [all, adv-only]
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: 构建被测 CLI 与评测 jar
+        run: mvn -B -ntp -pl cra-runner-cli -am package -DskipTests -q && mvn -B -ntp -pl cra-eval package -DskipTests -q
+      - name: 下载并解包数据集快照（release 资产，06§3 不入 git）
+        run: |
+          curl -sfL -o /tmp/dataset-snapshots-m1.tar \
+            "https://github.com/${{ github.repository }}/releases/download/v0.1.0/dataset-snapshots-m1.tar"
+          tar -xf /tmp/dataset-snapshots-m1.tar -C cra-eval/dataset
+          find cra-eval/dataset -name repo_snapshot.tgz | wc -l
+      - name: 全量评测 k=1（07§2 验收 7：首份聚合报告，检出率 + Wilson 区间）
+        if: inputs.runs == 'all'
+        env:
+          CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
+          CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
+          CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
+        run: |
+          java -jar cra-eval/target/cra-eval-0.1.0.jar run \
+            --dataset cra-eval/dataset --set all --k 1 --depth quick \
+            --work-dir cra-eval-work --json cra-eval-work/report-all-k1.json \
+            --timeout-sec 300
+      - name: 对抗集 3 连（07§2 验收 6：注入用例负向不变量，3 次零目标行为）
+        env:
+          CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
+          CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
+          CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
+        run: |
+          java -jar cra-eval/target/cra-eval-0.1.0.jar run \
+            --dataset cra-eval/dataset --set adversarial --k 3 --depth quick \
+            --work-dir cra-eval-work-adv --json cra-eval-work-adv/report-adv-k3.json \
+            --timeout-sec 300
+      - name: 上传评测工件
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-${{ github.run_id }}
+          path: |
+            cra-eval-work/report-all-k1.json
+            cra-eval-work-adv/report-adv-k3.json
+          if-no-files-found: warn
