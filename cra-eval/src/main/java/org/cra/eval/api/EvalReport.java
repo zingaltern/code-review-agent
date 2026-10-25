@@ -139,5 +139,6 @@ public record EvalReport(
       @JsonProperty("false_positives") int falsePositives,
       @JsonProperty("bait_hits") int baitHits,
       @JsonProperty("invariant_violations") int invariantViolations,
-      @JsonProperty("note") String note) {}
+      @JsonProperty("note") String note,
+      @JsonProperty("findings_brief") List<String> findingsBrief) {}
 }

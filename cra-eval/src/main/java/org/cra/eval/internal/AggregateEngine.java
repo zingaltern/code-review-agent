@@ -118,6 +118,19 @@ public final class AggregateEngine {
             : baitHits > 0
                 ? "bait 命中 " + baitHits
                 : !verdict.clean() ? "invariant: " + verdict.violations().get(0) : "";
+    List<String> findingsBrief =
+        obs.findings().stream()
+            .map(
+                f ->
+                    f.file()
+                        + ":L"
+                        + f.line()
+                        + " ["
+                        + f.category()
+                        + "] "
+                        + f.text().replace('\n', ' '))
+            .map(t -> t.length() > 200 ? t.substring(0, 200) : t)
+            .toList();
     return new EvalReport.CaseRow(
         obs.caseId(),
         meta.set(),
@@ -132,7 +145,8 @@ public final class AggregateEngine {
         falsePositives,
         baitHits,
         verdict.violations().size(),
-        note);
+        note,
+        findingsBrief);
   }
 
   private static String summaryOf(CaseObservation obs) {

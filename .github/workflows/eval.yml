@@ -24,6 +24,10 @@ on:
         default: 'quick'
         type: choice
         options: [quick, standard, deep]
+      cases:
+        description: '仅跑指定用例（逗号分隔，空=全部）——断言校准取证时只跑修改的部分'
+        required: false
+        default: '' 
 
 permissions:
   contents: read
@@ -56,9 +60,11 @@ jobs:
         run: |
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set all --k ${{ inputs.k }} --depth ${{ inputs.depth }} \
+            ${{ inputs.cases != '' && format('--case {0}', inputs.cases) || '' }} \
             --work-dir cra-eval-work --json cra-eval-work/report-all-k${{ inputs.k }}.json \
             --timeout-sec 600
       - name: 对抗集 3 连（07§2 验收 6 / 07§3 验收 1+4：注入负向不变量与幻觉拒绝率）
+        if: inputs.cases == ''
         env:
           CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
           CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
