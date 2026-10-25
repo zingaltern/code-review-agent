@@ -80,20 +80,8 @@ class LocalAppConfig {
     // 05§5 agents.crosschecker：默认关闭；模式串在 CLI 解析期已校验
     return new org.cra.core.api.CrossCheckerOptions(
         config.crossCheckerEnabled(),
-        parseCrossCheckerModes(config.crossCheckerModes()),
+        CrossCheckerModeParser.parse(config.crossCheckerModes()),
         config.crossCheckerHistoryWeeks());
-  }
-
-  private static java.util.Set<org.cra.core.api.CrossCheckerOptions.Mode> parseCrossCheckerModes(
-      String modes) {
-    java.util.Set<org.cra.core.api.CrossCheckerOptions.Mode> out =
-        java.util.EnumSet.noneOf(org.cra.core.api.CrossCheckerOptions.Mode.class);
-    for (String part : modes.split(",")) {
-      if (!part.isBlank()) {
-        out.add(org.cra.core.api.CrossCheckerOptions.Mode.parse(part));
-      }
-    }
-    return out;
   }
 
   @Bean

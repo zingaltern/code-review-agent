@@ -229,6 +229,29 @@ class VerificationPromotionTest {
     assertThat(scripted.judgeCalls.get(0).systemPrompt()).contains("终裁仲裁员");
     assertThat(result.stats().confirmed()).isEqualTo(1); // Judge 翻案成立
     assertThat(result.stats().findingsPublished()).isEqualTo(1);
+    // 门禁与验证波共享 contentCache：HEAD/FILE 只应在预取与门禁各读一次，补查轮复用缓存
+    Mockito.verify(adapter, Mockito.times(2))
+        .readFile(Mockito.any(), Mockito.eq(HEAD), Mockito.eq(FILE));
+  }
+
+  @Test
+  void tokenAccountingSumsReviewVerificationAndJudge() {
+    // 拆分 ReviewPipeline 后的关键不变量：评审 + 验证波 + Judge 三段 token 必须全部累加
+    pipeline =
+        newPipeline(
+            new org.cra.core.api.PipelineOptions(
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100)); // 100% 命中抽查
+    scripted
+        .review(oneFinding("bug", "important"))
+        .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null));
+    scripted.judge(
+        "{\"judgement\":{\"verdict\":\"CONFIRMED\",\"rationale\":\"抽查复核：反证不成立，L4 处无防护\"}}");
+    ReviewResult result =
+        pipeline.run(new ReviewRequest("o", "r", 7, BASE, HEAD, Depth.QUICK, false, false));
+
+    // QUICK = 1 评审代理（100/20）+ 验证波（200/60）+ Judge（80/15）
+    assertThat(result.stats().tokensIn()).isEqualTo(100 + 200 + 80);
+    assertThat(result.stats().tokensOut()).isEqualTo(20 + 60 + 15);
   }
 
   // ---------- T2.5：重要级 REFUTED 确定性抽查保险丝 ----------

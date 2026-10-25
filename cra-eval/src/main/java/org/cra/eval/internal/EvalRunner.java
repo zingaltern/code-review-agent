@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.cra.common.exception.CraIntegrationException;
+import org.cra.common.text.Texts;
 import org.cra.eval.api.FixtureMeta;
 
 /**
@@ -93,7 +94,7 @@ public final class EvalRunner {
           false,
           "failed",
           List.of(),
-          abbreviate(reason),
+          Texts.truncate(reason, 200),
           CaseObservation.RunStats.EMPTY);
     }
   }
@@ -142,7 +143,7 @@ public final class EvalRunner {
             : "no completion marker (exit="
                 + exitCode
                 + ") "
-                + abbreviate(CliProcessRunner.readQuietly(stderrLog).strip());
+                + Texts.truncate(CliProcessRunner.readQuietly(stderrLog).strip(), 200);
     if (!completed && exitCode == 0) {
       failure = "exit=0 但无完成标记（发布未收尾?）";
     }
@@ -164,12 +165,5 @@ public final class EvalRunner {
       end = Math.min(body.length(), from + 400);
     }
     return body.substring(Math.min(from, body.length()), end).strip();
-  }
-
-  private static String abbreviate(String s) {
-    if (s == null) {
-      return "";
-    }
-    return s.length() <= 200 ? s : s.substring(0, 200) + "…";
   }
 }

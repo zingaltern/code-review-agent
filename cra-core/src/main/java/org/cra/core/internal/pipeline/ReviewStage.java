@@ -1,79 +1,49 @@
 package org.cra.core.internal.pipeline;
 
-import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.function.Supplier;
-import java.util.regex.Pattern;
-import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.BugHunterDefinition;
 import org.cra.agents.api.ReviewAgentInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
-import org.cra.agents.api.ToolWhitelist;
-import org.cra.common.context.AssembledContext;
-import org.cra.common.context.ContextInput;
-import org.cra.common.context.PathGlobs;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
 import org.cra.common.finding.CandidateFinding;
-import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
-import org.cra.common.run.Depth;
 import org.cra.context.api.ContextAssembler;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.internal.AgentRunner;
 import org.cra.core.internal.TraceWriter;
+import org.cra.core.internal.pipeline.ReviewAgentDispatcher.DispatchOutcome;
 
 /**
- * M2 评审扇出编排（T2.2/T2.3，03§2.2/03§3/03§6）：视角路由 → 专角色触发判定 → 按 chunk 扇出（并发 8）→ 失败隔离汇聚 → 跨代理精确去重合并。
+ * M2 评审扇出编排（T2.2/T2.3，03§2.2/03§3/03§6）：按 chunk 扇出（并发 8）→ 预算阶梯调度 → 失败隔离汇聚 → 跨代理精确去重合并。
  *
  * <ul>
- *   <li>视角路由（02§4.3）：quick 1 视角 / standard 2 视角 / deep 全 4 视角；派发序即优先级序（dataflow → boundary →
- *       concurrency → resource——逻辑类与输入校验类覆盖最高频缺陷面，时序与资源类进 deep）；run 预算 ≥70% 档砍 1 视角（下限 1，02§4.4）；
- *   <li>专角色（03§6 v1.2）：Security 每 chunk 1 实例并行（强档，read_file+grep scoped，敏感路径/priority 注入 chunk
- *       内文件全文）；Perf Deep 档按 chunk；Test/Convention 全 PR 单实例（chunk 扇出后派发——预算阶梯下先保评审主力，70% 档砍 light 的
- *       Convention，02§4.4）；触发判定见各 trigger 方法；
+ *   <li>视角与专角色触发规则见 {@link ReviewRoutingPolicy}（02§4.3/02§4.4/03§3）；
+ *   <li>Prompt 附加段见 {@link ReviewPromptSections}（03§6 v1.2）；
+ *   <li>单代理执行与上下文预算见 {@link ReviewAgentDispatcher}（03§2.1/03§2.3）；
  *   <li>上下文隔离（03§2.1）：每代理独立 brief（编排器组装、全文落盘），不共享中间推理与其他代理输出；
  *   <li>失败隔离（03§2.3/02§4.2）：单代理异常/超时/预算击穿不传染——收敛为该代理空产出 + 降级声明；全部代理 LLM 不可得才判 run FAILED（LLM
  *       全局故障），部分缺失则 DEGRADED 收尾；
  *   <li>汇聚（03§4.5）：候选并集 + 同 file/category/±3 行精确合并（{@link FindingMerger}，T2.8 精确去重的汇聚侧；语义去重留 M3）。
  * </ul>
  *
- * <p>共享可变状态仅限构造期创建的固定线程池（09§6，daemon 线程，宽度 = LLM 并发 8）。
+ * <p>本类只保留调度编排与结果汇聚；线程池由 {@link ReviewAgentDispatcher} 持有（09§6，daemon 线程，宽度 = LLM 并发 8）。
  */
 public final class ReviewStage {
 
   /** 扇出并发（02§4.5 LLM 并发信号量同宽；网关侧信号量仍为硬限）。 */
-  static final int MAX_PARALLEL = 8;
-
-  /** Security 敏感路径判定（注入 chunk 内文件全文，03§6 v1.2）。 */
-  private static final Pattern SENSITIVE_PATH =
-      Pattern.compile("(?i)(auth|crypto|secret|token|password|credential|jwt|security|keystore)");
-
-  /** 依赖清单文件（依赖风险核对，03§3 Security 输入重点）。 */
-  private static final Set<String> DEPENDENCY_MANIFESTS =
-      Set.of("pom.xml", "build.gradle", "build.gradle.kts", "gradle.lockfile", "settings.gradle");
-
-  /** Security 附加段字符上限（≈8k token，04§2.1 字符/3.5）。 */
-  private static final int EXTRA_SECTION_MAX_CHARS = 28_000;
-
-  private static final Set<String> EMPTY_PATHS = Set.of();
+  static final int MAX_PARALLEL = ReviewAgentDispatcher.MAX_PARALLEL;
 
   private final ReviewCrew crew;
-  private final AgentRunner agentRunner;
-  private final ContextAssembler contextAssembler;
+  private final ReviewAgentDispatcher dispatcher;
   private final CrossCheckerOptions crossCheckerOptions;
-  private final ExecutorService pool;
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭）。
@@ -98,18 +68,9 @@ public final class ReviewStage {
       ContextAssembler contextAssembler,
       CrossCheckerOptions crossCheckerOptions) {
     this.crew = crew;
-    this.agentRunner = agentRunner;
-    this.contextAssembler = contextAssembler;
+    this.dispatcher = new ReviewAgentDispatcher(agentRunner, contextAssembler);
     this.crossCheckerOptions =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
-    this.pool =
-        Executors.newFixedThreadPool(
-            MAX_PARALLEL,
-            runnable -> {
-              Thread thread = new Thread(runnable, "cra-review");
-              thread.setDaemon(true);
-              return thread;
-            });
   }
 
   /** 全部代理的汇聚产出（对齐原 RunOutcome 形状，publish 段无感）。 */
@@ -126,201 +87,6 @@ public final class ReviewStage {
       boolean stoppedByBudget,
       boolean truncationReached,
       Map<String, String> templateVersions) {}
-
-  /** 单代理派发结果。 */
-  private record DispatchOutcome(
-      String agentId,
-      String templateVersion,
-      List<CandidateFinding> findings,
-      long tokensIn,
-      long tokensOut,
-      boolean llmUnavailable,
-      String llmError,
-      List<String> schemaErrors,
-      List<String> degradations,
-      List<String> contextNotes,
-      List<String> trimDecisions) {}
-
-  /**
-   * 视角路由（02§4.3 档位表：quick 1 / standard 2 / deep 3–4；返回序 = 派发优先级序）。
-   *
-   * @param depth 生效档位
-   * @return 该档位的视角列表
-   */
-  public static List<BugHunterDefinition.Perspective> routePerspectives(Depth depth) {
-    return switch (depth) {
-      case QUICK -> List.of(BugHunterDefinition.Perspective.DATAFLOW);
-      case STANDARD ->
-          List.of(
-              BugHunterDefinition.Perspective.DATAFLOW, BugHunterDefinition.Perspective.BOUNDARY);
-      case DEEP ->
-          List.of(
-              BugHunterDefinition.Perspective.DATAFLOW,
-              BugHunterDefinition.Perspective.BOUNDARY,
-              BugHunterDefinition.Perspective.CONCURRENCY,
-              BugHunterDefinition.Perspective.RESOURCE);
-    };
-  }
-
-  /** 70% 档砍 1 视角（下限 1，02§4.4）。 */
-  public static List<BugHunterDefinition.Perspective> degradePerspectives(
-      List<BugHunterDefinition.Perspective> base) {
-    if (base.size() <= 1) {
-      return List.copyOf(base);
-    }
-    return base.subList(0, base.size() - 1);
-  }
-
-  /**
-   * TestReviewer 触发判定（03§3：逻辑文件变更且测试变更比例低）。 测试文件 = src/test/ 路径；比例阈值 0.5 为实现默认（文档未钉死，覆盖声明如实说明）。
-   *
-   * @param diff 变更 diff
-   * @return true 触发
-   */
-  public static boolean testReviewerTriggered(DiffResult diff) {
-    int logic = 0;
-    int test = 0;
-    for (DiffFile file : diff.files()) {
-      if (isTestPath(file.path())) {
-        test++;
-      } else {
-        logic++;
-      }
-    }
-    return logic > 0 && (test == 0 || (double) test / (test + logic) < 0.5);
-  }
-
-  /**
-   * ConventionReviewer 触发判定（03§3：REVIEW.md 定义约定时）。
-   *
-   * @param policy 评审策略
-   * @return true 触发
-   */
-  public static boolean conventionTriggered(ReviewPolicy policy) {
-    return !policy.conventions().isEmpty();
-  }
-
-  /**
-   * PerfReviewer 触发判定（03§3：Deep 档；perf 路径判定待 REVIEW.md 扩展，M2 以 Deep 档触发并在覆盖声明说明）。
-   *
-   * @param depthPlan 深度计划
-   * @return true 触发
-   */
-  public static boolean perfTriggered(DepthPlan depthPlan) {
-    return depthPlan.effectiveDepth() == Depth.DEEP;
-  }
-
-  /**
-   * CrossChecker 触发判定（03§3 角色表 + 02§4.3 档位联动 + 05§5
-   * 配置）：agents.crosschecker.enabled=true、standard/deep 档（quick 不触发）、班组已装配，且至少一个模式有数据可查。
-   *
-   * <p>数据门槛（07 T1.4：段落缺失时相关检查优雅跳过）：模式 A 需 Product context / Known incidents 非空或变更史可得； 模式 B 需 Sniff
-   * tests 非空。
-   *
-   * @param depthPlan 深度计划（生效档位）
-   * @param policy base 分支 REVIEW.md 策略
-   * @param crew 班组（crossChecker=null 表示未装配）
-   * @param options 配置（enabled/modes）
-   * @param history 变更史（无本地仓库时 available=false）
-   * @return true 派发 1 实例
-   */
-  public static boolean crossCheckTriggered(
-      DepthPlan depthPlan,
-      ReviewPolicy policy,
-      ReviewCrew crew,
-      CrossCheckerOptions options,
-      CrossCheckHistory history) {
-    if (options == null || !options.enabled() || crew == null || crew.crossChecker() == null) {
-      return false;
-    }
-    if (depthPlan.effectiveDepth() == Depth.QUICK) {
-      return false;
-    }
-    boolean assumptionData =
-        !policy.productContext().isEmpty()
-            || !policy.knownIncidents().isEmpty()
-            || history.hasData();
-    boolean sniffData = !policy.sniffTests().isEmpty();
-    boolean assumption = options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && assumptionData;
-    boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && sniffData;
-    return assumption || sniff;
-  }
-
-  private static List<String> activeModes(boolean assumption, boolean sniff) {
-    List<String> modes = new ArrayList<>();
-    if (assumption) {
-      modes.add(CrossCheckerOptions.Mode.ASSUMPTION.id);
-    }
-    if (sniff) {
-      modes.add(CrossCheckerOptions.Mode.SNIFF.id);
-    }
-    return List.copyOf(modes);
-  }
-
-  /** 未触发原因（覆盖声明必须可见，07 T1.4）。 */
-  private static String crossCheckSkipReason(
-      DepthPlan depthPlan, ReviewPolicy policy, ReviewCrew crew, CrossCheckHistory history) {
-    if (crew.crossChecker() == null) {
-      return "班组未装配 cross-checker";
-    }
-    if (depthPlan.effectiveDepth() == Depth.QUICK) {
-      return "quick 档不触发（02§4.3 档位联动；M4f-lite 仅 standard/deep）";
-    }
-    boolean assumptionData =
-        !policy.productContext().isEmpty()
-            || !policy.knownIncidents().isEmpty()
-            || history.hasData();
-    boolean sniffData = !policy.sniffTests().isEmpty();
-    if (!assumptionData && !sniffData) {
-      return "REVIEW.md 未配置 Product context/Known incidents/Sniff tests，且变更史为空/不可得（07 T1.4 段落缺失优雅跳过）";
-    }
-    return "配置的 mode 与可用数据不匹配（05§5 agents.crosschecker.mode）";
-  }
-
-  /**
-   * Security 附加段（03§6 v1.2）：chunk 内敏感路径/priority 命中文件的全文 + 依赖清单变更注记， 字符封顶（预算内注入）。
-   *
-   * @param chunk 评审 chunk
-   * @param headFiles head 侧预取全文
-   * @param policy 评审策略（priority_paths）
-   * @return 附加段（无命中返回空串）
-   */
-  public static String securityExtraSection(
-      ChunkPlanner.Chunk chunk, Map<String, FileContent> headFiles, ReviewPolicy policy) {
-    StringBuilder out = new StringBuilder();
-    for (DiffFile file : chunk.files()) {
-      boolean manifest = DEPENDENCY_MANIFESTS.contains(file.path());
-      boolean sensitive =
-          SENSITIVE_PATH.matcher(file.path()).find()
-              || PathGlobs.matchesAny(policy.priorityPaths(), file.path());
-      if (manifest) {
-        out.append("【依赖清单变更】").append(file.path()).append("（重点核对引入组件与版本放宽）\n");
-      }
-      if (sensitive) {
-        FileContent content = headFiles.get(file.path());
-        if (content != null && !content.binary() && content.text() != null) {
-          out.append("### 敏感文件全文：")
-              .append(file.path())
-              .append("\n")
-              .append(content.text())
-              .append("\n");
-        }
-      }
-      if (out.length() >= EXTRA_SECTION_MAX_CHARS) {
-        out.append("（附加段已达预算上限，后续文件仅注入 diff）\n");
-        break;
-      }
-    }
-    if (out.length() > EXTRA_SECTION_MAX_CHARS) {
-      out.setLength(EXTRA_SECTION_MAX_CHARS);
-      out.append("\n（附加段截断至预算上限）\n");
-    }
-    return out.toString();
-  }
-
-  private static boolean isTestPath(String path) {
-    return path.startsWith("src/test/") || path.contains("/src/test/");
-  }
 
   /**
    * 执行评审扇出。
@@ -398,9 +164,10 @@ public final class ReviewStage {
     CrossCheckHistory crossHistory =
         crossCheckHistory == null ? CrossCheckHistory.none() : crossCheckHistory;
     List<BugHunterDefinition.Perspective> basePerspectives =
-        routePerspectives(depthPlan.effectiveDepth());
+        ReviewRoutingPolicy.routePerspectives(depthPlan.effectiveDepth());
     boolean securityEnabled = crew.securityReviewer() != null;
-    boolean perfEnabled = perfTriggered(depthPlan) && crew.perfReviewer() != null;
+    boolean perfEnabled =
+        ReviewRoutingPolicy.perfTriggered(depthPlan) && crew.perfReviewer() != null;
     List<Future<DispatchOutcome>> futures = new ArrayList<>();
     List<DispatchOutcome> collected = new ArrayList<>();
     List<String> degradations = new ArrayList<>();
@@ -448,7 +215,7 @@ public final class ReviewStage {
           // 70% 档：剩余 chunk 砍 1 视角（下限 1）+ 简化上下文（02§4.4）
           List<BugHunterDefinition.Perspective> effective =
               phase == RunBudgetTracker.Phase.DEGRADE
-                  ? degradePerspectives(basePerspectives)
+                  ? ReviewRoutingPolicy.degradePerspectives(basePerspectives)
                   : basePerspectives;
           int waveSize = effective.size() + (securityEnabled ? 1 : 0) + (perfEnabled ? 1 : 0);
           // chunk 原子派发：整个 chunk 的全部代理都能入队才取下一个 chunk——
@@ -457,56 +224,49 @@ public final class ReviewStage {
             ChunkPlanner.Chunk chunk = chunks.get(chunkIndex++);
             for (BugHunterDefinition.Perspective perspective : effective) {
               SubAgent<ReviewAgentInput> agent = agentOf(perspective);
-              Map<String, FileContent> scoped = scopedFiles(chunk, headFiles);
-              ContextInput contextInput =
-                  buildContextInput(
-                      chunk, headFiles, depthPlan, simplified, agent.budget().maxInputTokens());
               futures.add(
-                  pool.submit(
-                      () ->
-                          dispatch(
-                              agent,
-                              new AgentScope(chunk.key(), chunk.files()),
-                              scoped,
-                              contextInput,
-                              "",
-                              prTitle,
-                              commitMessages,
-                              policySection,
-                              runId,
-                              trace)));
+                  dispatcher.submitChunk(
+                      agent,
+                      chunk,
+                      headFiles,
+                      depthPlan,
+                      simplified,
+                      "",
+                      prTitle,
+                      commitMessages,
+                      policySection,
+                      runId,
+                      trace));
             }
             if (securityEnabled) {
               futures.add(
-                  chunkDispatch(
+                  dispatcher.submitChunk(
                       crew.securityReviewer(),
                       chunk,
                       headFiles,
                       depthPlan,
                       simplified,
-                      policy,
+                      ReviewPromptSections.securityExtraSection(chunk, headFiles, policy),
                       prTitle,
                       commitMessages,
                       policySection,
                       runId,
-                      trace,
-                      securityExtraSection(chunk, headFiles, policy)));
+                      trace));
             }
             if (perfEnabled) {
               futures.add(
-                  chunkDispatch(
+                  dispatcher.submitChunk(
                       crew.perfReviewer(),
                       chunk,
                       headFiles,
                       depthPlan,
                       simplified,
-                      policy,
+                      "",
                       prTitle,
                       commitMessages,
                       policySection,
                       runId,
-                      trace,
-                      ""));
+                      trace));
             }
           }
           if (futures.isEmpty()) {
@@ -524,13 +284,13 @@ public final class ReviewStage {
       // 70% 档砍 light 的 Convention（02§4.4），100% 终止
       RunBudgetTracker.Phase phase = budget.phase();
       if (phase != RunBudgetTracker.Phase.STOP) {
-        if (crew.testReviewer() != null && testReviewerTriggered(diff)) {
+        if (crew.testReviewer() != null && ReviewRoutingPolicy.testReviewerTriggered(diff)) {
           futures.add(
-              wholePrDispatch(
+              dispatcher.submitWholePr(
                   crew.testReviewer(),
                   plan,
                   headFiles,
-                  testExtraSection(plan),
+                  ReviewPromptSections.testExtraSection(plan),
                   prTitle,
                   commitMessages,
                   policySection,
@@ -538,10 +298,10 @@ public final class ReviewStage {
                   trace));
         }
         if (crew.conventionReviewer() != null
-            && conventionTriggered(policy)
+            && ReviewRoutingPolicy.conventionTriggered(policy)
             && phase != RunBudgetTracker.Phase.DEGRADE) {
           futures.add(
-              wholePrDispatch(
+              dispatcher.submitWholePr(
                   crew.conventionReviewer(),
                   plan,
                   headFiles,
@@ -554,7 +314,8 @@ public final class ReviewStage {
         }
         // M4f-lite CrossChecker（03§3.1）：全 PR 单实例；配置开启 + standard/deep 档 + 至少一个模式有数据
         boolean crossCheck =
-            crossCheckTriggered(depthPlan, policy, crew, crossCheckerOptions, crossHistory);
+            ReviewRoutingPolicy.crossCheckTriggered(
+                depthPlan, policy, crew, crossCheckerOptions, crossHistory);
         if (crossCheck) {
           boolean assumptionMode =
               crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION)
@@ -566,7 +327,7 @@ public final class ReviewStage {
                   && !policy.sniffTests().isEmpty();
           CrossCheckMaterials.Materials materials =
               CrossCheckMaterials.build(
-                  wholePrScope(plan).files(),
+                  ReviewAgentDispatcher.wholePrFiles(plan),
                   assumptionMode ? crossHistory.entries() : List.of(),
                   crossCheckerOptions.historyWeeks(),
                   policy,
@@ -576,7 +337,7 @@ public final class ReviewStage {
           contextNotes.addAll(materials.notes());
           Map<String, Object> event = new LinkedHashMap<>();
           event.put("triggered", true);
-          event.put("modes", activeModes(assumptionMode, sniffMode));
+          event.put("modes", ReviewRoutingPolicy.activeModes(assumptionMode, sniffMode));
           event.put("history_available", crossHistory.available());
           event.put("history_commits", crossHistory.entries().size());
           event.put("diff_tokens", TokenMath.estimateTokens(materials.diffDigest()));
@@ -584,7 +345,7 @@ public final class ReviewStage {
           event.put("context_tokens", TokenMath.estimateTokens(materials.trustedSections()));
           trace.emit("crosscheck", event);
           futures.add(
-              crossCheckDispatch(
+              dispatcher.submitCrossCheck(
                   crew.crossChecker(),
                   plan,
                   headFiles,
@@ -595,7 +356,8 @@ public final class ReviewStage {
                   trace));
         } else if (crossCheckerOptions.enabled()) {
           // 覆盖声明（07 T1.4：段落缺失时相关检查优雅跳过——跳过原因必须可见，不静默）
-          String reason = crossCheckSkipReason(depthPlan, policy, crew, crossHistory);
+          String reason =
+              ReviewRoutingPolicy.crossCheckSkipReason(depthPlan, policy, crew, crossHistory);
           contextNotes.add("CrossChecker 未触发：" + reason);
           trace.emit("crosscheck", Map.of("triggered", false, "reason", reason));
         }
@@ -639,7 +401,7 @@ public final class ReviewStage {
     long unavailableCount = 0;
     String llmError = null;
     List<String> schemaErrors = new ArrayList<>();
-    Map<String, String> templateVersions = new java.util.LinkedHashMap<>();
+    Map<String, String> templateVersions = new LinkedHashMap<>();
     for (DispatchOutcome outcome : collected) {
       all.addAll(outcome.findings());
       if (outcome.templateVersion() != null && !outcome.templateVersion().isBlank()) {
@@ -691,67 +453,6 @@ public final class ReviewStage {
         templateVersions);
   }
 
-  /** 按 chunk 派发专角色（Security/Perf；上下文预算 = 该角色输入预算）。 */
-  private Future<DispatchOutcome> chunkDispatch(
-      SubAgent<ReviewAgentInput> agent,
-      ChunkPlanner.Chunk chunk,
-      Map<String, FileContent> headFiles,
-      DepthPlan depthPlan,
-      boolean simplified,
-      ReviewPolicy policy,
-      String prTitle,
-      String commitMessages,
-      String policySection,
-      String runId,
-      TraceWriter trace,
-      String extraSection) {
-    Map<String, FileContent> scoped = scopedFiles(chunk, headFiles);
-    ContextInput contextInput =
-        buildContextInput(chunk, headFiles, depthPlan, simplified, agent.budget().maxInputTokens());
-    return pool.submit(
-        () ->
-            dispatch(
-                agent,
-                new AgentScope(chunk.key(), chunk.files()),
-                scoped,
-                contextInput,
-                extraSection,
-                prTitle,
-                commitMessages,
-                policySection,
-                runId,
-                trace));
-  }
-
-  /** 全 PR 级专角色派发（Test/Convention：仅 L0 diff，无窗口/全文；scope = 全部 chunk 文件）。 */
-  private Future<DispatchOutcome> wholePrDispatch(
-      SubAgent<ReviewAgentInput> agent,
-      ChunkPlanner.Plan plan,
-      Map<String, FileContent> headFiles,
-      String extraSection,
-      String prTitle,
-      String commitMessages,
-      String policySection,
-      String runId,
-      TraceWriter trace) {
-    AgentScope scope = wholePrScope(plan);
-    Map<String, FileContent> scoped =
-        scopedFiles(new ChunkPlanner.Chunk(scope.key(), scope.files()), headFiles);
-    return pool.submit(
-        () ->
-            dispatch(
-                agent,
-                scope,
-                scoped,
-                wholePrContextInput(scope, agent),
-                extraSection,
-                prTitle,
-                commitMessages,
-                policySection,
-                runId,
-                trace));
-  }
-
   private SubAgent<ReviewAgentInput> agentOf(BugHunterDefinition.Perspective perspective) {
     // 按角色 id 匹配（03§2.2：视角 = 角色 id 后缀；不绑定定义类型，班组可注入任意 SubAgent 实现）
     String expectedId = "bug-hunter/" + perspective.id;
@@ -759,274 +460,5 @@ public final class ReviewStage {
         .filter(agent -> agent.role().id().equals(expectedId))
         .findFirst()
         .orElseThrow(() -> new IllegalStateException("班组缺少视角: " + expectedId));
-  }
-
-  /**
-   * 单代理派发（并行任务；失败隔离边界——任何异常收敛为空产出 + agent_output/failed 事件）。
-   *
-   * @param scope 代理范围（chunk 或全 PR；key 进 trace，files 为该代理的文件全集）
-   */
-  private DispatchOutcome dispatch(
-      SubAgent<ReviewAgentInput> agent,
-      AgentScope scope,
-      Map<String, FileContent> scoped,
-      ContextInput contextInput,
-      String extraSection,
-      String prTitle,
-      String commitMessages,
-      String policySection,
-      String runId,
-      TraceWriter trace) {
-    return executeGuarded(
-        agent,
-        scope,
-        () -> {
-          AssembledContext context = contextAssembler.assemble(contextInput);
-          boolean hasTools = agent.tools() != ToolWhitelist.NONE;
-          ReviewAgentInput input =
-              new ReviewAgentInput(
-                  prTitle,
-                  commitMessages,
-                  context.diffText(),
-                  context.windowText(),
-                  "", // L2 切片（04§1）：M2 未实现切片生成，dataflow/security 模板如实渲染占位说明
-                  extraSection,
-                  policySection,
-                  hasTools ? scoped.keySet() : EMPTY_PATHS);
-          return new Prepared(
-              input,
-              hasTools,
-              context.estimatedTokens(),
-              context.coverageNotes(),
-              context.trimDecisions());
-        },
-        scoped,
-        runId,
-        trace);
-  }
-
-  /**
-   * CrossChecker 派发（M4f-lite，03§3.1）：全 PR 单实例，输入 = diff 精简视图（L0 槽）+ 变更史（extraSection 槽，不可信）+
-   * 产品段（reviewPolicySection 槽，可信）。材料在 {@link CrossCheckMaterials} 按 03§6 预算裁剪。
-   */
-  private Future<DispatchOutcome> crossCheckDispatch(
-      SubAgent<ReviewAgentInput> agent,
-      ChunkPlanner.Plan plan,
-      Map<String, FileContent> headFiles,
-      CrossCheckMaterials.Materials materials,
-      String prTitle,
-      String commitMessages,
-      String runId,
-      TraceWriter trace) {
-    AgentScope scope = wholePrScope(plan);
-    Map<String, FileContent> scoped =
-        scopedFiles(new ChunkPlanner.Chunk(scope.key(), scope.files()), headFiles);
-    return pool.submit(
-        () ->
-            executeGuarded(
-                agent,
-                scope,
-                () -> {
-                  boolean hasTools = agent.tools() != ToolWhitelist.NONE;
-                  ReviewAgentInput input =
-                      new ReviewAgentInput(
-                          prTitle,
-                          commitMessages,
-                          materials.diffDigest(),
-                          "",
-                          "",
-                          materials.historyText(),
-                          materials.trustedSections(),
-                          hasTools ? scoped.keySet() : EMPTY_PATHS);
-                  long estimated =
-                      TokenMath.estimateTokens(
-                          materials.diffDigest()
-                              + materials.historyText()
-                              + materials.trustedSections());
-                  return new Prepared(input, hasTools, estimated, List.of(), List.of());
-                },
-                scoped,
-                runId,
-                trace));
-  }
-
-  /** 派发准备态（brief 组装输入 + 上下文统计）。 */
-  private record Prepared(
-      ReviewAgentInput input,
-      boolean hasTools,
-      long estimatedTokens,
-      List<String> coverageNotes,
-      List<String> trimDecisions) {}
-
-  /** 执行边界：brief 组装 + 隔离运行时 + 事件 + 失败隔离（任何异常收敛为空产出，03§2.3/09§4）。 */
-  private DispatchOutcome executeGuarded(
-      SubAgent<ReviewAgentInput> agent,
-      AgentScope scope,
-      Supplier<Prepared> prepare,
-      Map<String, FileContent> scoped,
-      String runId,
-      TraceWriter trace) {
-    try {
-      Prepared prepared = prepare.get();
-      AgentBrief brief = agent.buildBrief(prepared.input());
-      Path briefPath = trace.persistBrief(brief, scope.key());
-      trace.emit(
-          "agent_start",
-          Map.of(
-              "agent", agent.role().id(),
-              "chunk", scope.key(),
-              "brief_path", briefPath.toString(),
-              "est_tokens", prepared.estimatedTokens(),
-              "trim_decisions", prepared.trimDecisions()));
-      AgentRunner.AgentRun<List<CandidateFinding>> run =
-          agentRunner.execute(
-              brief,
-              new AgentRunner.ToolContext(brief.tools(), prepared.hasTools() ? scoped : Map.of()),
-              AgentRunner.findingsParser(runId, agent.role().id()),
-              runId,
-              trace);
-      List<CandidateFinding> findings = run.output() == null ? List.of() : run.output();
-      trace.emit(
-          "agent_output",
-          Map.of(
-              "agent", agent.role().id(),
-              "chunk", scope.key(),
-              "findings", findings.size(),
-              "termination", run.termination().name().toLowerCase(java.util.Locale.ROOT),
-              "tokens", Map.of("in", run.tokensIn(), "out", run.tokensOut()),
-              "latency_ms", run.latencyMs()));
-      List<String> outcomeNotes = new ArrayList<>(prepared.coverageNotes());
-      List<String> outcomeTrims = new ArrayList<>(prepared.trimDecisions());
-      List<String> outcomeDegr = new ArrayList<>(run.degradations());
-      if (run.termination() == AgentRunner.Termination.BUDGET_EXCEEDED) {
-        // 03§1：预算硬限击穿的代理 = 该角色缺失，降级声明（不传染）
-        outcomeDegr.add("agent-budget-exceeded:" + agent.role().id());
-        outcomeNotes.add("代理 " + agent.role().id() + " 因预算硬限终止（" + run.errorMessage() + "）");
-      }
-      if (run.termination() == AgentRunner.Termination.TOOL_VIOLATION) {
-        outcomeDegr.add("agent-tool-violation:" + agent.role().id());
-        outcomeNotes.add("代理 " + agent.role().id() + " 触发工具隔离边界被终止（" + run.errorMessage() + "）");
-      }
-      return new DispatchOutcome(
-          agent.role().id(),
-          brief.templateVersion(),
-          findings,
-          run.tokensIn(),
-          run.tokensOut(),
-          run.llmUnavailable(),
-          run.llmUnavailable() ? run.errorMessage() : null,
-          run.termination() == AgentRunner.Termination.SCHEMA_VIOLATION
-              ? run.schemaErrors()
-              : List.of(),
-          outcomeDegr,
-          outcomeNotes,
-          outcomeTrims);
-    } catch (RuntimeException e) {
-      // 失败隔离（03§2.3/09§4）：brief 组装/上下文等异常收敛为该代理空产出
-      trace.emit(
-          "agent_output",
-          Map.of(
-              "agent", agent.role().id(),
-              "chunk", scope.key(),
-              "findings", 0,
-              "termination", "failed",
-              "error", String.valueOf(e.getMessage())));
-      List<String> outcomeDegr = new ArrayList<>();
-      outcomeDegr.add("agent-failed:" + agent.role().id());
-      return new DispatchOutcome(
-          agent.role().id(),
-          "",
-          List.of(),
-          0,
-          0,
-          false,
-          null,
-          List.of(),
-          outcomeDegr,
-          List.of("代理 " + agent.role().id() + " 执行失败（" + e.getMessage() + "），已隔离"),
-          List.of());
-    }
-  }
-
-  /** 代理范围（chunk 或全 PR）。 */
-  private record AgentScope(String key, List<DiffFile> files) {
-
-    AgentScope {
-      files = List.copyOf(files == null ? List.of() : files);
-    }
-  }
-
-  private static AgentScope wholePrScope(ChunkPlanner.Plan plan) {
-    List<DiffFile> files = new ArrayList<>();
-    plan.chunks().forEach(c -> files.addAll(c.files()));
-    return new AgentScope("whole-pr", files);
-  }
-
-  private static Map<String, FileContent> scopedFiles(
-      ChunkPlanner.Chunk chunk, Map<String, FileContent> headFiles) {
-    Map<String, FileContent> scoped = new HashMap<>();
-    for (DiffFile file : chunk.files()) {
-      FileContent content = headFiles.get(file.path());
-      if (content != null) {
-        scoped.put(file.path(), content);
-      }
-    }
-    return scoped;
-  }
-
-  private static String testExtraSection(ChunkPlanner.Plan plan) {
-    StringBuilder sb = new StringBuilder();
-    sb.append("### 本次变更的测试相关文件\n");
-    boolean any = false;
-    for (ChunkPlanner.Chunk chunk : plan.chunks()) {
-      for (DiffFile file : chunk.files()) {
-        if (isTestPath(file.path())) {
-          any = true;
-          sb.append("- ").append(file.path()).append("（").append(file.status()).append("）\n");
-        }
-      }
-    }
-    if (!any) {
-      sb.append("-（本次变更未触及 src/test/ 路径）\n");
-    }
-    return sb.toString();
-  }
-
-  /** 全 PR 级代理的上下文：仅 L0 diff（无窗口/全文），L1 预算 = 该角色输入预算 − L0 估算 − 余量。 */
-  private ContextInput wholePrContextInput(AgentScope scope, SubAgent<ReviewAgentInput> agent) {
-    StringBuilder l0 = new StringBuilder();
-    for (DiffFile file : scope.files()) {
-      if (file.patch() != null) {
-        l0.append(file.patch());
-      }
-    }
-    long reserved = TokenMath.estimateTokens(l0.toString()) + 2_000;
-    long l1Budget = Math.max(1_000, agent.budget().maxInputTokens() - reserved);
-    return new ContextInput(scope.files(), Map.of(), 0, false, 1, l1Budget);
-  }
-
-  /** L1 预算 = 代理输入预算 − L0 估算 − 定界/策略占用余量（04§1 预算裁决）；DEGRADE 档收窄窗口并关全文（02§4.4）。 */
-  private ContextInput buildContextInput(
-      ChunkPlanner.Chunk chunk,
-      Map<String, FileContent> headFiles,
-      DepthPlan depthPlan,
-      boolean simplified,
-      long agentInputBudget) {
-    boolean fullText = depthPlan.conditionalFullText() && !simplified;
-    int window = simplified ? Math.min(depthPlan.windowLines(), 15) : depthPlan.windowLines();
-    long reserved = TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000;
-    long l1Budget = Math.max(1_000, agentInputBudget - reserved);
-    return new ContextInput(
-        chunk.files(), headFiles, window, fullText, depthPlan.fullFileMaxLines(), l1Budget);
-  }
-
-  private static String estimateChunkL0(ChunkPlanner.Chunk chunk) {
-    StringBuilder sb = new StringBuilder();
-    for (DiffFile file : chunk.files()) {
-      if (file.patch() != null) {
-        sb.append(file.patch());
-      }
-    }
-    return sb.toString();
   }
 }

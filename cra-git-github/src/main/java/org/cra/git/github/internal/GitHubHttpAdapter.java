@@ -4,26 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import java.io.IOException;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.Side;
@@ -31,7 +19,6 @@ import org.cra.common.git.CommentLedger;
 import org.cra.common.git.CommentSource;
 import org.cra.common.git.CommitSummary;
 import org.cra.common.git.DiffFile;
-import org.cra.common.git.DiffHunk;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.FileContent;
@@ -55,24 +42,21 @@ import org.slf4j.LoggerFactory;
 /**
  * GitHub REST v3 实现（05§2.3 端点清单锁定）：compare diff / contents raw / PR review（只装
  * inline，event=COMMENT，commit_id 绑定 head sha）/ issue comments（Summary 载体）/ 账本拉取 （inline 与 issue
- * 两端点合并，只认 bot 自身评论）。限流告警与 429/403 退避（≤3 次）、整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link
+ * 两端点合并，只认 bot 自身评论）。
+ *
+ * <p>传输与退避在 {@link GitHubHttpTransport}，payload 解析在 {@link GitHubPayloadSupport}，处置标签在 {@link
+ * GitHubDispositionSupport}；本类只保留端口语义、响应映射与发布 payload 组装。整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link
  * CraIntegrationException} 上抛。
  */
 public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private static final Logger LOG = LoggerFactory.getLogger(GitHubHttpAdapter.class);
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final Pattern HUNK_HEADER =
-      Pattern.compile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
-  private static final int MAX_BACKOFF_RETRIES = 3;
   private static final String CI_BOT_LOGIN = "github-actions[bot]";
   private static final int PAGE_SIZE = 100;
   private static final int MAX_PAGES = 10;
 
-  private final String apiBase;
-  private final String token;
-  private final HttpClient http;
-  private final java.util.function.LongConsumer sleeper;
+  private final GitHubHttpTransport transport;
   private final LedgerMarkerParser markerParser = new LedgerMarkerParser();
   private String cachedLogin;
 
@@ -83,18 +67,24 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
    * @param sleeper 退避睡眠（测试注入即时实现）
    */
   public GitHubHttpAdapter(
-      String apiBase, String token, HttpClient http, java.util.function.LongConsumer sleeper) {
-    this.apiBase = apiBase.replaceAll("/+$", "");
-    this.token = token;
-    this.http = http;
-    this.sleeper = sleeper;
+      String apiBase,
+      String token,
+      java.net.http.HttpClient http,
+      java.util.function.LongConsumer sleeper) {
+    this.transport = new GitHubHttpTransport(apiBase, token, http, sleeper);
   }
 
   // ---------- 读：diff / 文件 / 文件树 ----------
 
   @Override
   public DiffResult fetchDiff(RepoRef repo, String baseSha, String headSha) {
-    JsonNode root = getJson(repo, "/compare/" + urlEncode(baseSha) + "..." + urlEncode(headSha));
+    JsonNode root =
+        transport.getJson(
+            repo,
+            "/compare/"
+                + GitHubPayloadSupport.urlEncode(baseSha)
+                + "..."
+                + GitHubPayloadSupport.urlEncode(headSha));
     List<DiffFile> files = new ArrayList<>();
     for (JsonNode f : root.path("files")) {
       String patch =
@@ -109,7 +99,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                   : f.path("previous_filename").asText(),
               f.path("status").asText("modified"),
               patch,
-              patch == null ? List.of() : parseHunks(patch)));
+              patch == null ? List.of() : GitHubPayloadSupport.parseHunks(patch)));
     }
     List<CommitSummary> commits = new ArrayList<>();
     for (JsonNode c : root.path("commits")) {
@@ -122,12 +112,15 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   @Override
   public FileContent readFile(RepoRef repo, String sha, String path) {
     byte[] bytes =
-        getBytes(
+        transport.getBytes(
             repo,
-            "/contents/" + encodePath(path) + "?ref=" + urlEncode(sha),
+            "/contents/"
+                + GitHubPayloadSupport.encodePath(path)
+                + "?ref="
+                + GitHubPayloadSupport.urlEncode(sha),
             "application/vnd.github.raw");
     try {
-      return new FileContent(path, strictUtf8(bytes), false);
+      return new FileContent(path, GitHubPayloadSupport.strictUtf8(bytes), false);
     } catch (CharacterCodingException e) {
       return new FileContent(path, null, true);
     }
@@ -135,8 +128,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   @Override
   public List<String> listFiles(RepoRef repo, String sha, String pathGlob) {
-    JsonNode root = getJson(repo, "/git/trees/" + urlEncode(sha) + "?recursive=1");
-    Pattern glob = globToRegex(pathGlob);
+    JsonNode root =
+        transport.getJson(
+            repo, "/git/trees/" + GitHubPayloadSupport.urlEncode(sha) + "?recursive=1");
+    java.util.regex.Pattern glob = GitHubPayloadSupport.globToRegex(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry : root.path("tree")) {
       if ("blob".equals(entry.path("type").asText())) {
@@ -174,7 +169,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                   ""));
         }
       } catch (CraIntegrationException e) {
-        if (!isUnprocessable(e)) {
+        if (!GitHubHttpTransport.isUnprocessable(e)) {
           throw e; // 非 422 故障不降级，交由 run 级失败处置（02§4.2）
         }
         perItemFallback(cmd, items);
@@ -198,7 +193,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       node.put("side", c.side() == Side.LEFT ? "LEFT" : "RIGHT");
       node.put("body", c.body());
     }
-    JsonNode response = postJson(cmd, "/pulls/" + cmd.prNumber() + "/reviews", payload);
+    JsonNode response =
+        transport.postJson(
+            cmd.repoOwner(), cmd.repoName(), "/pulls/" + cmd.prNumber() + "/reviews", payload);
     List<Long> ids = new ArrayList<>();
     for (JsonNode c : response.path("comments")) {
       ids.add(c.path("id").asLong(0));
@@ -219,7 +216,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       node.put("side", one.side() == Side.LEFT ? "LEFT" : "RIGHT");
       node.put("body", one.body());
       try {
-        JsonNode response = postJson(cmd, "/pulls/" + cmd.prNumber() + "/reviews", payload);
+        JsonNode response =
+            transport.postJson(
+                cmd.repoOwner(), cmd.repoName(), "/pulls/" + cmd.prNumber() + "/reviews", payload);
         long commentId = response.path("comments").path(0).path("id").asLong(0);
         items.add(
             new ReviewItemResult(
@@ -248,7 +247,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     ObjectNode payload = MAPPER.createObjectNode();
     payload.put("body", cmd.summaryBody());
     try {
-      JsonNode response = postJson(cmd, "/issues/" + cmd.prNumber() + "/comments", payload);
+      JsonNode response =
+          transport.postJson(
+              cmd.repoOwner(), cmd.repoName(), "/issues/" + cmd.prNumber() + "/comments", payload);
       long id = response.path("id").asLong(0);
       return id > 0 ? Optional.of(id) : Optional.empty();
     } catch (CraIntegrationException e) {
@@ -268,12 +269,13 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     payload.put("body", body);
     String path = "/repos/" + repo.owner() + "/" + repo.repo() + "/issues/comments/" + commentId;
     HttpRequest request =
-        request(path)
+        transport
+            .request(path)
             .header("Accept", "application/vnd.github+json")
             .header("Content-Type", "application/json")
             .method("PATCH", HttpRequest.BodyPublishers.ofString(payload.toString()))
             .build();
-    execute(request, path);
+    transport.execute(request, path);
   }
 
   private record PostedReview(String reviewId, List<Long> commentIds) {}
@@ -320,7 +322,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   private void collectPaged(
       RepoRef repo, String path, String login, String kind, List<LedgerComment> out) {
     for (int page = 1; page <= MAX_PAGES; page++) {
-      JsonNode root = getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
+      JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
       if (!root.isArray() || root.isEmpty()) {
         return;
       }
@@ -352,7 +354,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     List<PullRequestRef> out = new ArrayList<>();
     for (int page = 1; page <= MAX_PAGES; page++) {
       JsonNode root =
-          getJson(
+          transport.getJson(
               repo,
               "/pulls?state=all&sort=updated&direction=desc&per_page="
                   + PAGE_SIZE
@@ -363,7 +365,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       }
       boolean reachedOlder = false;
       for (JsonNode pr : root) {
-        Instant updated = instantOrNull(pr.path("updated_at"));
+        Instant updated = GitHubDispositionSupport.instantOrNull(pr.path("updated_at"));
         if (updated == null || updated.isBefore(since)) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
@@ -376,7 +378,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
                 pr.path("state").asText(PullRequestRef.STATE_CLOSED),
                 updated,
-                instantOrNull(pr.path("merged_at"))));
+                GitHubDispositionSupport.instantOrNull(pr.path("merged_at"))));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
         break;
@@ -408,7 +410,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
         continue; // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
       }
       String body = c.path("body").asText("");
-      String tag = replyTag(body);
+      String tag = GitHubDispositionSupport.replyTag(body);
       if (tag == null) {
         continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
       }
@@ -416,10 +418,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
           new DispositionSignal(
               DispositionSignal.KIND_REPLY_TAG,
               parent,
-              instantOrEpoch(c.path("created_at")),
+              GitHubDispositionSupport.instantOrEpoch(c.path("created_at")),
               tag,
               c.path("user").path("login").asText(""),
-              excerpt(body)));
+              GitHubDispositionSupport.excerpt(body)));
     }
     List<JsonNode> issueComments = getPaged(repo, "/issues/" + prNumber + "/comments");
     for (JsonNode c : issueComments) {
@@ -440,7 +442,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
             new DispositionSignal(
                 DispositionSignal.KIND_REACTION,
                 commentId,
-                instantOrEpoch(r.path("created_at")),
+                GitHubDispositionSupport.instantOrEpoch(r.path("created_at")),
                 content,
                 r.path("user").path("login").asText(""),
                 ""));
@@ -449,52 +451,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     return out.toArray(new DispositionSignal[0]);
   }
 
-  private static final Pattern TAG_WRONG = Pattern.compile("(?i)(:wrong:|not-a-bug|\\[wrong\\])");
-  private static final Pattern TAG_INTENTIONAL =
-      Pattern.compile("(?i)(:intentional:|\\[intentional\\])");
-  private static final Pattern TAG_FIXED = Pattern.compile("(?i)(:fixed:|\\[fixed\\])");
-
-  private static String replyTag(String body) {
-    if (body == null || body.isBlank()) {
-      return null;
-    }
-    if (TAG_WRONG.matcher(body).find()) {
-      return DispositionSignal.TAG_WRONG;
-    }
-    if (TAG_INTENTIONAL.matcher(body).find()) {
-      return DispositionSignal.TAG_INTENTIONAL;
-    }
-    if (TAG_FIXED.matcher(body).find()) {
-      return DispositionSignal.TAG_FIXED;
-    }
-    return null;
-  }
-
-  private static String excerpt(String body) {
-    String oneLine = body.replaceAll("\\s+", " ").strip();
-    return oneLine.length() <= 200 ? oneLine : oneLine.substring(0, 200) + "…";
-  }
-
-  private static Instant instantOrNull(JsonNode node) {
-    if (node == null || node.isMissingNode() || node.isNull() || node.asText().isBlank()) {
-      return null;
-    }
-    try {
-      return Instant.parse(node.asText());
-    } catch (DateTimeParseException e) {
-      return null;
-    }
-  }
-
-  private static Instant instantOrEpoch(JsonNode node) {
-    Instant parsed = instantOrNull(node);
-    return parsed == null ? Instant.EPOCH : parsed;
-  }
-
   private List<JsonNode> getPaged(RepoRef repo, String path) {
     List<JsonNode> out = new ArrayList<>();
     for (int page = 1; page <= MAX_PAGES; page++) {
-      JsonNode root = getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
+      JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
@@ -510,9 +470,13 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     if (cachedLogin == null) {
       // /user 不在 /repos/{o}/{r} 前缀下（05§2.3：bot 身份按 token 对应 login）
       HttpRequest request =
-          request("/user").header("Accept", "application/vnd.github+json").GET().build();
+          transport.request("/user").header("Accept", "application/vnd.github+json").GET().build();
       try {
-        cachedLogin = parseJson(execute(request, "/user").body(), "/user").path("login").asText();
+        cachedLogin =
+            transport
+                .parseJson(transport.execute(request, "/user").body(), "/user")
+                .path("login")
+                .asText();
       } catch (CraIntegrationException e) {
         if (!isUserForbidden(e)) {
           throw e;
@@ -527,209 +491,5 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private static boolean isUserForbidden(CraIntegrationException e) {
     return e.getMessage() != null && e.getMessage().contains("GitHub API 403 on /user");
-  }
-
-  // ---------- HTTP 基础设施 ----------
-
-  private JsonNode getJson(RepoRef repo, String pathAndQuery) {
-    HttpRequest request =
-        request("/repos/" + repo.owner() + "/" + repo.repo() + pathAndQuery)
-            .header("Accept", "application/vnd.github+json")
-            .GET()
-            .build();
-    HttpResponse<String> response = execute(request, pathAndQuery);
-    return parseJson(response.body(), pathAndQuery);
-  }
-
-  private String getRaw(RepoRef repo, String pathAndQuery, String accept) {
-    HttpRequest request =
-        request("/repos/" + repo.owner() + "/" + repo.repo() + pathAndQuery)
-            .header("Accept", accept)
-            .GET()
-            .build();
-    return execute(request, pathAndQuery).body();
-  }
-
-  private byte[] getBytes(RepoRef repo, String pathAndQuery, String accept) {
-    HttpRequest request =
-        request("/repos/" + repo.owner() + "/" + repo.repo() + pathAndQuery)
-            .header("Accept", accept)
-            .GET()
-            .build();
-    return executeBytes(request, pathAndQuery);
-  }
-
-  private JsonNode postJson(PostReviewCommand cmd, String pathAndQuery, ObjectNode payload) {
-    HttpRequest request =
-        request("/repos/" + cmd.repoOwner() + "/" + cmd.repoName() + pathAndQuery)
-            .header("Accept", "application/vnd.github+json")
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(payload.toString()))
-            .build();
-    HttpResponse<String> response = execute(request, pathAndQuery);
-    return parseJson(response.body(), pathAndQuery);
-  }
-
-  private JsonNode parseJson(String body, String path) {
-    try {
-      return MAPPER.readTree(body);
-    } catch (IOException e) {
-      throw new CraIntegrationException("non-JSON response from " + path, e);
-    }
-  }
-
-  private HttpRequest.Builder request(String pathAndQuery) {
-    return HttpRequest.newBuilder()
-        .uri(URI.create(apiBase + pathAndQuery))
-        .header("Authorization", "Bearer " + token)
-        .header("X-GitHub-Api-Version", "2022-11-28");
-  }
-
-  private HttpResponse<String> execute(HttpRequest request, String path) {
-    for (int attempt = 0; ; attempt++) {
-      HttpResponse<String> response = send(request, path);
-      int status = response.statusCode();
-      if (status == 200 || status == 201) {
-        throttleIfCloseToLimit(response);
-        return response;
-      }
-      if (isRetryable(response) && attempt < MAX_BACKOFF_RETRIES) {
-        sleeper.accept(retryAfterMs(response, attempt)); // 指数退避（05§2.3 ≤3 次）
-        continue;
-      }
-      throw new CraIntegrationException(
-          "GitHub API " + status + " on " + path + ": " + abbreviate(response.body()));
-    }
-  }
-
-  private byte[] executeBytes(HttpRequest request, String path) {
-    for (int attempt = 0; ; attempt++) {
-      HttpResponse<byte[]> response = sendBytes(request, path);
-      int status = response.statusCode();
-      if (status == 200 || status == 201) {
-        return response.body();
-      }
-      if (isRetryable(response) && attempt < MAX_BACKOFF_RETRIES) {
-        sleeper.accept(retryAfterMs(response, attempt));
-        continue;
-      }
-      throw new CraIntegrationException(
-          "GitHub API "
-              + status
-              + " on "
-              + path
-              + ": "
-              + abbreviate(new String(response.body(), StandardCharsets.UTF_8)));
-    }
-  }
-
-  private HttpResponse<String> send(HttpRequest request, String path) {
-    try {
-      return http.send(request, HttpResponse.BodyHandlers.ofString());
-    } catch (IOException e) {
-      throw new CraIntegrationException("transport failure on " + path, e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CraIntegrationException("interrupted on " + path, e);
-    }
-  }
-
-  private HttpResponse<byte[]> sendBytes(HttpRequest request, String path) {
-    try {
-      return http.send(request, HttpResponse.BodyHandlers.ofByteArray());
-    } catch (IOException e) {
-      throw new CraIntegrationException("transport failure on " + path, e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new CraIntegrationException("interrupted on " + path, e);
-    }
-  }
-
-  private static boolean isRetryable(HttpResponse<?> response) {
-    return response.statusCode() == 429
-        || (response.statusCode() == 403
-            && response.headers().firstValue("Retry-After").isPresent());
-  }
-
-  private long retryAfterMs(HttpResponse<?> response, int attempt) {
-    String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
-    // 正则前置校验替代 try/parse：无效头不进 catch（09§4 禁吞异常），直接走指数退避
-    if (retryAfter != null && retryAfter.matches("\\d{1,9}")) {
-      return Long.parseLong(retryAfter) * 1000L;
-    }
-    return 1_000L * (1L << Math.min(attempt, 4));
-  }
-
-  private void throttleIfCloseToLimit(HttpResponse<?> response) {
-    String remaining = response.headers().firstValue("X-RateLimit-Remaining").orElse(null);
-    if (remaining != null && remaining.matches("\\d{1,9}") && Integer.parseInt(remaining) < 20) {
-      // 主动节流告警不硬睡（CI 单 run 调用量小，硬睡拖尾；05§2.3）
-      LOG.warn("github rate limit low: remaining={}", remaining);
-    }
-  }
-
-  private static boolean isUnprocessable(CraIntegrationException e) {
-    return e.getMessage() != null && e.getMessage().contains("GitHub API 422");
-  }
-
-  private static List<DiffHunk> parseHunks(String patch) {
-    List<DiffHunk> hunks = new ArrayList<>();
-    for (String line : patch.split("\n", -1)) {
-      Matcher m = HUNK_HEADER.matcher(line);
-      if (m.matches()) {
-        hunks.add(
-            new DiffHunk(
-                Integer.parseInt(m.group(1)),
-                m.group(2) == null ? 1 : Integer.parseInt(m.group(2)),
-                Integer.parseInt(m.group(3)),
-                m.group(4) == null ? 1 : Integer.parseInt(m.group(4))));
-      }
-    }
-    return hunks;
-  }
-
-  private static String strictUtf8(byte[] bytes) throws CharacterCodingException {
-    return StandardCharsets.UTF_8
-        .newDecoder()
-        .onMalformedInput(CodingErrorAction.REPORT)
-        .onUnmappableCharacter(CodingErrorAction.REPORT)
-        .decode(ByteBuffer.wrap(bytes))
-        .toString();
-  }
-
-  private static Pattern globToRegex(String glob) {
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < glob.length(); i++) {
-      char c = glob.charAt(i);
-      if (c == '*') {
-        if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-          sb.append(".*");
-          i++;
-        } else {
-          sb.append("[^/]*");
-        }
-      } else if (c == '?') {
-        sb.append('.');
-      } else {
-        sb.append(Pattern.quote(String.valueOf(c)));
-      }
-    }
-    return Pattern.compile(sb.toString());
-  }
-
-  private static String encodePath(String path) {
-    return String.join(
-        "/", Arrays.stream(path.split("/")).map(GitHubHttpAdapter::urlEncode).toList());
-  }
-
-  private static String urlEncode(String value) {
-    return URLEncoder.encode(value, StandardCharsets.UTF_8);
-  }
-
-  private static String abbreviate(String s) {
-    if (s == null) {
-      return "";
-    }
-    return s.length() <= 200 ? s : s.substring(0, 200) + "…";
   }
 }

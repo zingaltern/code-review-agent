@@ -18,6 +18,7 @@ import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
+import org.cra.common.text.Texts;
 import org.cra.git.api.GitPlatformAdapter;
 
 /**
@@ -115,6 +116,6 @@ final class GitHubWindowSource implements ReportWindowSource {
   }
 
   private static String abbreviate(String sha) {
-    return sha.length() <= 8 ? sha : sha.substring(0, 8);
+    return Texts.shortSha(sha, 8, "");
   }
 }

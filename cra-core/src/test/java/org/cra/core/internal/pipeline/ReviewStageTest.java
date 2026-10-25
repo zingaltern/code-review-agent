@@ -8,11 +8,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.AgentBudget;
 import org.cra.agents.api.AgentRole;
-import org.cra.agents.api.BugHunterDefinition;
 import org.cra.agents.api.ReviewAgentInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
@@ -28,7 +26,6 @@ import org.cra.core.api.PipelineOptions;
 import org.cra.core.internal.AgentRunner;
 import org.cra.core.internal.TraceWriter;
 import org.cra.llm.api.LlmGateway;
-import org.cra.llm.api.LlmRequest;
 import org.cra.llm.api.LlmResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -90,31 +87,6 @@ class ReviewStageTest {
             stubAgent("bug-hunter/boundary", bh),
             stubAgent("bug-hunter/concurrency", bh),
             stubAgent("bug-hunter/resource", bh)));
-  }
-
-  /** 脚本化假网关：记录 caller，按序回放（耗尽后重复末条）。 */
-  private static final class ScriptedGateway implements LlmGateway {
-
-    // 并发派发下被多线程调用：线程安全集合 + 并发下顺序不保证（断言用计数）
-    private final java.util.Queue<String> callers =
-        new java.util.concurrent.ConcurrentLinkedQueue<>();
-    private final List<LlmResponse> script;
-    private final AtomicInteger index = new AtomicInteger();
-
-    ScriptedGateway(LlmResponse... responses) {
-      this.script = List.of(responses);
-    }
-
-    java.util.Queue<String> callers() {
-      return callers;
-    }
-
-    @Override
-    public LlmResponse complete(LlmRequest request) {
-      callers.add(request.caller());
-      int i = Math.min(index.getAndIncrement(), script.size() - 1);
-      return script.get(i);
-    }
   }
 
   private ReviewStage.StageOutcome runStage(
@@ -189,40 +161,16 @@ class ReviewStageTest {
         };
     ReviewCrew crew = ReviewCrew.ofBugHunters(List.of(broken));
     ReviewStage.StageOutcome outcome =
-        runStage(crew, new ScriptedGateway(), Depth.QUICK, PipelineOptions.defaults(), 1);
+        runStage(
+            crew, new ReviewStageScriptedGateway(), Depth.QUICK, PipelineOptions.defaults(), 1);
     org.assertj.core.api.Assertions.assertThat(outcome.degradations())
         .contains("all-review-agents-failed");
   }
 
   @Test
-  void routePerspectivesFollowsDepthTable() {
-    // 02§4.3：quick 1 / standard 2 / deep 3–4
-    assertThat(ReviewStage.routePerspectives(Depth.QUICK))
-        .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
-    assertThat(ReviewStage.routePerspectives(Depth.STANDARD))
-        .containsExactly(
-            BugHunterDefinition.Perspective.DATAFLOW, BugHunterDefinition.Perspective.BOUNDARY);
-    assertThat(ReviewStage.routePerspectives(Depth.DEEP))
-        .containsExactly(
-            BugHunterDefinition.Perspective.DATAFLOW,
-            BugHunterDefinition.Perspective.BOUNDARY,
-            BugHunterDefinition.Perspective.CONCURRENCY,
-            BugHunterDefinition.Perspective.RESOURCE);
-  }
-
-  @Test
-  void degradePerspectivesDropsOneKeepsOne() {
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.DEEP)))
-        .hasSize(3);
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.STANDARD)))
-        .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.QUICK)))
-        .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
-  }
-
-  @Test
   void quickDepthDispatchesOneAgentPerChunk() {
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(stubCrew(), gateway, Depth.QUICK, PipelineOptions.defaults(), 2);
 
@@ -235,7 +183,8 @@ class ReviewStageTest {
 
   @Test
   void standardDepthDispatchesTwoPerspectivesPerChunk() {
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(stubCrew(), gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
 
@@ -247,7 +196,8 @@ class ReviewStageTest {
   void budgetDegradeCutsOnePerspectiveForRemainingChunks() {
     // 5 chunk × 2 视角 = 10 派发 > 并发 8：首 8 个即时派发；每代理 60 token、runTotal=150
     // → 第 2 次收集后比例 0.8 → DEGRADE，chunk5 只派 1 视角（dataflow），100% 未触发
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 60, 0, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 60, 0, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(
             stubCrew(),
@@ -270,7 +220,8 @@ class ReviewStageTest {
   void budgetStopTerminatesRemainingDispatches() {
     // 5 chunk × 2 视角 = 10 派发 > 并发 8；runTotal=10：首个代理收集后即跨 100%
     // → 剩余未派发 chunk（chunk5）终止，DEGRADED 收尾（02§4.4）
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 0, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 0, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(
             stubCrew(),
@@ -343,7 +294,8 @@ class ReviewStageTest {
                 stubAgent("bug-hunter/boundary", new AgentBudget(24_000, 2_000, 3, 240_000)),
                 stubAgent("bug-hunter/concurrency", new AgentBudget(24_000, 2_000, 3, 240_000)),
                 stubAgent("bug-hunter/resource", new AgentBudget(24_000, 2_000, 3, 240_000))));
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(crew, gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
 
@@ -388,7 +340,8 @@ class ReviewStageTest {
             null,
             null,
             null);
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStage(crew, gateway, Depth.STANDARD, PipelineOptions.defaults(), 2);
 
@@ -396,61 +349,6 @@ class ReviewStageTest {
         .isEqualTo(2);
     assertThat(gateway.callers()).hasSize(6);
     assertThat(outcome.findings()).isNotEmpty();
-  }
-
-  @Test
-  void testReviewerTriggeredOnlyWhenTestRatioLow() {
-    // 03§3：逻辑文件变更且测试变更比例低；≥0.5 不触发
-    DiffResult logicOnly =
-        new DiffResult(
-            "b",
-            "h",
-            List.of(
-                new org.cra.common.git.DiffFile(
-                    "src/A.java", null, "modified", "@@ -1 +1 @@", List.of())),
-            List.of());
-    DiffResult balanced =
-        new DiffResult(
-            "b",
-            "h",
-            List.of(
-                new org.cra.common.git.DiffFile(
-                    "src/A.java", null, "modified", "@@ -1 +1 @@", List.of()),
-                new org.cra.common.git.DiffFile(
-                    "src/test/A.java", null, "modified", "@@ -1 +1 @@", List.of())),
-            List.of());
-    assertThat(ReviewStage.testReviewerTriggered(logicOnly)).isTrue();
-    assertThat(ReviewStage.testReviewerTriggered(balanced)).isFalse();
-  }
-
-  @Test
-  void conventionTriggeredOnlyWithConventionsConfigured() {
-    assertThat(ReviewStage.conventionTriggered(ReviewPolicy.empty())).isFalse();
-    ReviewPolicy withConventions =
-        new ReviewPolicy(
-            true,
-            List.of(),
-            null,
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of("禁止使用 Fastjson"),
-            List.of(),
-            List.of(),
-            List.of());
-    assertThat(ReviewStage.conventionTriggered(withConventions)).isTrue();
-  }
-
-  @Test
-  void perfTriggeredOnlyInDeep() {
-    assertThat(
-            ReviewStage.perfTriggered(
-                new DepthPlan(Depth.STANDARD, 30, true, 200, false, List.of())))
-        .isFalse();
-    assertThat(
-            ReviewStage.perfTriggered(new DepthPlan(Depth.DEEP, 60, true, 400, false, List.of())))
-        .isTrue();
   }
 
   @Test
@@ -463,7 +361,8 @@ class ReviewStageTest {
             stubAgent("test-reviewer", new AgentBudget(12_000, 1_000, 2, 120_000)),
             stubAgent("convention-reviewer", new AgentBudget(8_000, 1_000, 1, 60_000)),
             null);
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStageWithDiff(
             crew,
@@ -498,7 +397,8 @@ class ReviewStageTest {
             stubAgent("test-reviewer", new AgentBudget(12_000, 1_000, 2, 120_000)),
             stubAgent("convention-reviewer", new AgentBudget(8_000, 1_000, 1, 60_000)),
             null);
-    ScriptedGateway gateway = new ScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 150, 0, 1, "m"));
+    ReviewStageScriptedGateway gateway =
+        new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 150, 0, 1, "m"));
     ReviewStage.StageOutcome outcome =
         runStageWithDiff(
             crew,

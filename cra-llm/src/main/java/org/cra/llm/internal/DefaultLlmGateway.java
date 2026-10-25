@@ -9,6 +9,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
+import org.cra.common.text.Texts;
 import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmRequest;
@@ -157,7 +158,7 @@ public final class DefaultLlmGateway implements LlmGateway {
                 + ": llm http "
                 + response.statusCode()
                 + ": "
-                + abbreviate(response.body());
+                + Texts.truncate(response.body(), 200);
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
       } catch (java.io.IOException e) {
@@ -201,12 +202,5 @@ public final class DefaultLlmGateway implements LlmGateway {
 
   private static boolean isRetryable(int statusCode) {
     return statusCode == 429 || statusCode >= 500;
-  }
-
-  private static String abbreviate(String s) {
-    if (s == null) {
-      return "";
-    }
-    return s.length() <= 200 ? s : s.substring(0, 200) + "…";
   }
 }

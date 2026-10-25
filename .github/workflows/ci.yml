@@ -142,10 +142,28 @@ jobs:
             exit 1
           fi
           cd "${GITHUB_WORKSPACE}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          report_commit=$(python3 -c "import json;print(json.load(open('eval/l2/report.json')).get('commit') or '')")
+          if [ -z "$report_commit" ]; then
+            echo "::error::L2 报告缺少 commit 绑定（--commit）"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$report_commit" "$head_sha"; then
+            echo "::error::L2 报告 commit $report_commit 不在 PR 历史中"
+            exit 1
+          fi
+          # 报告只能绑定被测代码提交；report.json 自身提交是新 commit，允许其后仅 eval/l2/ 变更。
+          # 任何非报告文件改动都意味着报告已过期（04§2.4 荣誉制 + 此处防“报告后继续改代码”）。
+          changed_after=$(git diff --name-only "$report_commit" "$head_sha")
+          if echo "$changed_after" | grep -vE '^eval/l2/' | grep -q .; then
+            echo "::error::L2 报告 commit 之后仍有非 eval/l2/ 改动，报告已过期："
+            echo "$changed_after"
+            exit 1
+          fi
           mvn -B -ntp -pl cra-eval -am package -DskipTests -q
           java -jar cra-eval/target/cra-eval-0.1.0.jar verify \
             --report "$report" --sha256-file "$hash" --tier l2 \
-            --expect-commit "${{ github.event.pull_request.head.sha }}"
+            --expect-commit "$report_commit"
       - name: 上传校验记录
         if: always()
         uses: actions/upload-artifact@v4

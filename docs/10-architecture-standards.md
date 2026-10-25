@@ -1,5 +1,6 @@
 # 10 · 架构规范
 
+> 文档版本：v1.0.3（2026-10-26，本轮治理：cra-common 子包列表同步 + 生产侧 god class 行数基线更新）
 > 文档版本：v1.0.2（2026-10-25，M0 实现撞墙定点修订：R1 片段 Infra 行补 Eval——10§2 矩阵与 ADR-0005 放开的 cra-eval→git(+git-gh) ✅ 会被旧片段层规则误判红，矩阵是单一事实源）
 > 文档版本：v1.0.1（2026-10-25，并入 v1 基线：第五轮缺陷①③⑤——eval 矩阵行放开取数、源码扫描并入 cra-archtest、R1-R8 自 M0 required；附录增 ADR-0005）
 > 前置阅读：`02-architecture-design.md` §1/§3、`03-multi-agent-design.md` §1、`05-data-and-integration.md` §2
@@ -61,7 +62,7 @@ org.cra.<module>/
 
 | 模块 | api | internal / 说明 |
 |---|---|---|
-| cra-common | 免二分：整个模块即公共契约（05§1 数据模型 + SPI 入参出参 POJO） | 子包按域：`finding` / `run` / `plan` / `brief` / `trace` |
+| cra-common | 免二分：整个模块即公共契约（05§1 数据模型 + SPI 入参出参 POJO） | 子包按域：`finding` / `run` / `git` / `context` / `exception` / `text` |
 | cra-llm | `LlmGateway` + 降级结果对象（02§4.2） | `routing` / `retry` / `concurrency` / `cost`（02§4.5） |
 | cra-git | `GitPlatformAdapter`、`LocalRepoContext`（05§2.1） | jgit blame 实现 |
 | cra-git-github | 包名 `org.cra.git.github`（09§3）；api = 装配工厂 | `http`、账本标记解析（05§1.3）、锚定校验（05§2.2） |
@@ -147,7 +148,7 @@ ArchUnit 违规的唯一合法出口是 **freeze 冻结**，没有"先合了再�
 ## 8. 禁止事项
 
 1. 循环依赖（模块级或包级）——CI 红（R2）【强制】；
-2. 上帝类：单类型 >500 行（含 prompt 模板资源除外）即拆分——评审提醒，不做门禁【建议】；
+2. 上帝类：单类型 >500 行（含 prompt 模板资源除外）即拆分——评审提醒，不做门禁【建议】；本轮治理后生产侧 ReviewPipeline / ReviewStage / GitHubHttpAdapter / WeeklyReportBuilder 均已降至 500 行以下，新增超线类型按本条评审提醒处理；
 3. 跨层反射、`Class.forName` 动态加载绕过 api 边界——R8【强制】；
 4. 编排器外 `new` 子代理实现：SubAgent 实现类只能由组合根装配产生；cra-core 只面向 `SubAgent` 接口与 cra-agents 的 api 定义编程（03§1）【强制】；
 5. 跨模块 import 他模块 `internal` 包——R3【强制】；

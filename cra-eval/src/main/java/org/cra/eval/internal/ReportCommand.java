@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.exception.CraIntegrationException;
+import org.cra.common.text.Texts;
 import org.cra.eval.api.WeeklyReport;
 import org.cra.git.github.api.GitHubAssembly;
 import org.cra.git.github.api.GitHubComponents;
@@ -38,7 +39,8 @@ public final class ReportCommand {
     if (args.ledgerFixture() != null) {
       source = new ReplayWindowSource(args.ledgerFixture());
     } else {
-      String token = firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
+      String token =
+          Texts.firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
       if (token == null) {
         throw new CraConfigException(
             "report 需要 GitHub 只读 token：--token / GITHUB_TOKEN / GH_TOKEN（或用 --ledger-fixture 离线回放）");
@@ -99,15 +101,6 @@ public final class ReportCommand {
       }
     }
     return out;
-  }
-
-  private static String firstNonBlank(String... values) {
-    for (String value : values) {
-      if (value != null && !value.isBlank()) {
-        return value;
-      }
-    }
-    return null;
   }
 
   /** 窗口长度解析（7d / 12h / 2w）。 */

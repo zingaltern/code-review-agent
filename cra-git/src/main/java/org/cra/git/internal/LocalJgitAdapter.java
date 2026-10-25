@@ -24,6 +24,7 @@ import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
+import org.cra.common.text.Texts;
 import org.cra.git.api.LocalGitAdapter;
 import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
@@ -317,6 +318,6 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
   }
 
   private static String shortSha(String sha) {
-    return sha == null ? "" : sha.substring(0, Math.min(7, sha.length()));
+    return Texts.shortSha(sha, 7, "");
   }
 }

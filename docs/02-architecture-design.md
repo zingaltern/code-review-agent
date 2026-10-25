@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③⑤；规范包 08–11 入库时 §3 登记 cra-archtest）
 > 前置阅读：`01-background-and-research.md`
 > **v1.1**：新增 §5 部署形态与状态归属；触发收窄为仅 PR；LLM 并发与降级语义补全。
@@ -71,7 +72,7 @@ PR:opened/synchronize ─→ Trigger(CI job / CLI)
 
 ```
 code-review-agent/
-├── cra-common/            # 纯 POJO：Finding/Brief/Verdict/Plan/RunStatus 等
+├── cra-common/            # 纯公共契约：Finding/RunStatus 等数据模型 + 无依赖文本/校验辅助
 ├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
 │   └── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）

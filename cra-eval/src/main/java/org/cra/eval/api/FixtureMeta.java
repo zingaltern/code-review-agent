@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 import java.util.Objects;
+import org.cra.common.text.Texts;
 
 /**
  * 用例元数据（06§3 fixture 规格的 meta.json，评测数据集格式 v1，11§2 演进扩展点——字段变更须 bump {@code format_version}
@@ -59,13 +60,13 @@ public record FixtureMeta(
       throw new IllegalArgumentException(
           "meta format_version=" + formatVersion + " 不受支持（当前 " + FORMAT_VERSION + "）");
     }
-    requireNonBlank(caseId, "case_id");
-    requireNonBlank(set, "set");
+    Texts.requireNonBlank(caseId, "case_id");
+    Texts.requireNonBlank(set, "set");
     if (!SET_BAD.equals(set) && !SET_CLEAN.equals(set) && !SET_ADVERSARIAL.equals(set)) {
       throw new IllegalArgumentException("非法 set: " + set + "（bad|clean|adversarial）");
     }
     if (SET_ADVERSARIAL.equals(set)) {
-      requireNonBlank(adversarialSubtype, "adversarial_subtype");
+      Texts.requireNonBlank(adversarialSubtype, "adversarial_subtype");
       if (!"injection".equals(adversarialSubtype)
           && !"hallucination".equals(adversarialSubtype)
           && !"refusal".equals(adversarialSubtype)
@@ -76,17 +77,11 @@ public record FixtureMeta(
                 + "（injection|hallucination|refusal|context）");
       }
     }
-    requireNonBlank(baseSha, "base_sha");
-    requireNonBlank(headSha, "head_sha");
+    Texts.requireNonBlank(baseSha, "base_sha");
+    Texts.requireNonBlank(headSha, "head_sha");
     Objects.requireNonNull(snapshot, "snapshot");
     Objects.requireNonNull(reviewRequest, "review_request");
     filteredTestFiles = List.copyOf(filteredTestFiles == null ? List.of() : filteredTestFiles);
-  }
-
-  private static void requireNonBlank(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must be non-blank");
-    }
   }
 
   /**
@@ -103,7 +98,7 @@ public record FixtureMeta(
       @JsonProperty("crop_root") String cropRoot) {
 
     public Snapshot {
-      requireNonBlank(file, "snapshot.file");
+      Texts.requireNonBlank(file, "snapshot.file");
       sha256 = sha256 == null || sha256.isBlank() ? null : sha256;
       cropRoot = cropRoot == null ? "" : cropRoot;
     }
@@ -126,8 +121,8 @@ public record FixtureMeta(
       if (prNumber <= 0) {
         throw new IllegalArgumentException("pr_number must be positive: " + prNumber);
       }
-      requireNonBlank(repoOwner, "review_request.repo_owner");
-      requireNonBlank(repoName, "review_request.repo_name");
+      Texts.requireNonBlank(repoOwner, "review_request.repo_owner");
+      Texts.requireNonBlank(repoName, "review_request.repo_name");
     }
   }
 
