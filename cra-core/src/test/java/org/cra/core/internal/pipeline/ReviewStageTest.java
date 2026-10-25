@@ -197,12 +197,12 @@ class ReviewStageTest {
   @Test
   void routePerspectivesFollowsDepthTable() {
     // 02§4.3：quick 1 / standard 2 / deep 3–4
-    assertThat(ReviewStage.routePerspectives(Depth.QUICK))
+    assertThat(ReviewRoutingPolicy.routePerspectives(Depth.QUICK))
         .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
-    assertThat(ReviewStage.routePerspectives(Depth.STANDARD))
+    assertThat(ReviewRoutingPolicy.routePerspectives(Depth.STANDARD))
         .containsExactly(
             BugHunterDefinition.Perspective.DATAFLOW, BugHunterDefinition.Perspective.BOUNDARY);
-    assertThat(ReviewStage.routePerspectives(Depth.DEEP))
+    assertThat(ReviewRoutingPolicy.routePerspectives(Depth.DEEP))
         .containsExactly(
             BugHunterDefinition.Perspective.DATAFLOW,
             BugHunterDefinition.Perspective.BOUNDARY,
@@ -212,11 +212,17 @@ class ReviewStageTest {
 
   @Test
   void degradePerspectivesDropsOneKeepsOne() {
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.DEEP)))
+    assertThat(
+            ReviewRoutingPolicy.degradePerspectives(
+                ReviewRoutingPolicy.routePerspectives(Depth.DEEP)))
         .hasSize(3);
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.STANDARD)))
+    assertThat(
+            ReviewRoutingPolicy.degradePerspectives(
+                ReviewRoutingPolicy.routePerspectives(Depth.STANDARD)))
         .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
-    assertThat(ReviewStage.degradePerspectives(ReviewStage.routePerspectives(Depth.QUICK)))
+    assertThat(
+            ReviewRoutingPolicy.degradePerspectives(
+                ReviewRoutingPolicy.routePerspectives(Depth.QUICK)))
         .containsExactly(BugHunterDefinition.Perspective.DATAFLOW);
   }
 
@@ -419,13 +425,13 @@ class ReviewStageTest {
                 new org.cra.common.git.DiffFile(
                     "src/test/A.java", null, "modified", "@@ -1 +1 @@", List.of())),
             List.of());
-    assertThat(ReviewStage.testReviewerTriggered(logicOnly)).isTrue();
-    assertThat(ReviewStage.testReviewerTriggered(balanced)).isFalse();
+    assertThat(ReviewRoutingPolicy.testReviewerTriggered(logicOnly)).isTrue();
+    assertThat(ReviewRoutingPolicy.testReviewerTriggered(balanced)).isFalse();
   }
 
   @Test
   void conventionTriggeredOnlyWithConventionsConfigured() {
-    assertThat(ReviewStage.conventionTriggered(ReviewPolicy.empty())).isFalse();
+    assertThat(ReviewRoutingPolicy.conventionTriggered(ReviewPolicy.empty())).isFalse();
     ReviewPolicy withConventions =
         new ReviewPolicy(
             true,
@@ -439,17 +445,18 @@ class ReviewStageTest {
             List.of(),
             List.of(),
             List.of());
-    assertThat(ReviewStage.conventionTriggered(withConventions)).isTrue();
+    assertThat(ReviewRoutingPolicy.conventionTriggered(withConventions)).isTrue();
   }
 
   @Test
   void perfTriggeredOnlyInDeep() {
     assertThat(
-            ReviewStage.perfTriggered(
+            ReviewRoutingPolicy.perfTriggered(
                 new DepthPlan(Depth.STANDARD, 30, true, 200, false, List.of())))
         .isFalse();
     assertThat(
-            ReviewStage.perfTriggered(new DepthPlan(Depth.DEEP, 60, true, 400, false, List.of())))
+            ReviewRoutingPolicy.perfTriggered(
+                new DepthPlan(Depth.DEEP, 60, true, 400, false, List.of())))
         .isTrue();
   }
 
