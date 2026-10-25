@@ -16,6 +16,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.stubbing.ServeEvent;
 import java.net.http.HttpClient;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.cra.common.exception.CraIntegrationException;
@@ -23,11 +24,13 @@ import org.cra.common.finding.Side;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
+import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
+import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
 import org.junit.jupiter.api.AfterAll;
@@ -339,8 +342,77 @@ class GitHubHttpAdapterWireMockTest {
   }
 
   @Test
-  void dispositionSignalsNotCollectedInM0() {
-    assertThat(adapter.fetchDispositionSignals(REPO, 7)).isEmpty();
+  void listPullRequestsFiltersWindowAndMapsMergeState() {
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"merge_commit_sha\":\"m1\",\"updated_at\":\"2026-10-24T00:00:00Z\","
+                        + "\"merged_at\":\"2026-10-24T00:00:00Z\"},"
+                        + "{\"number\":6,\"state\":\"closed\",\"head\":{\"sha\":\"h0\"},"
+                        + "\"merge_commit_sha\":null,\"updated_at\":\"2026-10-01T00:00:00Z\","
+                        + "\"merged_at\":null}]")));
+    List<PullRequestRef> pulls =
+        adapter.listPullRequests(REPO, Instant.parse("2026-10-18T00:00:00Z"));
+    assertThat(pulls).hasSize(1);
+    assertThat(pulls.get(0).number()).isEqualTo(7);
+    assertThat(pulls.get(0).headSha()).isEqualTo("h1");
+    assertThat(pulls.get(0).mergeCommitSha()).isEqualTo("m1");
+    assertThat(pulls.get(0).merged()).isTrue();
+  }
+
+  @Test
+  void fetchDispositionSignalsReadsBotRepliesAndSummaryReactions() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":100,\"user\":{\"login\":\"cra-bot\"},\"body\":\"finding\","
+                        + "\"created_at\":\"2026-10-20T00:00:00Z\",\"commit_id\":\"abc\"},"
+                        + "{\"id\":101,\"user\":{\"login\":\"human\"},"
+                        + "\"body\":\"this is :wrong: not-a-bug\","
+                        + "\"created_at\":\"2026-10-21T00:00:00Z\",\"in_reply_to_id\":100},"
+                        + "{\"id\":102,\"user\":{\"login\":\"human\"},\"body\":\"thanks, will fix\","
+                        + "\"created_at\":\"2026-10-21T01:00:00Z\",\"in_reply_to_id\":100},"
+                        + "{\"id\":103,\"user\":{\"login\":\"human\"},\"body\":\"human to human\","
+                        + "\"created_at\":\"2026-10-21T02:00:00Z\",\"in_reply_to_id\":101}]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":200,\"user\":{\"login\":\"cra-bot\"},\"body\":\"summary\","
+                        + "\"created_at\":\"2026-10-20T00:00:00Z\"},"
+                        + "{\"id\":201,\"user\":{\"login\":\"human\"},\"body\":\"hi\","
+                        + "\"created_at\":\"2026-10-20T01:00:00Z\"}]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/comments/200/reactions?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"content\":\"+1\",\"user\":{\"login\":\"bob\"},"
+                        + "\"created_at\":\"2026-10-22T00:00:00Z\"},"
+                        + "{\"content\":\"heart\",\"user\":{\"login\":\"eve\"},"
+                        + "\"created_at\":\"2026-10-22T01:00:00Z\"}]")));
+    DispositionSignal[] signals = adapter.fetchDispositionSignals(REPO, 7);
+    assertThat(signals).hasSize(2);
+    DispositionSignal reply =
+        java.util.Arrays.stream(signals)
+            .filter(s -> DispositionSignal.KIND_REPLY_TAG.equals(s.kind()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(reply.commentId()).isEqualTo(100);
+    assertThat(reply.detail()).isEqualTo(DispositionSignal.TAG_WRONG);
+    assertThat(reply.actor()).isEqualTo("human");
+    assertThat(reply.excerpt()).contains(":wrong:");
+    DispositionSignal reaction =
+        java.util.Arrays.stream(signals)
+            .filter(s -> DispositionSignal.KIND_REACTION.equals(s.kind()))
+            .findFirst()
+            .orElseThrow();
+    assertThat(reaction.commentId()).isEqualTo(200);
+    assertThat(reaction.detail()).isEqualTo(DispositionSignal.REACTION_UP);
   }
 
   private static PostReviewCommand command(int count) {

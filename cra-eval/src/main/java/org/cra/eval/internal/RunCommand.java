@@ -52,10 +52,9 @@ public final class RunCommand {
     EvalRunner runner = new EvalRunner(CliProcessRunner.JAVA_JAR);
     int index = 0;
     for (Path caseDir : caseDirs) {
-      DatasetLoader.LoadedCase loaded = DatasetLoader.load(caseDir, cacheDir);
-      FixtureMeta meta = loaded.meta();
-      metas.put(meta.caseId(), meta);
-      expecteds.put(meta.caseId(), loaded.expected());
+      // 状态机先于数据加载（06§3）：draft 只有草稿、无 expected_findings.json——先给出"未确认"的
+      // 明确拒绝，而不是文件缺失的误导性解析错误
+      FixtureMeta meta = Json.readMeta(caseDir.resolve("meta.json"));
       if (isRelabeled(meta)) {
         // 净化工序②：relabeled 样本已挪集，原集统计作废（06§3）——不计入本集合观测
         ReportWriter.printLines(List.of("跳过改标样本: " + meta.caseId() + "（recheck=relabeled）"));
@@ -65,6 +64,9 @@ public final class RunCommand {
         throw new CraConfigException(
             "用例 " + meta.caseId() + " 标注仍为 draft——先 cra-eval annotate confirm 后再 run（禁止跑未确认断言）");
       }
+      DatasetLoader.LoadedCase loaded = DatasetLoader.load(caseDir, cacheDir);
+      metas.put(meta.caseId(), meta);
+      expecteds.put(meta.caseId(), loaded.expected());
       Path workDir = runsDir.resolve(meta.caseId());
       ensureEmptyDir(workDir);
       for (int k = 0; k < args.k(); k++) {

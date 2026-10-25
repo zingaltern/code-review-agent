@@ -1,0 +1,20 @@
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_102", "event": "run_start", "repo": "acme/demo", "pr": 102, "base": "base1", "head": "head1", "depth": "standard", "dry_run": false}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_1", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_2", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_3", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_4", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_5", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_6", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_7", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_8", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_9", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_10", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_11", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_12", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_13", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_14", "verifier_verdict": "REFUTED", "decision": "reject", "reason": "refuted", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_102", "event": "promotion", "finding_id": "f_102_15", "verifier_verdict": "REFUTED", "decision": "reject", "reason": "refuted", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_102", "event": "judge", "finding_id": "f_102_11", "verdict": "CONFIRMED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_102", "event": "judge", "finding_id": "f_102_12", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_102", "event": "judge", "finding_id": "f_102_13", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_102", "event": "run_end", "status": "success", "findings_published": 10, "skipped_duplicate": 0, "suppressed_by_truncation": 1, "tokens_in": 1, "tokens_out": 1, "latency_ms": 100}

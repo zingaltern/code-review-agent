@@ -1,0 +1,356 @@
+{
+  "number": 102,
+  "head_sha": "commitcc",
+  "merge_commit_sha": "mergecc",
+  "state": "closed",
+  "updated_at": "2026-10-05T10:00:00Z",
+  "merged_at": "2026-10-05T10:00:00Z",
+  "comments": [
+    {
+      "id": 20201,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 1** — `src/main/java/A0.java:60`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20202,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 2** — `src/main/java/A1.java:61`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20203,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 3** — `src/main/java/A2.java:62`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20204,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 4** — `src/main/java/A3.java:63`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20205,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 5** — `src/main/java/A4.java:64`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20206,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 6** — `src/main/java/A5.java:65`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20207,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 7** — `src/main/java/A6.java:66`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20208,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 8** — `src/main/java/A7.java:67`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20209,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 9** — `src/main/java/A8.java:68`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20210,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 10** — `src/main/java/A9.java:69`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20211,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 11** — `src/main/java/A10.java:70`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20212,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 12** — `src/main/java/A11.java:71`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20213,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 13** — `src/main/java/A12.java:72`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    },
+    {
+      "id": 20214,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 14** — `src/main/java/B0.java:70`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-01T10:00:00Z",
+      "commit_id": "commitcc"
+    }
+  ],
+  "finding_markers": [
+    {
+      "fingerprint": "00660001",
+      "file": "src/main/java/A0.java",
+      "line": 60,
+      "category": "bug",
+      "finding_id": "f_102_1",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20201
+    },
+    {
+      "fingerprint": "00660002",
+      "file": "src/main/java/A1.java",
+      "line": 61,
+      "category": "bug",
+      "finding_id": "f_102_2",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20202
+    },
+    {
+      "fingerprint": "00660003",
+      "file": "src/main/java/A2.java",
+      "line": 62,
+      "category": "bug",
+      "finding_id": "f_102_3",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20203
+    },
+    {
+      "fingerprint": "00660004",
+      "file": "src/main/java/A3.java",
+      "line": 63,
+      "category": "bug",
+      "finding_id": "f_102_4",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20204
+    },
+    {
+      "fingerprint": "00660005",
+      "file": "src/main/java/A4.java",
+      "line": 64,
+      "category": "bug",
+      "finding_id": "f_102_5",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20205
+    },
+    {
+      "fingerprint": "00660006",
+      "file": "src/main/java/A5.java",
+      "line": 65,
+      "category": "bug",
+      "finding_id": "f_102_6",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20206
+    },
+    {
+      "fingerprint": "00660007",
+      "file": "src/main/java/A6.java",
+      "line": 66,
+      "category": "bug",
+      "finding_id": "f_102_7",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20207
+    },
+    {
+      "fingerprint": "00660008",
+      "file": "src/main/java/A7.java",
+      "line": 67,
+      "category": "bug",
+      "finding_id": "f_102_8",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20208
+    },
+    {
+      "fingerprint": "00660009",
+      "file": "src/main/java/A8.java",
+      "line": 68,
+      "category": "bug",
+      "finding_id": "f_102_9",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20209
+    },
+    {
+      "fingerprint": "0066000a",
+      "file": "src/main/java/A9.java",
+      "line": 69,
+      "category": "bug",
+      "finding_id": "f_102_10",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20210
+    },
+    {
+      "fingerprint": "0066000b",
+      "file": "src/main/java/A10.java",
+      "line": 70,
+      "category": "bug",
+      "finding_id": "f_102_11",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20211
+    },
+    {
+      "fingerprint": "0066000c",
+      "file": "src/main/java/A11.java",
+      "line": 71,
+      "category": "bug",
+      "finding_id": "f_102_12",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20212
+    },
+    {
+      "fingerprint": "0066000d",
+      "file": "src/main/java/A12.java",
+      "line": 72,
+      "category": "bug",
+      "finding_id": "f_102_13",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20213
+    },
+    {
+      "fingerprint": "0066000e",
+      "file": "src/main/java/B0.java",
+      "line": 70,
+      "category": "bug",
+      "finding_id": "f_102_14",
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "comment_id": 20214
+    }
+  ],
+  "run_markers": [
+    {
+      "run_id": "run_102",
+      "commit_sha": "commitcc",
+      "status": "DONE",
+      "findings": 10,
+      "suppressed": 1,
+      "comment_id": 9101
+    },
+    {
+      "run_id": "run_102b",
+      "commit_sha": "commitcc",
+      "status": "DEGRADED",
+      "findings": 2,
+      "suppressed": 0,
+      "comment_id": 9102
+    }
+  ],
+  "suspect_count": 0,
+  "signals": [],
+  "touches": [
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A0.java",
+      "line": 60
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A1.java",
+      "line": 61
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A2.java",
+      "line": 62
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A3.java",
+      "line": 63
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A4.java",
+      "line": 64
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A5.java",
+      "line": 65
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A6.java",
+      "line": 66
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A7.java",
+      "line": 67
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A8.java",
+      "line": 68
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A9.java",
+      "line": 69
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A10.java",
+      "line": 70
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A11.java",
+      "line": 71
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/A12.java",
+      "line": 72
+    },
+    {
+      "commit": "commitcc",
+      "file": "src/main/java/B0.java",
+      "line": 9000
+    }
+  ]
+}

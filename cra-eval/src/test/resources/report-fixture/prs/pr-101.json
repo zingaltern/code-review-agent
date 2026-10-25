@@ -1,0 +1,661 @@
+{
+  "number": 101,
+  "head_sha": "commitaa",
+  "merge_commit_sha": "mergeaa",
+  "state": "closed",
+  "updated_at": "2026-10-15T10:00:00Z",
+  "merged_at": "2026-10-15T10:00:00Z",
+  "comments": [
+    {
+      "id": 20101,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 1** — `src/main/java/Foo0.java:10`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20102,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 2** — `src/main/java/Foo1.java:11`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20103,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 3** — `src/main/java/Foo2.java:12`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20104,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 4** — `src/main/java/Foo3.java:13`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20105,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 5** — `src/main/java/Foo4.java:14`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20106,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 6** — `src/main/java/Foo5.java:15`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20107,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 7** — `src/main/java/Foo6.java:16`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20108,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 8** — `src/main/java/Foo7.java:17`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20109,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 9** — `src/main/java/Foo8.java:18`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20110,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 10** — `src/main/java/Foo9.java:19`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20111,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 11** — `src/main/java/Foo10.java:20`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20112,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 12** — `src/main/java/Foo11.java:21`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20113,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 13** — `src/main/java/Foo12.java:22`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20114,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 14** — `src/main/java/Foo13.java:23`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20115,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 15** — `src/main/java/Foo14.java:24`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20116,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 16** — `src/main/java/Foo15.java:25`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20117,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 17** — `src/main/java/Foo16.java:26`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20118,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 18** — `src/main/java/Foo17.java:27`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20119,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 19** — `src/main/java/Bar0.java:20`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20120,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 20** — `src/main/java/Bar1.java:21`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20121,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 21** — `src/main/java/Baz0.java:30`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20122,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 22** — `src/main/java/Baz1.java:31`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20123,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 23** — `src/main/java/Qux0.java:40`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20124,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 24** — `src/main/java/Qux1.java:41`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitaa"
+    },
+    {
+      "id": 20125,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 25** — `src/main/java/Unk0.java:50`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitbb"
+    },
+    {
+      "id": 20126,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 26** — `src/main/java/Unk1.java:51`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-10T10:00:00Z",
+      "commit_id": "commitbb"
+    }
+  ],
+  "finding_markers": [
+    {
+      "fingerprint": "00650001",
+      "file": "src/main/java/Foo0.java",
+      "line": 10,
+      "category": "bug",
+      "finding_id": "f_101_1",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20101
+    },
+    {
+      "fingerprint": "00650002",
+      "file": "src/main/java/Foo1.java",
+      "line": 11,
+      "category": "bug",
+      "finding_id": "f_101_2",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20102
+    },
+    {
+      "fingerprint": "00650003",
+      "file": "src/main/java/Foo2.java",
+      "line": 12,
+      "category": "bug",
+      "finding_id": "f_101_3",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20103
+    },
+    {
+      "fingerprint": "00650004",
+      "file": "src/main/java/Foo3.java",
+      "line": 13,
+      "category": "bug",
+      "finding_id": "f_101_4",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20104
+    },
+    {
+      "fingerprint": "00650005",
+      "file": "src/main/java/Foo4.java",
+      "line": 14,
+      "category": "bug",
+      "finding_id": "f_101_5",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20105
+    },
+    {
+      "fingerprint": "00650006",
+      "file": "src/main/java/Foo5.java",
+      "line": 15,
+      "category": "bug",
+      "finding_id": "f_101_6",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20106
+    },
+    {
+      "fingerprint": "00650007",
+      "file": "src/main/java/Foo6.java",
+      "line": 16,
+      "category": "bug",
+      "finding_id": "f_101_7",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20107
+    },
+    {
+      "fingerprint": "00650008",
+      "file": "src/main/java/Foo7.java",
+      "line": 17,
+      "category": "bug",
+      "finding_id": "f_101_8",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20108
+    },
+    {
+      "fingerprint": "00650009",
+      "file": "src/main/java/Foo8.java",
+      "line": 18,
+      "category": "bug",
+      "finding_id": "f_101_9",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20109
+    },
+    {
+      "fingerprint": "0065000a",
+      "file": "src/main/java/Foo9.java",
+      "line": 19,
+      "category": "bug",
+      "finding_id": "f_101_10",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20110
+    },
+    {
+      "fingerprint": "0065000b",
+      "file": "src/main/java/Foo10.java",
+      "line": 20,
+      "category": "bug",
+      "finding_id": "f_101_11",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20111
+    },
+    {
+      "fingerprint": "0065000c",
+      "file": "src/main/java/Foo11.java",
+      "line": 21,
+      "category": "bug",
+      "finding_id": "f_101_12",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20112
+    },
+    {
+      "fingerprint": "0065000d",
+      "file": "src/main/java/Foo12.java",
+      "line": 22,
+      "category": "bug",
+      "finding_id": "f_101_13",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20113
+    },
+    {
+      "fingerprint": "0065000e",
+      "file": "src/main/java/Foo13.java",
+      "line": 23,
+      "category": "bug",
+      "finding_id": "f_101_14",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20114
+    },
+    {
+      "fingerprint": "0065000f",
+      "file": "src/main/java/Foo14.java",
+      "line": 24,
+      "category": "bug",
+      "finding_id": "f_101_15",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20115
+    },
+    {
+      "fingerprint": "00650010",
+      "file": "src/main/java/Foo15.java",
+      "line": 25,
+      "category": "bug",
+      "finding_id": "f_101_16",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20116
+    },
+    {
+      "fingerprint": "00650011",
+      "file": "src/main/java/Foo16.java",
+      "line": 26,
+      "category": "bug",
+      "finding_id": "f_101_17",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20117
+    },
+    {
+      "fingerprint": "00650012",
+      "file": "src/main/java/Foo17.java",
+      "line": 27,
+      "category": "bug",
+      "finding_id": "f_101_18",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20118
+    },
+    {
+      "fingerprint": "00650013",
+      "file": "src/main/java/Bar0.java",
+      "line": 20,
+      "category": "bug",
+      "finding_id": "f_101_19",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20119
+    },
+    {
+      "fingerprint": "00650014",
+      "file": "src/main/java/Bar1.java",
+      "line": 21,
+      "category": "bug",
+      "finding_id": "f_101_20",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20120
+    },
+    {
+      "fingerprint": "00650015",
+      "file": "src/main/java/Baz0.java",
+      "line": 30,
+      "category": "bug",
+      "finding_id": "f_101_21",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20121
+    },
+    {
+      "fingerprint": "00650016",
+      "file": "src/main/java/Baz1.java",
+      "line": 31,
+      "category": "bug",
+      "finding_id": "f_101_22",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20122
+    },
+    {
+      "fingerprint": "00650017",
+      "file": "src/main/java/Qux0.java",
+      "line": 40,
+      "category": "bug",
+      "finding_id": "f_101_23",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20123
+    },
+    {
+      "fingerprint": "00650018",
+      "file": "src/main/java/Qux1.java",
+      "line": 41,
+      "category": "bug",
+      "finding_id": "f_101_24",
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "comment_id": 20124
+    },
+    {
+      "fingerprint": "00650019",
+      "file": "src/main/java/Unk0.java",
+      "line": 50,
+      "category": "bug",
+      "finding_id": "f_101_25",
+      "run_id": "run_101",
+      "commit_sha": "commitbb",
+      "comment_id": 20125
+    },
+    {
+      "fingerprint": "0065001a",
+      "file": "src/main/java/Unk1.java",
+      "line": 51,
+      "category": "bug",
+      "finding_id": "f_101_26",
+      "run_id": "run_101",
+      "commit_sha": "commitbb",
+      "comment_id": 20126
+    }
+  ],
+  "run_markers": [
+    {
+      "run_id": "run_101",
+      "commit_sha": "commitaa",
+      "status": "DONE",
+      "findings": 16,
+      "suppressed": 2,
+      "comment_id": 9001
+    },
+    {
+      "run_id": "run_101b",
+      "commit_sha": "commitbb",
+      "status": "DONE",
+      "findings": 0,
+      "suppressed": 0,
+      "comment_id": 9002
+    }
+  ],
+  "suspect_count": 0,
+  "signals": [
+    {
+      "kind": "reply_tag",
+      "comment_id": 20121,
+      "occurred_at": "2026-10-11T10:00:00Z",
+      "detail": "intentional",
+      "actor": "alice",
+      "excerpt": ":intentional: done"
+    },
+    {
+      "kind": "reply_tag",
+      "comment_id": 20122,
+      "occurred_at": "2026-10-11T10:00:00Z",
+      "detail": "intentional",
+      "actor": "alice",
+      "excerpt": ":intentional: done"
+    },
+    {
+      "kind": "reply_tag",
+      "comment_id": 20123,
+      "occurred_at": "2026-10-11T10:00:00Z",
+      "detail": "wrong",
+      "actor": "alice",
+      "excerpt": ":wrong: done"
+    },
+    {
+      "kind": "reply_tag",
+      "comment_id": 20124,
+      "occurred_at": "2026-10-11T10:00:00Z",
+      "detail": "wrong",
+      "actor": "alice",
+      "excerpt": ":wrong: done"
+    },
+    {
+      "kind": "reaction",
+      "comment_id": 9001,
+      "occurred_at": "2026-10-16T10:00:00Z",
+      "detail": "+1",
+      "actor": "bob",
+      "excerpt": ""
+    },
+    {
+      "kind": "reaction",
+      "comment_id": 9002,
+      "occurred_at": "2026-10-16T10:00:00Z",
+      "detail": "-1",
+      "actor": "carol",
+      "excerpt": ""
+    }
+  ],
+  "touches": [
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo0.java",
+      "line": 10
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo1.java",
+      "line": 11
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo2.java",
+      "line": 12
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo3.java",
+      "line": 13
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo4.java",
+      "line": 14
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo5.java",
+      "line": 15
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo6.java",
+      "line": 16
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo7.java",
+      "line": 17
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo8.java",
+      "line": 18
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo9.java",
+      "line": 19
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo10.java",
+      "line": 20
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo11.java",
+      "line": 21
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo12.java",
+      "line": 22
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo13.java",
+      "line": 23
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo14.java",
+      "line": 24
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo15.java",
+      "line": 25
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo16.java",
+      "line": 26
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Foo17.java",
+      "line": 27
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Bar0.java",
+      "line": 9000
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Bar1.java",
+      "line": 9001
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Baz0.java",
+      "line": 30
+    },
+    {
+      "commit": "commitaa",
+      "file": "src/main/java/Baz1.java",
+      "line": 31
+    }
+  ]
+}

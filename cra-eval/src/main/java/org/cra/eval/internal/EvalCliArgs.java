@@ -7,10 +7,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.common.git.RepoRef;
 
 /**
- * {@code cra-eval} 参数解析（run | annotate | verify 子命令，05§3）。缺参/非法值 → CraConfigException（退出码 2，与 cra
- * review 同语义）。
+ * {@code cra-eval} 参数解析（run | annotate | verify | gate | report | badcase 子命令，05§3）。缺参/非法值 →
+ * CraConfigException（退出码 2，与 cra review 同语义）。
  */
 public final class EvalCliArgs {
 
@@ -80,6 +81,66 @@ public final class EvalCliArgs {
   public record GateArgs(
       Path report, String tier, Path jsonOut, Path sha256Out, boolean crosscheckerEnabled) {}
 
+  /**
+   * report 命令参数（T3.4）。
+   *
+   * @param repo 仓库
+   * @param since 窗口长度（7d/12h/2w）
+   * @param jsonOut JSON 输出路径（可空）
+   * @param ledgerFixture 离线账本回放目录（可空 = 走 GitHub）
+   * @param traceDirs run trace 目录（漏斗/拒真池）
+   * @param previous 历史周报 JSON（趋势基线）
+   * @param dataset 数据集根（扫描 badcase.json；可空）
+   * @param token GitHub token（可空，命令层回退环境变量）
+   * @param apiBase GitHub API 根
+   */
+  public record ReportArgs(
+      RepoRef repo,
+      String since,
+      Path jsonOut,
+      Path ledgerFixture,
+      List<Path> traceDirs,
+      List<Path> previous,
+      Path dataset,
+      String token,
+      String apiBase) {}
+
+  /**
+   * badcase add 命令参数（T3.5）。
+   *
+   * @param dataset 数据集根
+   * @param runRef 原始 run 引用（本地路径或 artifact://）
+   * @param findingId finding 标识
+   * @param label missed|false-positive|relabeled
+   * @param toSet relabeled 目标集合（可空）
+   * @param caseId 自定义 case id（可空）
+   * @param annotator 标注人
+   * @param reason 理由
+   * @param diffFile 离线 diff（可空）
+   * @param snapshotDir 离线快照目录（可空）
+   * @param artifactRoot artifact:// 解析根（可空）
+   * @param token GitHub token（可空）
+   * @param apiBase GitHub API 根
+   * @param file 覆盖 finding 文件（可空）
+   * @param line 覆盖 finding 行号（可空）
+   */
+  public record BadcaseArgs(
+      Path dataset,
+      String runRef,
+      String findingId,
+      String label,
+      String toSet,
+      String caseId,
+      String annotator,
+      String reason,
+      Path diffFile,
+      Path snapshotDir,
+      Path artifactRoot,
+      String token,
+      String apiBase,
+      String file,
+      Integer line) {}
+
   private EvalCliArgs() {}
 
   /**
@@ -116,9 +177,8 @@ public final class EvalCliArgs {
       case "annotate" -> parseAnnotate(named, positional);
       case "verify" -> parseVerify(named);
       case "gate" -> parseGate(named);
-      case "report" ->
-          throw new CraConfigException(
-              "cra-eval report 随 M3 处置采集落地（T3.4，06§1.1）；当前支持: run | annotate | verify");
+      case "report" -> parseReport(named, env);
+      case "badcase" -> parseBadcase(named, positional, env);
       default -> throw new CraConfigException("未知子命令: " + sub + "；" + usage());
     };
   }
@@ -233,6 +293,111 @@ public final class EvalCliArgs {
     return new AnnotateArgs(Path.of(fixture), action, toSet, annotator, reason);
   }
 
+  private static ReportArgs parseReport(Map<String, String> named, Map<String, String> env) {
+    String repo = named.get("--repo");
+    if (repo == null || repo.isBlank()) {
+      throw new CraConfigException("缺参数: --repo <owner/name>");
+    }
+    String since = named.getOrDefault("--since", "7d");
+    ReportCommand.DurationSpec.parse(since);
+    String json = named.get("--json");
+    String fixture = named.get("--ledger-fixture");
+    List<Path> traceDirs = pathList(named.get("--trace-dir"));
+    List<Path> previous = pathList(named.get("--previous"));
+    String dataset = named.get("--dataset");
+    Path datasetPath = dataset != null ? Path.of(dataset) : defaultDataset();
+    String token = named.get("--token");
+    String apiBase = named.get("--api-base");
+    if (apiBase == null || apiBase.isBlank()) {
+      apiBase = env.getOrDefault("GITHUB_API_URL", "https://api.github.com");
+    }
+    return new ReportArgs(
+        RepoRef.parse(repo),
+        since,
+        json == null ? null : Path.of(json),
+        fixture == null ? null : Path.of(fixture),
+        traceDirs,
+        previous,
+        datasetPath,
+        token,
+        apiBase);
+  }
+
+  private static BadcaseArgs parseBadcase(
+      Map<String, String> named, List<String> positional, Map<String, String> env) {
+    if (positional.isEmpty() || !"add".equals(positional.get(0))) {
+      throw new CraConfigException("badcase 子命令当前只支持 add；" + usage());
+    }
+    if (positional.size() < 3) {
+      throw new CraConfigException(
+          "缺参数: badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled --dataset <dir>");
+    }
+    String dataset = named.get("--dataset");
+    if (dataset == null || dataset.isBlank()) {
+      throw new CraConfigException("缺参数: --dataset <dir>");
+    }
+    String label = named.get("--label");
+    if (label == null || label.isBlank()) {
+      throw new CraConfigException("缺参数: --label missed|false-positive|relabeled");
+    }
+    if (!List.of("missed", "false-positive", "relabeled").contains(label)) {
+      throw new CraConfigException("--label 非法: " + label + "（missed|false-positive|relabeled）");
+    }
+    Integer line = null;
+    if (named.containsKey("--line")) {
+      try {
+        line = Integer.parseInt(named.get("--line"));
+      } catch (NumberFormatException e) {
+        throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
+      }
+      if (line <= 0) {
+        throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
+      }
+    }
+    String apiBase = named.get("--api-base");
+    if (apiBase == null || apiBase.isBlank()) {
+      apiBase = env.getOrDefault("GITHUB_API_URL", "https://api.github.com");
+    }
+    return new BadcaseArgs(
+        Path.of(dataset),
+        positional.get(1),
+        positional.get(2),
+        label,
+        named.get("--to-set"),
+        named.get("--case-id"),
+        named.getOrDefault("--annotator", "unknown"),
+        named.getOrDefault("--reason", ""),
+        named.containsKey("--diff-file") ? Path.of(named.get("--diff-file")) : null,
+        named.containsKey("--snapshot-dir") ? Path.of(named.get("--snapshot-dir")) : null,
+        named.containsKey("--artifact-root") ? Path.of(named.get("--artifact-root")) : null,
+        named.get("--token"),
+        apiBase,
+        named.get("--file"),
+        line);
+  }
+
+  private static Path defaultDataset() {
+    for (Path candidate : List.of(Path.of("cra-eval", "dataset"), Path.of("dataset"))) {
+      if (Files.isDirectory(candidate)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  private static List<Path> pathList(String value) {
+    if (value == null || value.isBlank()) {
+      return List.of();
+    }
+    List<Path> out = new ArrayList<>();
+    for (String part : value.split(",")) {
+      if (!part.isBlank()) {
+        out.add(Path.of(part.strip()));
+      }
+    }
+    return out;
+  }
+
   private static Path locateCliJar(String hint) {
     if (hint != null && !hint.isBlank()) {
       Path p = Path.of(hint);
@@ -296,6 +461,13 @@ public final class EvalCliArgs {
           cra-eval verify --report <json> [--sha256 <hex>|--sha256-file <path>] [--tier l1|l2|l3]
               [--expect-commit SHA]
           cra-eval gate --report <json> [--tier l1|l2|l3] [--json-out PATH] [--sha256-out PATH]
-              [--crosschecker-enabled]""";
+              [--crosschecker-enabled]
+          cra-eval report --repo <owner/name> --since 7d [--json PATH] [--ledger-fixture DIR]
+              [--trace-dir DIR[,DIR...]] [--previous REPORT.json[,REPORT.json...]] [--dataset DIR]
+              [--token TOKEN] [--api-base URL]
+          cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled
+              --dataset <dir> [--to-set bad|clean] [--case-id ID] [--annotator NAME] [--reason TEXT]
+              [--diff-file PATH] [--snapshot-dir DIR] [--artifact-root DIR] [--token TOKEN]
+              [--api-base URL] [--file PATH] [--line N]""";
   }
 }

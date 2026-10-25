@@ -22,6 +22,7 @@ dataset/
 | `diff.patch` | ✅ | 评审 diff（bad 集已过 hunk 级测试文件过滤，过滤结果记入 `filtered_test_files`） |
 | `expected_findings.json` | ✅ | 断言规格（expected + negative_baits），06§3 口径：file + 行 ±5 + 类别 + 全部关键词 |
 | `repo_snapshot.tgz` | ❌（.gitignore） | head 侧裁剪快照（缺陷相关模块），`meta.snapshot.sha256` 校验 |
+| `badcase.json` | ✅（仅 badcase 条目） | 线上 badcase 固化来源（T3.5）：label/run_ref/run_id/finding_id/verifier_verdict；`meta.source=production` |
 
 **快照 tgz 不入仓库**（体积与许可）。缺失时加载器报错并指向本 README。
 
@@ -74,15 +75,17 @@ shasum -a 256 repo_snapshot.tgz   # 回填 meta.snapshot.sha256
 2. **REVIEW.md `Known incidents` 含矛盾条目**：企业会话 30 分钟硬上限（INC-2087）、
    报表 totals 必须先求和后舍入（INC-1932）；
 3. **上下游路径含相关 commit**：不在 diff 内的 `SessionPolicy.java` / `ReportTotals.java`
-   承载被引 commit（`9c41d2a` / `5b81e77`）的实现与注释；fixture 无真实 git 历史，
-   jgit 变更史输入在真实仓库中以该 commit 体现（meta.note 如实声明）。
+   承载被引 commit（`9c41d2a` / `5b81e77`）的实现与注释；**快照含 `.git` 三提交历史**
+   （root → 矛盾 commit → head，日期固定、矛盾 commit 触及 PR 变更文件以进入
+   CrossChecker 路径集窗口），`meta.base/head_sha` 与该历史真实 git SHA 对齐——
+   jgit 变更史维度的度量据此可执行（M3 协调者验收修复）。
 
 期望检出 `category=context`（CrossChecker M4f-lite 的输出类别）。**M4f 未启用时该子集
 检出率按 06§1.2 跳过、不计入门禁分母**；冒烟 run 记录见仓库提交说明。
 
-> 框架接缝：`FixtureMeta` 的 `adversarial_subtype` 枚举目前仅接受
-> injection|hallucination|refusal（`cra-eval/src`，A/C 线领地）。加载 context 用例前需
-> 该枚举接受 `context`（与 `--set adv-context` 过滤同源）；本线仅交付数据，未改框架代码。
+> 框架接缝（已闭环）：`FixtureMeta` 的 `adversarial_subtype` 已接受 `context`
+> （M3 协调者补，`FixtureMetaTest` 4 例守护）；快照 `.git` 历史与 eval 的 `--workspace`
+> 透传同批修复（stub contents 前缀硬编码 bug 一并修复）——context 冒烟 2/2 检出。
 > **在枚举更新前，`--set bad|clean|adversarial` 会读取全部 meta 并在 context 用例上抛异常**；
 > 新增子集冒烟用 `--set all --case <id,...>` 规避（列表过滤不读 meta），或先完成枚举接入。
 
@@ -120,10 +123,22 @@ cra-eval run --dataset cra-eval/dataset --set all --case <新增 case 清单> \
 - **adversarial +2**（10→12）：context 2 条（见上）；
 - 全部新用例经 `cra-eval annotate prefill → 人工确认（--annotator zcode-dataset）→ confirm`，
   `recheck=pending` 待净化工序②复核；
-- **CI 快照包需重打**：`.github/workflows/eval.yml` 仍从 v0.1.0 release 资产
-  `dataset-snapshots-m1.tar` 解包（只含 M1 的 30 条快照）。新增用例的快照需重新打包上传
-  （`tar -cf dataset-snapshots-m3.tar -C cra-eval/dataset <case>/repo_snapshot.tgz`），
-  否则 CI 全量 run 会在新用例上报快照缺失。
+- **CI 快照包已切换**：v0.3.0 release 资产 `dataset-snapshots-m3.tar`（62 条，含 context 2），
+  `.github/workflows/{ci,eval}.yml` 已同步（M3 协调者）；m1 资产保留历史。
+
+## 线上 badcase 固化（T3.5，06§2）
+
+```bash
+cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled \
+  --dataset cra-eval/dataset [--diff-file PATH] [--snapshot-dir DIR]
+# 然后人工核对 expected_findings.draft.json，再：
+cra-eval annotate --fixture cra-eval/dataset/<set>/<case-id> --action confirm --annotator <name>
+```
+
+- `missed` → bad 集（expected 草案取 finding 自身位置/类别/关键词）；
+- `false-positive` → clean 集（expected 草案为空，clean 口径 = 该 run 全部发布计误报）；
+- `relabeled` → `--to-set bad|clean`（默认 bad）；
+- 未 confirm 的 draft 用例不会被 `run` 执行（06§3 状态机）；来源记录见 `badcase.json`。
 
 ## recheck 复核通道（净化工序②格式预留，06§3）
 

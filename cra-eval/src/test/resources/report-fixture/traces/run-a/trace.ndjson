@@ -1,0 +1,43 @@
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "run_start", "repo": "acme/demo", "pr": 101, "base": "base1", "head": "head1", "depth": "standard", "dry_run": false}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_1", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_2", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_3", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_4", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_5", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_6", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_7", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_8", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_9", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_10", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_11", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_12", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_13", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_14", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_15", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_16", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_17", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_18", "verifier_verdict": "CONFIRMED", "decision": "publish", "reason": "verifier-confirmed", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_19", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_20", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_21", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_22", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_23", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_24", "verifier_verdict": "REFUTED", "decision": "judge", "reason": "refuted-spotcheck", "spotcheck_fuse": true, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_25", "verifier_verdict": "REFUTED", "decision": "reject", "reason": "refuted-nit", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_26", "verifier_verdict": "INSUFFICIENT_EVIDENCE", "decision": "judge", "reason": "insufficient-arbitration", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_27", "verifier_verdict": "INSUFFICIENT_EVIDENCE", "decision": "judge", "reason": "insufficient-arbitration", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_28", "verifier_verdict": "INSUFFICIENT_EVIDENCE", "decision": "judge", "reason": "insufficient-arbitration", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_29", "verifier_verdict": "INSUFFICIENT_EVIDENCE", "decision": "judge", "reason": "insufficient-arbitration", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"run_id": "run_101", "event": "promotion", "finding_id": "f_101_30", "verifier_verdict": "INSUFFICIENT_EVIDENCE", "decision": "judge", "reason": "insufficient-arbitration", "spotcheck_fuse": false, "ts": "2026-10-12T10:00:00Z"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_19", "verdict": "CONFIRMED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_20", "verdict": "CONFIRMED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_21", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_22", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_23", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_24", "verdict": "unavailable", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_26", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_27", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_28", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_29", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "judge", "finding_id": "f_101_30", "verdict": "REJECTED", "rationale": "mock"}
+{"ts": "2026-10-12T10:00:00Z", "run_id": "run_101", "event": "run_end", "status": "success", "findings_published": 16, "skipped_duplicate": 0, "suppressed_by_truncation": 2, "tokens_in": 1, "tokens_out": 1, "latency_ms": 100}

@@ -169,12 +169,19 @@ public interface LocalRepoContext {                                            /
 }
 
 public interface CommentSource {                                               // v1 基线新增（ADR-0005，10§6）：账本与处置采集的取数端口
+    default List<PullRequestRef> listPullRequests(RepoRef repo, Instant since); // v1.3.3（T3.4）：窗口 PR 发现；不可得 = 空列表 + 声明
     CommentLedger fetchBotComments(RepoRef repo, int prNumber);                // 与 GitPlatformAdapter 同名方法同语义，返回 common POJO
-    DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);   // 06§1.1 周报数据面
+    DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);   // 06§1.1 周报数据面（reply 标签 + Summary reaction）
 }
 // 消费方：cra-store 的 GitHub 评论账本实现（构造器注入，只依赖 common 类型）与 cra-eval report；
 // 提供方：cra-git-github（适配既有 adapter 方法）；装配：组合根（cra-runner-cli 与 eval 的 Main）。
 ```
+
+**v1.3.3 实现补充（T3.4，2026-10-26）**：`DispositionSignal` 增 `detail`（wrong|intentional|fixed / +1|-1）、
+`actor`、`excerpt` 三个可空分量（保留三参构造，纯加法）；`listPullRequests` 为 default 方法（平台不支持时返回空列表，
+消费方声明不采，11§4 第 5 条）。GitHub 实现：PR 列表 `/pulls?state=all&sort=updated`；reply 从
+`/pulls/{n}/comments` 全量评论按 `in_reply_to_id` 关联 bot 评论；reaction 从 `/issues/comments/{id}/reactions`。
+resolve 仍不采（GraphQL-only）。
 
 **修订说明**：
 
@@ -205,7 +212,9 @@ public interface CommentSource {                                               /
 | inline 评论发布 | `POST /repos/{o}/{r}/pulls/{n}/reviews` | 只装 inline，body 固定引导语 |
 | Summary 发布/收尾编辑 | `POST` / `PATCH /repos/{o}/{r}/issues/{n}/comments/{id}` | issue comment 可编辑（review body 不可） |
 | Summary reaction（处置信号） | `POST /repos/{o}/{r}/issues/comments/{id}/reactions` | 👍/👎 快捷处置（06§1.1） |
-| 账本拉取 | `GET /pulls/comments` + `GET /issues/{n}/comments` + review replies 线索 | bot 的 inline 与 Summary 分属不同端点，合并去重（v1.2 已定） |
+| 账本拉取 | `GET /pulls/comments` + `GET /issues/{n}/comments` + review replies 线索 | bot 的 inline 与 Summary 分属不同端点，合并去重（v1.2 已定）；人类 reply 含 `in_reply_to_id`（v1.3.3 处置采集） |
+| 周报 PR 发现 | `GET /pulls?state=all&sort=updated&direction=desc` | T3.4 `listPullRequests`：按 updated_at 过滤窗口（05§2.1） |
+| Summary 满意度 | `GET /issues/comments/{id}/reactions` | T3.4：👍/👎 记 run 满意度，不参与单 finding 分类（06§1.1） |
 
 **resolve 状态为 GraphQL-only**：REST v3 锁定下不采、不操作（06§1.1、02§5）。
 
@@ -221,9 +230,23 @@ cra review --local [--base main] [--head REF] [--depth standard] [--dry-run=fals
   [--exec "mvn -B -ntp verify"] [--ledger-db ~/.cra/ledger.db] \
   [--model-strong M] [--model-light M] [--fallback-chain standard,light] [--rpm standard=60,strong=30,light=60]
 
-# 处置采集/周报（本地跑，读 GitHub 账本，无常驻服务）
-cra-eval report --repo zingaltern/code-review-agent --since 7d
+# 处置采集/周报（本地跑，读 GitHub 账本，无常驻服务；T3.4）
+cra-eval report --repo zingaltern/code-review-agent --since 7d \
+  [--json report.json] [--ledger-fixture DIR] [--trace-dir DIR[,DIR...]] \
+  [--previous REPORT.json[,REPORT.json...]] [--dataset DIR] [--token TOKEN] [--api-base URL]
+
+# badcase 固化（T3.5，06§2）
+cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled \
+  --dataset cra-eval/dataset [--to-set bad|clean] [--case-id ID] [--annotator NAME] [--reason TEXT] \
+  [--diff-file PATH] [--snapshot-dir DIR] [--artifact-root DIR] [--token TOKEN] [--api-base URL]
 ```
+
+`report` 参数语义：`--since` 支持 `7d`/`12h`/`2w`；token 取 `--token` → `GITHUB_TOKEN` → `GH_TOKEN`；
+无 token 且无 `--ledger-fixture` → 退出码 2。`--ledger-fixture` 为离线账本回放（测试/脱敏样例，报告
+`data_source=ledger-fixture`）；`--trace-dir` 缺省读本地 `.cra/runs`（存在时）；`--previous` 为历史周报 JSON
+（零发布率趋势基线，需本期 + 两期才判定"连续两周上行"）。`badcase add` 的 `run_ref` 支持本地 run 目录 /
+`artifact://<rel>`（相对 `--artifact-root`，默认 `.cra/artifact`）/ `file://`；缺 `--diff-file` 或
+`--snapshot-dir` 时需要 token 从远端拉；draft 用例须 `annotate confirm` 后才进回归。
 
 本地模式解析语义（v1.3.2 实现落地）：`--repo`/`--head`/`--token`/`CRA_LLM_*` 均可省——仓库身份由 remote origin 推导（兜底 `local/<目录名>`）、head 解析为 HEAD、无 `CRA_LLM_API_KEY` 时评审段**如实跳过**（报告声明，不伪装）；`--pr` 省缺为 0（本地无 PR，账本按 `(repo, 0, commit)` 键控）。
 

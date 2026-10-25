@@ -1,0 +1,72 @@
+{
+  "number": 104,
+  "head_sha": "commitee",
+  "merge_commit_sha": "mergeee",
+  "state": "closed",
+  "updated_at": "2026-10-23T10:00:00Z",
+  "merged_at": "2026-10-23T10:00:00Z",
+  "comments": [
+    {
+      "id": 20401,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 1** — `src/main/java/D0.java:90`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-23T10:00:00Z",
+      "commit_id": "commitee"
+    },
+    {
+      "id": 20402,
+      "kind": "inline",
+      "author": "github-actions[bot]",
+      "body": "**[IMPORTANT] finding 2** — `src/main/java/D1.java:91`\n\nmock body\n\n<!-- cra:v=2.1 -->",
+      "created_at": "2026-10-23T10:00:00Z",
+      "commit_id": "commitee"
+    }
+  ],
+  "finding_markers": [
+    {
+      "fingerprint": "00680001",
+      "file": "src/main/java/D0.java",
+      "line": 90,
+      "category": "bug",
+      "finding_id": "f_104_1",
+      "run_id": "run_104",
+      "commit_sha": "commitee",
+      "comment_id": 20401
+    },
+    {
+      "fingerprint": "00680002",
+      "file": "src/main/java/D1.java",
+      "line": 91,
+      "category": "bug",
+      "finding_id": "f_104_2",
+      "run_id": "run_104",
+      "commit_sha": "commitee",
+      "comment_id": 20402
+    }
+  ],
+  "run_markers": [
+    {
+      "run_id": "run_104",
+      "commit_sha": "commitee",
+      "status": "DONE",
+      "findings": 1,
+      "suppressed": 0,
+      "comment_id": 9201
+    }
+  ],
+  "suspect_count": 0,
+  "signals": [],
+  "touches": [
+    {
+      "commit": "commitee",
+      "file": "src/main/java/D0.java",
+      "line": 9001
+    },
+    {
+      "commit": "commitee",
+      "file": "src/main/java/D1.java",
+      "line": 9002
+    }
+  ]
+}

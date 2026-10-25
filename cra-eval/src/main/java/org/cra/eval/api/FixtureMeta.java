@@ -15,7 +15,7 @@ import java.util.Objects;
  *     commit，期望 findings 为空）、{@code adversarial}（微型 fixture）
  * @param adversarialSubtype 对抗集子类：injection（藏指令）/ hallucination（幻觉诱导）/ refusal（拒真陷阱）/
  *     context（v1.3.1 第 4 类：隐式假设与外部证据矛盾，06§1.2）；非对抗集为 null
- * @param source 来源：defects4j | synthetic
+ * @param source 来源：defects4j | synthetic | production（T3.5 badcase 固化；来源细节见用例目录 badcase.json）
  * @param project Defects4J 项目 id（如 Gson），synthetic 为 null
  * @param bugId Defects4J bug 编号，无则为 null
  * @param reportId 上游 issue/PR 标识（如 gson#40），可空

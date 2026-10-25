@@ -1,0 +1,7 @@
+diff --git a/src/main/java/Foo.java b/src/main/java/Foo.java
+index 1111111..2222222 100644
+--- a/src/main/java/Foo.java
++++ b/src/main/java/Foo.java
+@@ -40,3 +40,3 @@ class Foo {
+-    return items.get(items.size());
++    return items.get(items.size() - 1);

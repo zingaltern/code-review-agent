@@ -4,13 +4,15 @@ import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraException;
 import org.cra.eval.internal.AnnotateCommand;
+import org.cra.eval.internal.BadcaseCommand;
 import org.cra.eval.internal.EvalCliArgs;
 import org.cra.eval.internal.GateCommand;
+import org.cra.eval.internal.ReportCommand;
 import org.cra.eval.internal.RunCommand;
 import org.cra.eval.internal.VerifyCommand;
 
 /**
- * cra-eval CLI 入口（05§3：评测命令行壳；run / annotate / verify，report 随 T3.4）。
+ * cra-eval CLI 入口（05§3：评测命令行壳；M1 run/annotate + M3 verify/gate/report/badcase）。
  *
  * <pre>
  * cra-eval run --dataset &lt;dir&gt; [--set ...] [--k N] [--depth quick] [--tier auto|l1|l2|l3]
@@ -18,10 +20,12 @@ import org.cra.eval.internal.VerifyCommand;
  * cra-eval annotate --fixture &lt;caseDir&gt; [--action prefill|confirm|relabel] ...
  * cra-eval verify --report &lt;json&gt; [--sha256 &lt;hex&gt;|--sha256-file &lt;path&gt;] [--tier l1|l2|l3] [--expect-commit SHA]
  * cra-eval gate --report &lt;json&gt; [--tier l1|l2|l3] [--json-out PATH] [--sha256-out PATH]
+ * cra-eval report --repo &lt;owner/name&gt; --since 7d [--json PATH] [--ledger-fixture DIR] ...
+ * cra-eval badcase add &lt;run_ref&gt; &lt;finding_id&gt; --label ... --dataset &lt;dir&gt; ...
  * </pre>
  *
- * <p>退出码（05§3）：0 正常完成（门禁红绿在报告中呈现，不改变退出码语义）；2 自身故障（参数/数据集/被测对象启动失败）； 5 门禁红（{@code --fail-on-red}
- * 生效）或 verify 校验失败——供 CI 的 L1/L2 job 判定（04§2.4）。
+ * <p>退出码（05§3）：0 正常完成（门禁红绿在报告中呈现，不改变退出码语义）；2 自身故障（参数/数据集/被测对象启动失败/ 平台取数失败）；5 门禁红（{@code
+ * --fail-on-red} 生效）或 verify 校验失败——供 CI 的 L1/L2 job 判定（04§2.4）。
  */
 public final class EvalCli {
 
@@ -64,6 +68,14 @@ public final class EvalCli {
       }
       if (parsed instanceof EvalCliArgs.GateArgs gateArgs) {
         return GateCommand.execute(gateArgs);
+      }
+      if (parsed instanceof EvalCliArgs.ReportArgs reportArgs) {
+        ReportCommand.execute(reportArgs, env);
+        return 0;
+      }
+      if (parsed instanceof EvalCliArgs.BadcaseArgs badcaseArgs) {
+        BadcaseCommand.execute(badcaseArgs, env);
+        return 0;
       }
       return 2;
     } catch (CraException e) {

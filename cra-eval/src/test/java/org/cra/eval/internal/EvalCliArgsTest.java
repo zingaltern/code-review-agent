@@ -102,10 +102,60 @@ class EvalCliArgsTest {
   }
 
   @Test
-  void reportSubcommandIsReservedForT34() {
-    assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"report", "--repo", "o/r"}, Map.of()))
+  void reportAndBadcaseSubcommands() {
+    EvalCliArgs.ReportArgs report =
+        (EvalCliArgs.ReportArgs)
+            EvalCliArgs.parse(
+                new String[] {
+                  "report",
+                  "--repo",
+                  "o/r",
+                  "--since",
+                  "7d",
+                  "--ledger-fixture",
+                  "fx",
+                  "--trace-dir",
+                  "a,b",
+                  "--previous",
+                  "p1,p2"
+                },
+                Map.of());
+    assertThat(report.repo().owner()).isEqualTo("o");
+    assertThat(report.since()).isEqualTo("7d");
+    assertThat(report.ledgerFixture()).isEqualTo(Path.of("fx"));
+    assertThat(report.traceDirs()).containsExactly(Path.of("a"), Path.of("b"));
+    assertThat(report.previous()).containsExactly(Path.of("p1"), Path.of("p2"));
+    assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"report"}, Map.of()))
         .isInstanceOf(CraConfigException.class)
-        .hasMessageContaining("T3.4");
+        .hasMessageContaining("--repo");
+    assertThatThrownBy(
+            () ->
+                EvalCliArgs.parse(
+                    new String[] {"report", "--repo", "o/r", "--since", "7x"}, Map.of()))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--since");
+
+    EvalCliArgs.BadcaseArgs badcase =
+        (EvalCliArgs.BadcaseArgs)
+            EvalCliArgs.parse(
+                new String[] {
+                  "badcase", "add", "runs/run_1", "f_1", "--label", "missed", "--dataset", "ds"
+                },
+                Map.of());
+    assertThat(badcase.runRef()).isEqualTo("runs/run_1");
+    assertThat(badcase.findingId()).isEqualTo("f_1");
+    assertThat(badcase.label()).isEqualTo("missed");
+    assertThat(badcase.dataset()).isEqualTo(Path.of("ds"));
+    assertThatThrownBy(
+            () ->
+                EvalCliArgs.parse(
+                    new String[] {"badcase", "add", "r", "f", "--label", "nope", "--dataset", "ds"},
+                    Map.of()))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--label");
+    assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"badcase", "add"}, Map.of()))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("badcase add");
   }
 
   @Test

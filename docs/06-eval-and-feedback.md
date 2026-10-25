@@ -42,6 +42,35 @@
 零发布率   = finding=0 的 run 占比                     趋势护栏：连续两周上行触发复盘
 ```
 
+#### 1.1.1 实现注记（T3.4/T3.5/T3.6，2026-10-26 落地）
+
+- **取数面**：`cra-eval report` 经 `CommentSource` 端口（05§2.1，ADR-0005，构造器注入）拉账本；PR 发现用
+  `listPullRequests`（GitHub `GET /pulls?state=all&sort=updated`），账本用
+  `GET /pulls/{n}/comments` + `GET /issues/{n}/comments` 双端点合并；人类 reply 从同一 pulls/comments 端点按
+  `in_reply_to_id` 关联 bot 评论；Summary 满意度用 `GET /issues/comments/{id}/reactions`。**resolve 仍不采**（GraphQL-only）。
+  离线回放 `--ledger-fixture` 走同一聚合路径（测试/脱敏样例），报告 `data_source` 如实标注。
+- **处置分类优先级（实现口径）**：① reply 标签（同一评论多条时取最新；同刻按 wrong > intentional > fixed）；
+  ② 合并后锚定行被后续 commit 改动 → fixed（自动初判：`compare(评论 commit…PR head)` 的 LEFT 侧 hunk 覆盖锚定行；
+  重命名/删除/二进制按整文件"涉及"处理）；③ 合并满 7 天、行未改且无标签 → ignored；④ 合并未满 7 天 / 未合并 /
+  compare 不可得 → pending（**不进分母**）。06 原表"合并时行未改 → intentional"与"7 天无信号 → ignored"存在口径重叠；
+  实现以 **ignored 承接"合并未改"的自动判定**（intentional 只来自显式 `:intentional:` 标签）——否则 ignored 永远为 0，
+  "分母含此噪声"的声明失去对象；两套分母同时输出，口径差异可见。
+- **两套分母**：主口径 = fixed+wrong+intentional+ignored（06§1.1 字面"分母含 ignored 噪声"，门槛/T3.6 判定用此）；
+  附口径 = fixed+wrong+intentional（只含有向处置）。两套都输出（JSON + 文本），避免单一口径掩盖噪声。
+- **fixed 是初判**：行变更只证明"作者动过"，不证明"按建议修复"；报告逐条给出信号（reply 标签 / line-changed /
+  merged-unmodified / unknown-change），供人工复核。Summary 降级的 finding 无独立评论、无法锚定信号，**不参与处置分母**。
+- **拒真池与漏斗来自 trace**（账本 run 标记只含 published/suppressed，无 candidate/confirmed/REFUTED）：解析
+  `promotion` / `judge` / `run_end` 事件；dry-run 不计。拒真评估池 = Judge 可读的 REFUTED 抽查样本
+  + 事后 badcase（label=missed 且原判定 REFUTED）——按 finding_id 去重，Judge 不可得样本不进池。门槛 20 不变。
+- **零发布率与满意度来自账本**：零发布率 = run 完成标记中 `findings=0` 占比；连续两周上行需本期 + 两期历史报告
+  （`--previous`），不足三期标"趋势不可判定"。满意度 = reaction 落在 run 标记的 Summary 评论上（👍/👎），
+  不参与单 finding 分类。
+- **T3.6 门槛评估**：`report` 的 `dual_verifier_gate` 段输出两个条件和结论；样本不足时条件 `met=false` 且
+  verdict 含"样本不足，不下结论"。**当前不开启**（首份评估见 07 T3.6 记录）——不得为"完成 T3.6"放松门槛；
+  数据触发后才实施 `require-distinct-model-family` 硬校验 + 语义去重。
+- **离线与依赖**：`report` 本地跑无服务依赖；真实模式需只读 token（`--token` / `GITHUB_TOKEN` / `GH_TOKEN`）；
+  `--trace-dir` 指向本地 `.cra/runs` 或 CI artifact 解包目录。平台取数失败 → 退出码 2，不产出"空报告假装成功"。
+
 ### 1.2 L2 离线评测集与统计化门禁（v1.2 重写判定口径）
 
 **数据集**（构成与来源见 §3）：
@@ -126,6 +155,16 @@ prompt/模型改动与 run 关联（`prompt_template_versions`），线上问题
 
 `run_ref` 支持 artifact 引用（CI 形态）与本地路径（本地模式）。
 
+**实现注记（T3.5）**：`cra-eval badcase add` 先解析 run trace（`run_start` 的 repo/base/head/pr、`promotion`
+的 verifier 判定），再定位 finding——优先账本（已发布 finding 的 inline 评论含完整正文与 `cra:` 标记），
+回退 run `briefs/*.md` 的 `### id=…` 段（被 REFUTED/截断的候选只在验证 brief 留档）；两处都没有则**显式失败**，
+不凭空生成断言。diff 由 compare API 渲染为 unified diff，快照由 head 树（tree + contents raw）打成
+`repo_snapshot.tgz`（二进制跳过并计数声明）；`--diff-file`/`--snapshot-dir` 提供离线等价输入。label 映射：
+`missed`→bad（草案 expected 取 finding 的 file/line/category/关键词）、`false-positive`→clean（草案 expected 为空）、
+`relabeled`→`--to-set`（默认 bad，用于线上处置口径与固化口径不一致的样本）。来源写入用例目录 `badcase.json`
+（run_ref/run_id/finding_id/verifier_verdict/label），`meta.source=production`、annotation=draft——
+必须 `cra-eval annotate --action confirm` 后才进入回归；`run` 对 draft 用例仍拒绝执行（06§3 状态机不变）。
+
 ## 3. 数据飞轮冷启动（v1.2 重建——v1.1 三重悬空：种子不可得 / clean 分母为零 / 改造量低估一个数量级）
 
 **事实修正**：本仓库仅一个多月历史、两次文档提交，**没有 fix commit 可反查**——v1.1 "本仓库历史 bad-PR 种子 ≥8" 的来源不存在；纯文档 clean 集使 M2 验收"clean 误报下降 ≥30%"不可判定。
@@ -143,7 +182,7 @@ prompt/模型改动与 run 关联（`prompt_template_versions`），线上问题
 - 加载器：解包快照 → 构造 ReviewRequest(base=fixed_sha, head=buggy_sha) → 跑流水线 → 断言器按 expected 匹配（位置 ±5 行 + 类别 + 断言关键词）；
 - 标注工具：`cra-eval annotate` 半自动（patch hunk 预填 + 人工确认断言）；
 - 时序：M1 建 **bad 12 + clean 8 + 对抗 10（注入 3/幻觉 5/拒真 2）**；M3 扩到 bad ≥30 + clean ≥20；
-- 持续回流：自举 PR 的真实 badcase 经 `badcase add` 固化（对 Defects4J 集的补充，不替代）。
+- 持续回流：自举 PR 的真实 badcase 经 `badcase add` 固化（`meta.source=production`，来源见用例目录 `badcase.json`；对 Defects4J 集的补充，不替代）。
 
 ## 4. 周期性任务
 

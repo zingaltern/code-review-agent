@@ -1,0 +1,17 @@
+{
+  "label": "missed",
+  "case_id": "badcase-demo",
+  "set": "bad",
+  "run_ref": "artifact://runs/demo",
+  "run_id": "run_demo",
+  "finding_id": "f_demo_1",
+  "repo": "acme/demo",
+  "pr": 105,
+  "base_sha": "b",
+  "head_sha": "h",
+  "verifier_verdict": "",
+  "finding_source": "brief",
+  "added_at": "2026-10-20T10:00:00Z",
+  "added_by": "demo",
+  "reason": "演示：brief 未记录判定，不进拒真池"
+}

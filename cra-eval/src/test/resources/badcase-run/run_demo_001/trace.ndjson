@@ -1,0 +1,3 @@
+{"ts": "2026-10-20T09:00:00Z", "run_id": "run_demo_001", "event": "run_start", "repo": "acme/demo", "pr": 77, "base": "basesha77", "head": "headsha77", "depth": "standard", "dry_run": false}
+{"ts": "2026-10-20T09:01:00Z", "run_id": "run_demo_001", "event": "promotion", "finding_id": "f_missed01", "verifier_verdict": "REFUTED", "decision": "reject", "reason": "refuted", "spotcheck_fuse": false}
+{"ts": "2026-10-20T09:02:00Z", "run_id": "run_demo_001", "event": "run_end", "status": "success", "findings_published": 2, "skipped_duplicate": 0, "suppressed_by_truncation": 0, "tokens_in": 1, "tokens_out": 1, "latency_ms": 100}

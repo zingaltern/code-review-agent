@@ -15,10 +15,13 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.cra.common.exception.CraIntegrationException;
@@ -39,6 +42,7 @@ import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
+import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
 import org.cra.git.api.GitPlatformAdapter;
@@ -344,9 +348,162 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   }
 
   @Override
+  public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
+    List<PullRequestRef> out = new ArrayList<>();
+    for (int page = 1; page <= MAX_PAGES; page++) {
+      JsonNode root =
+          getJson(
+              repo,
+              "/pulls?state=all&sort=updated&direction=desc&per_page="
+                  + PAGE_SIZE
+                  + "&page="
+                  + page);
+      if (!root.isArray() || root.isEmpty()) {
+        break;
+      }
+      boolean reachedOlder = false;
+      for (JsonNode pr : root) {
+        Instant updated = instantOrNull(pr.path("updated_at"));
+        if (updated == null || updated.isBefore(since)) {
+          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
+          reachedOlder = true;
+          continue;
+        }
+        out.add(
+            new PullRequestRef(
+                pr.path("number").asInt(),
+                pr.path("head").path("sha").asText(""),
+                pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
+                pr.path("state").asText(PullRequestRef.STATE_CLOSED),
+                updated,
+                instantOrNull(pr.path("merged_at"))));
+      }
+      if (root.size() < PAGE_SIZE || reachedOlder) {
+        break;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 处置信号（06§1.1）：人类对 bot inline 评论的 reply 标签 + Summary issue comment 的 👍/👎。
+   *
+   * <p>reply 走 `GET /pulls/{n}/comments` 全量评论（人类回复与 bot 评论同端点，按 in_reply_to_id 关联，05§2.3）；reaction
+   * 走 `GET /issues/comments/{id}/reactions`。resolve 状态 GraphQL-only，不采。
+   */
+  @Override
   public DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber) {
-    // M0 不采（06§1.1 采集随 M3 处置闭环落地）：不可得语义 = 空数组 + 声明（11§4 第 5 条）
-    return new DispositionSignal[0];
+    String login = botLogin(repo);
+    List<JsonNode> reviewComments = getPaged(repo, "/pulls/" + prNumber + "/comments");
+    Set<Long> botCommentIds = new HashSet<>();
+    for (JsonNode c : reviewComments) {
+      if (login.equals(c.path("user").path("login").asText())) {
+        botCommentIds.add(c.path("id").asLong());
+      }
+    }
+    List<DispositionSignal> out = new ArrayList<>();
+    for (JsonNode c : reviewComments) {
+      long parent = c.path("in_reply_to_id").asLong(0);
+      if (parent <= 0 || !botCommentIds.contains(parent)) {
+        continue; // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
+      }
+      String body = c.path("body").asText("");
+      String tag = replyTag(body);
+      if (tag == null) {
+        continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
+      }
+      out.add(
+          new DispositionSignal(
+              DispositionSignal.KIND_REPLY_TAG,
+              parent,
+              instantOrEpoch(c.path("created_at")),
+              tag,
+              c.path("user").path("login").asText(""),
+              excerpt(body)));
+    }
+    List<JsonNode> issueComments = getPaged(repo, "/issues/" + prNumber + "/comments");
+    for (JsonNode c : issueComments) {
+      if (!login.equals(c.path("user").path("login").asText())) {
+        continue; // 只采 bot 的 Summary 评论 reaction（run 满意度载体，06§1.1）
+      }
+      long commentId = c.path("id").asLong(0);
+      if (commentId <= 0) {
+        continue;
+      }
+      for (JsonNode r : getPaged(repo, "/issues/comments/" + commentId + "/reactions")) {
+        String content = r.path("content").asText("");
+        if (!DispositionSignal.REACTION_UP.equals(content)
+            && !DispositionSignal.REACTION_DOWN.equals(content)) {
+          continue;
+        }
+        out.add(
+            new DispositionSignal(
+                DispositionSignal.KIND_REACTION,
+                commentId,
+                instantOrEpoch(r.path("created_at")),
+                content,
+                r.path("user").path("login").asText(""),
+                ""));
+      }
+    }
+    return out.toArray(new DispositionSignal[0]);
+  }
+
+  private static final Pattern TAG_WRONG = Pattern.compile("(?i)(:wrong:|not-a-bug|\\[wrong\\])");
+  private static final Pattern TAG_INTENTIONAL =
+      Pattern.compile("(?i)(:intentional:|\\[intentional\\])");
+  private static final Pattern TAG_FIXED = Pattern.compile("(?i)(:fixed:|\\[fixed\\])");
+
+  private static String replyTag(String body) {
+    if (body == null || body.isBlank()) {
+      return null;
+    }
+    if (TAG_WRONG.matcher(body).find()) {
+      return DispositionSignal.TAG_WRONG;
+    }
+    if (TAG_INTENTIONAL.matcher(body).find()) {
+      return DispositionSignal.TAG_INTENTIONAL;
+    }
+    if (TAG_FIXED.matcher(body).find()) {
+      return DispositionSignal.TAG_FIXED;
+    }
+    return null;
+  }
+
+  private static String excerpt(String body) {
+    String oneLine = body.replaceAll("\\s+", " ").strip();
+    return oneLine.length() <= 200 ? oneLine : oneLine.substring(0, 200) + "…";
+  }
+
+  private static Instant instantOrNull(JsonNode node) {
+    if (node == null || node.isMissingNode() || node.isNull() || node.asText().isBlank()) {
+      return null;
+    }
+    try {
+      return Instant.parse(node.asText());
+    } catch (DateTimeParseException e) {
+      return null;
+    }
+  }
+
+  private static Instant instantOrEpoch(JsonNode node) {
+    Instant parsed = instantOrNull(node);
+    return parsed == null ? Instant.EPOCH : parsed;
+  }
+
+  private List<JsonNode> getPaged(RepoRef repo, String path) {
+    List<JsonNode> out = new ArrayList<>();
+    for (int page = 1; page <= MAX_PAGES; page++) {
+      JsonNode root = getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
+      if (!root.isArray() || root.isEmpty()) {
+        break;
+      }
+      root.forEach(out::add);
+      if (root.size() < PAGE_SIZE) {
+        break;
+      }
+    }
+    return out;
   }
 
   private String botLogin(RepoRef repo) {

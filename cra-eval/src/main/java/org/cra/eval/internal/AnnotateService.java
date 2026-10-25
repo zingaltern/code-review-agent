@@ -60,6 +60,17 @@ public final class AnnotateService {
       }
     }
     ExpectedFindings draft = new ExpectedFindings(1, expected, List.<NegativeBait>of());
+    return writeDraft(caseDir, draft);
+  }
+
+  /**
+   * 写入 expected 草稿（prefill 与 badcase add 共用：draft → 人工确认 → confirm）。
+   *
+   * @param caseDir 用例目录
+   * @param draft 草稿内容
+   * @return 草稿文件路径（expected_findings.draft.json）
+   */
+  public static Path writeDraft(Path caseDir, ExpectedFindings draft) {
     Path out = caseDir.resolve("expected_findings.draft.json");
     Json.write(out, draft);
     return out;
