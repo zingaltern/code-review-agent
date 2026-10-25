@@ -116,13 +116,13 @@ final class ReviewRoutingPolicy {
     }
     Availability data = availability(policy, history);
     boolean assumption =
-        options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && data.assumption();
-    boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && data.sniff();
+        options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && data.assumptionData();
+    boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && data.sniffData();
     return assumption || sniff;
   }
 
   /** 两个模式各自是否有数据可查（触发判定与未触发原因共用，避免口径漂移）。 */
-  private record Availability(boolean assumption, boolean sniff) {}
+  private record Availability(boolean assumptionData, boolean sniffData) {}
 
   private static Availability availability(ReviewPolicy policy, CrossCheckHistory history) {
     boolean assumptionData =
@@ -154,7 +154,7 @@ final class ReviewRoutingPolicy {
       return "quick 档不触发（02§4.3 档位联动；M4f-lite 仅 standard/deep）";
     }
     Availability data = availability(policy, history);
-    if (!data.assumption() && !data.sniff()) {
+    if (!data.assumptionData() && !data.sniffData()) {
       return "REVIEW.md 未配置 Product context/Known incidents/Sniff tests，且变更史为空/不可得（07 T1.4 段落缺失优雅跳过）";
     }
     return "配置的 mode 与可用数据不匹配（05§5 agents.crosschecker.mode）";

@@ -60,7 +60,8 @@ import org.cra.store.api.ReviewLedger;
  *
  * <p>协作边界：数据面见 {@link PipelineDataLoader}，门禁见 {@link FindingGatekeeper}，验证晋升见 {@link
  * FindingPromoter}， 发布/账本见 {@link ReviewPublisher}，正文渲染见 {@link ReviewBodyRenderer}，覆盖声明见 {@link
- * CoverageReportBuilder}，收尾见 {@link ReviewRunFinisher}。本类只保留阶段编排。
+ * CoverageReportBuilder}，收尾见 {@link ReviewRunFinisher}，轮次超限收尾见 {@link
+ * ConvergenceBreachHandler}。本类只保留阶段编排。
  *
  * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker，run 内单实例）；扇出线程池由 ReviewAgentDispatcher 持有（09§6）。
  */
