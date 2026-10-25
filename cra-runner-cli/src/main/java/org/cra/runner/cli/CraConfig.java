@@ -36,6 +36,11 @@ package org.cra.runner.cli;
  * @param llmModelLight light 档模型名（--model-light / CRA_LLM_MODEL_LIGHT；缺省继承 standard）
  * @param fallbackChain 降级链（--fallback-chain / CRA_LLM_FALLBACK_CHAIN，默认 standard,light；05§5）
  * @param rpm per-model RPM（--rpm / CRA_LLM_RPM，形如 standard=60,strong=30,light=60；默认 60/30/60）
+ * @param crossCheckerEnabled CrossChecker 总开关（05§5 agents.crosschecker.enabled；--crosschecker /
+ *     CRA_CROSSCHECKER_ENABLED，默认 false——关闭不动 Standard 基线算术，04§2.2）
+ * @param crossCheckerModes 模式开关（--crosschecker-modes / CRA_CROSSCHECKER_MODES，默认 assumption,sniff）
+ * @param crossCheckerHistoryWeeks 上下游变更史回溯周数（--crosschecker-history-weeks /
+ *     CRA_CROSSCHECKER_HISTORY_WEEKS，默认 8）
  */
 public record CraConfig(
     String repoOwner,
@@ -67,7 +72,111 @@ public record CraConfig(
     String llmModelStrong,
     String llmModelLight,
     String fallbackChain,
-    String rpm) {
+    String rpm,
+    boolean crossCheckerEnabled,
+    String crossCheckerModes,
+    int crossCheckerHistoryWeeks) {
+
+  /**
+   * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
+   *
+   * @param repoOwner 仓库属主
+   * @param repoName 仓库名
+   * @param prNumber PR 编号
+   * @param baseSha 基线 sha
+   * @param headSha 目标 sha
+   * @param depth 深度档位
+   * @param dryRun dry-run
+   * @param securityBlock --security-block
+   * @param githubToken GitHub token
+   * @param githubApi GitHub API 根
+   * @param llmApiKey LLM 密钥
+   * @param llmBaseUrl LLM 端点
+   * @param llmModel 模型名
+   * @param runRoot trace 落盘根
+   * @param workspace 本地工作区根
+   * @param largeDiffLines 大 diff 降档线
+   * @param hardCapLines 硬上限
+   * @param nitBudget nit 预算默认
+   * @param runTotalTokens run 级预算
+   * @param degradeAtFirst 第一降档阈值
+   * @param degradeAtSecond 第二降档阈值
+   * @param publishUnverified UNVERIFIED 发布策略
+   * @param spotCheckPercent 抽查保险丝百分比
+   * @param local 本地 pre-PR 模式
+   * @param execCommand 本地实跑命令
+   * @param ledgerDb 本地账本
+   * @param llmModelStrong strong 档模型
+   * @param llmModelLight light 档模型
+   * @param fallbackChain 降级链
+   * @param rpm per-model RPM
+   */
+  public CraConfig(
+      String repoOwner,
+      String repoName,
+      int prNumber,
+      String baseSha,
+      String headSha,
+      String depth,
+      boolean dryRun,
+      boolean securityBlock,
+      String githubToken,
+      String githubApi,
+      String llmApiKey,
+      String llmBaseUrl,
+      String llmModel,
+      String runRoot,
+      String workspace,
+      int largeDiffLines,
+      int hardCapLines,
+      int nitBudget,
+      long runTotalTokens,
+      double degradeAtFirst,
+      double degradeAtSecond,
+      String publishUnverified,
+      int spotCheckPercent,
+      boolean local,
+      String execCommand,
+      String ledgerDb,
+      String llmModelStrong,
+      String llmModelLight,
+      String fallbackChain,
+      String rpm) {
+    this(
+        repoOwner,
+        repoName,
+        prNumber,
+        baseSha,
+        headSha,
+        depth,
+        dryRun,
+        securityBlock,
+        githubToken,
+        githubApi,
+        llmApiKey,
+        llmBaseUrl,
+        llmModel,
+        runRoot,
+        workspace,
+        largeDiffLines,
+        hardCapLines,
+        nitBudget,
+        runTotalTokens,
+        degradeAtFirst,
+        degradeAtSecond,
+        publishUnverified,
+        spotCheckPercent,
+        local,
+        execCommand,
+        ledgerDb,
+        llmModelStrong,
+        llmModelLight,
+        fallbackChain,
+        rpm,
+        false,
+        "assumption,sniff",
+        8);
+  }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
   public CraConfig withResolvedLocal(
@@ -102,6 +211,9 @@ public record CraConfig(
         llmModelStrong(),
         llmModelLight(),
         fallbackChain(),
-        rpm());
+        rpm(),
+        crossCheckerEnabled(),
+        crossCheckerModes(),
+        crossCheckerHistoryWeeks());
   }
 }

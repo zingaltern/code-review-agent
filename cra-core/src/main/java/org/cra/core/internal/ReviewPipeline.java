@@ -6,6 +6,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -26,6 +27,7 @@ import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
 import org.cra.common.finding.Severity;
 import org.cra.common.finding.Side;
+import org.cra.common.git.CommitSummary;
 import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
@@ -39,6 +41,7 @@ import org.cra.common.git.PublishStatus;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
 import org.cra.common.run.Coverage;
+import org.cra.common.run.Depth;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
@@ -46,10 +49,12 @@ import org.cra.common.run.ReviewSuggestion;
 import org.cra.common.run.RunStatus;
 import org.cra.context.api.ContextAssembly;
 import org.cra.context.api.ReviewPolicyParser;
+import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
+import org.cra.core.internal.pipeline.CrossCheckHistory;
 import org.cra.core.internal.pipeline.DepthPlan;
 import org.cra.core.internal.pipeline.DepthPolicy;
 import org.cra.core.internal.pipeline.ExactDedupMerger;
@@ -109,6 +114,8 @@ public final class ReviewPipeline implements Orchestrator {
   private final PipelineOptions options;
   private final LocalRepoContext localRepoContext;
   private final ReviewPolicyParser policyParser;
+  private final CrossCheckerOptions crossCheckerOptions;
+  private final CitedEvidenceResolver citedResolver;
   private final ExecutorService verifyPool;
 
   public ReviewPipeline(
@@ -121,17 +128,51 @@ public final class ReviewPipeline implements Orchestrator {
       Path runRoot,
       PipelineOptions options,
       LocalRepoContext localRepoContext) {
+    this(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        CrossCheckerOptions.disabled());
+  }
+
+  /**
+   * @param crossCheckerOptions CrossChecker 触发配置（05§5 agents.crosschecker；默认关闭不改变基线算术，04§2.2）
+   */
+  public ReviewPipeline(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions) {
     this.adapter = adapter;
     this.ledger = ledger;
-    this.reviewStage =
-        new ReviewStage(crew, new AgentRunner(gateway), ContextAssembly.createContextAssembler());
-    this.agentRunner = new AgentRunner(gateway);
-    this.verifier = verifier;
-    this.judge = judge;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
     this.localRepoContext = localRepoContext;
+    this.crossCheckerOptions =
+        crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
+    this.reviewStage =
+        new ReviewStage(
+            crew,
+            new AgentRunner(gateway),
+            ContextAssembly.createContextAssembler(),
+            this.crossCheckerOptions);
+    this.agentRunner = new AgentRunner(gateway);
+    this.verifier = verifier;
+    this.judge = judge;
     this.policyParser = ContextAssembly.createReviewPolicyParser();
+    this.citedResolver = new CitedEvidenceResolver(localRepoContext);
     this.verifyPool =
         Executors.newFixedThreadPool(
             MAX_PARALLEL_BATCHES,
@@ -295,6 +336,9 @@ public final class ReviewPipeline implements Orchestrator {
               .collect(Collectors.joining("\n"));
       String prTitle = "PR #" + request.prNumber();
       String policySection = PolicySections.render(policy, hasReviewMdChange(diff));
+      // M4f-lite：CrossChecker 变更史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查本地仓库
+      CrossCheckHistory crossCheckHistory =
+          resolveCrossCheckHistory(request, diff, plan, depthPlan);
       ReviewStage.StageOutcome outcome =
           reviewStage.execute(
               runId,
@@ -307,7 +351,8 @@ public final class ReviewPipeline implements Orchestrator {
               budget,
               prTitle,
               commitMessages,
-              policySection);
+              policySection,
+              crossCheckHistory);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
       trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
@@ -429,7 +474,7 @@ public final class ReviewPipeline implements Orchestrator {
               budget,
               verifyPool,
               path -> contentOf(path, request.headSha(), request, contentCache),
-              new CitedEvidenceResolver(localRepoContext));
+              citedResolver);
       VerificationWave.WaveResult waveResult =
           wave.verify(candidates, policy, headFiles, reviewDiff, runId);
       degradations.addAll(waveResult.degradations());
@@ -480,7 +525,7 @@ public final class ReviewPipeline implements Orchestrator {
           case JUDGE -> {
             boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
             JudgeArbiter.Judgement judgement =
-                arbitrate(arbiter, finding, verifierOutcome, spotCheck, headFiles, runId);
+                arbitrate(arbiter, finding, verifierOutcome, spotCheck, headFiles, policy, runId);
             budget.record(judgement.tokensIn(), judgement.tokensOut());
             tokensIn += judgement.tokensIn();
             tokensOut += judgement.tokensOut();
@@ -611,6 +656,26 @@ public final class ReviewPipeline implements Orchestrator {
     }
   }
 
+  // ---------- 阶段：CrossChecker 变更史（M4f-lite，03§3.1 输入 b） ----------
+
+  /**
+   * 查询上下游路径集近 N 周变更史（排除本 PR 自身 commit——变更本身不是外部证据）。
+   *
+   * <p>quick 档不查询（02§4.3 档位联动：CrossChecker 不触发）；无本地仓库时降级为空历史 + 声明（05§2.1 同 blame 模式）。
+   */
+  private CrossCheckHistory resolveCrossCheckHistory(
+      ReviewRequest request, DiffResult diff, ChunkPlanner.Plan plan, DepthPlan depthPlan) {
+    if (!crossCheckerOptions.enabled() || depthPlan.effectiveDepth() == Depth.QUICK) {
+      return CrossCheckHistory.none();
+    }
+    Set<String> paths = new LinkedHashSet<>();
+    plan.chunks().forEach(chunk -> chunk.files().forEach(file -> paths.add(file.path())));
+    Set<String> prCommits =
+        diff.commits().stream().map(CommitSummary::sha).collect(Collectors.toSet());
+    return CrossCheckHistoryAssembler.assemble(
+        localRepoContext, paths, crossCheckerOptions.historyWeeks(), request.headSha(), prCommits);
+  }
+
   // ---------- 阶段：策略加载（T1.4） ----------
 
   /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */
@@ -680,13 +745,14 @@ public final class ReviewPipeline implements Orchestrator {
     }
   }
 
-  /** Judge 案件组装 + 调用（03§4.4：brief = finding + 验证者判定与证据 + ≤3 文件上下文）。 */
+  /** Judge 案件组装 + 调用（03§4.4：brief = finding + 验证者判定与证据 + ≤3 文件上下文；context 类追加被引证据与产品段）。 */
   private JudgeArbiter.Judgement arbitrate(
       JudgeArbiter arbiter,
       CandidateFinding finding,
       VerificationWave.PerFinding verifierOutcome,
       boolean spotCheck,
       Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
       String runId) {
     String verdictText =
         verifierOutcome != null && verifierOutcome.verdict() != null
@@ -696,7 +762,12 @@ public final class ReviewPipeline implements Orchestrator {
             : "（验证不可得：验证者超时/预算击穿/输出不合法）";
     JudgeCaseInput input =
         VerificationBatchAssembler.buildJudgeCase(
-            finding, verdictText, JudgeArbiter.reasonText(spotCheck), headFiles);
+            finding,
+            verdictText,
+            JudgeArbiter.reasonText(spotCheck),
+            headFiles,
+            policy,
+            citedResolver);
     return arbiter.arbitrate(input, runId, finding.id());
   }
 

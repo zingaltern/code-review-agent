@@ -44,6 +44,36 @@ public final class CoreAssembly {
       Path runRoot,
       PipelineOptions options,
       LocalRepoContext localRepoContext) {
+    return createOrchestrator(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        CrossCheckerOptions.disabled());
+  }
+
+  /**
+   * 创建 M4f-lite 形态编排器（追加 CrossChecker 配置；默认关闭时与 M2 形态完全一致，04§2.2 基线算术不变）。
+   *
+   * @param crossCheckerOptions CrossChecker 触发配置（05§5 agents.crosschecker；null = 关闭）
+   * @return Orchestrator
+   */
+  public static Orchestrator createOrchestrator(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions) {
     return new org.cra.core.internal.ReviewPipeline(
         adapter,
         ledger,
@@ -53,6 +83,7 @@ public final class CoreAssembly {
         judge,
         runRoot,
         options == null ? PipelineOptions.defaults() : options,
-        localRepoContext);
+        localRepoContext,
+        crossCheckerOptions);
   }
 }

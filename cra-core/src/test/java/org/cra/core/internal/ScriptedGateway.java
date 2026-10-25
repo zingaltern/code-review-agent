@@ -18,10 +18,12 @@ final class ScriptedGateway implements LlmGateway {
   private static final Pattern FINDING_ID = Pattern.compile("f_[0-9a-f]+");
 
   private final LinkedList<LlmResponse> review = new LinkedList<>();
+  private final LinkedList<LlmResponse> crossChecker = new LinkedList<>();
   private final LinkedList<LlmResponse> verifier = new LinkedList<>();
   private final LinkedList<LlmResponse> judge = new LinkedList<>();
   // 评审/验证波并发调用网关：队列与记录全部走同一把锁（评审波 chunk 并发 8）
   private final Object lock = new Object();
+  final List<LlmRequest> crossCheckerCalls = new ArrayList<>();
   final List<LlmRequest> verifierCalls = new ArrayList<>();
   final List<LlmRequest> judgeCalls = new ArrayList<>();
   final List<LlmRequest> reviewCalls = new ArrayList<>();
@@ -39,6 +41,12 @@ final class ScriptedGateway implements LlmGateway {
   /** 指定 token 计量的评审响应（预算阶梯用例的算术载体，08§5 场景 11）。 */
   ScriptedGateway review(String json, int tokensIn, int tokensOut) {
     review.add(LlmResponse.ok(json, tokensIn, tokensOut, 5, "glm-x"));
+    return this;
+  }
+
+  /** CrossChecker 脚本响应（M4f-lite：context 类 finding）。 */
+  ScriptedGateway crossChecker(String json) {
+    crossChecker.add(LlmResponse.ok(json, 900, 120, 5, "glm-x"));
     return this;
   }
 
@@ -132,6 +140,10 @@ final class ScriptedGateway implements LlmGateway {
         reviewCalls.add(request);
         return pollOrRepeat(review);
       }
+      case "cross-checker" -> {
+        crossCheckerCalls.add(request);
+        return pollOrRepeat(crossChecker);
+      }
       case "verifier" -> {
         verifierCalls.add(request);
         if (verdictScript != null) {
@@ -159,7 +171,10 @@ final class ScriptedGateway implements LlmGateway {
 
   int totalCalls() {
     synchronized (lock) {
-      return reviewCalls.size() + verifierCalls.size() + judgeCalls.size();
+      return reviewCalls.size()
+          + crossCheckerCalls.size()
+          + verifierCalls.size()
+          + judgeCalls.size();
     }
   }
 

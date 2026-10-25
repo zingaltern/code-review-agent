@@ -5,9 +5,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.cra.agents.api.AgentBudget;
 import org.cra.agents.api.JudgeCaseInput;
@@ -49,9 +46,6 @@ final class VerificationBatchAssembler {
   private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
 
   private static final int JUDGE_MAX_FILES = 3;
-
-  /** 40 位/缩写 hex commit 引用（context 类 finding 的被引对象；M4f CrossChecker 将钉死引用格式）。 */
-  private static final Pattern COMMIT_REF = Pattern.compile("\\b[0-9a-f]{7,40}\\b");
 
   private VerificationBatchAssembler() {}
 
@@ -119,6 +113,40 @@ final class VerificationBatchAssembler {
       String verifierVerdictText,
       String caseReason,
       Map<String, FileContent> headFiles) {
+    return buildJudgeCase(finding, verifierVerdictText, caseReason, headFiles, null, null);
+  }
+
+  /**
+   * 组装 Judge 案件输入（context 类分型：追加被引矛盾证据原文与 REVIEW.md 产品段——03§4.2 v1.3.1 "Judge brief
+   * 同规则分型"，否则仲裁者对代码外证据失明）。
+   *
+   * @param finding 被仲裁的候选
+   * @param verifierVerdictText 验证者判定原文（verdict + rationale）
+   * @param caseReason 情形说明（可信）
+   * @param headFiles head 侧文件全文（涉事文件来源）
+   * @param policy base 分支 REVIEW.md 策略（context 类产品段来源；null = 不注入）
+   * @param resolver 被引证据解析（context 类；null = 不注入）
+   * @return 案件输入
+   */
+  static JudgeCaseInput buildJudgeCase(
+      CandidateFinding finding,
+      String verifierVerdictText,
+      String caseReason,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      CitedEvidenceResolver resolver) {
+    String context = renderCaseContext(finding, verifierVerdictText, headFiles);
+    if (finding.category() == FindingCategory.CONTEXT && (policy != null || resolver != null)) {
+      StringBuilder ext = new StringBuilder(context);
+      ext.append("\n\n");
+      if (resolver != null) {
+        ext.append(renderCitedFor(finding, resolver));
+      }
+      if (policy != null) {
+        appendContextPolicySections(ext, policy);
+      }
+      context = ext.toString();
+    }
     return new JudgeCaseInput(
         finding.id(),
         finding.category().name().toLowerCase(Locale.ROOT),
@@ -129,7 +157,7 @@ final class VerificationBatchAssembler {
         finding.evidence(),
         finding.suggestion(),
         verifierVerdictText,
-        renderCaseContext(finding, verifierVerdictText, headFiles),
+        context,
         caseReason);
   }
 
@@ -203,39 +231,62 @@ final class VerificationBatchAssembler {
     return sb.toString();
   }
 
-  /** context 类被引矛盾证据原文（03§4.2 v1.3.1：编排器预取内联；M2 经 CitedEvidenceResolver best effort）。 */
+  /** context 类被引矛盾证据原文（03§4.2 v1.3.1：编排器预取内联；引用格式见 ContextCitation）。 */
   private static String renderCitedEvidence(
       List<FindingAggregator.Scored> batch, CitedEvidenceResolver resolver) {
     return batch.stream()
         .filter(s -> s.finding().category() == FindingCategory.CONTEXT)
-        .map(s -> resolveCitedFor(s.finding(), resolver))
+        .map(s -> renderCitedFor(s.finding(), resolver))
         .filter(text -> !text.isBlank())
         .collect(Collectors.joining("\n\n"));
   }
 
-  private static String resolveCitedFor(CandidateFinding finding, CitedEvidenceResolver resolver) {
+  /** 单条 context finding 的被引证据：结构化 commit 引用（含 path）+ REVIEW.md 条目锚，逐条渲染。 */
+  private static String renderCitedFor(CandidateFinding finding, CitedEvidenceResolver resolver) {
+    CitedEvidenceResolver.Citation citation = resolver.citationOf(finding);
     StringBuilder sb = new StringBuilder();
     sb.append("结论 ").append(finding.id()).append(" 引用的矛盾证据：\n");
     boolean resolved = false;
-    for (String sha : extractCommitRefs(finding, CITED_COMMIT_MAX)) {
-      String patch = resolver.commitPatch(sha, finding.file());
+    int rendered = 0;
+    for (org.cra.common.finding.ContextCitation.CommitRef ref : citation.commits()) {
+      if (rendered >= CITED_COMMIT_MAX) {
+        break;
+      }
+      String path = ref.effectivePath(finding.file());
+      String patch = resolver.commitPatch(ref.sha(), path);
+      rendered++;
       if (!patch.isBlank()) {
         sb.append("--- commit ")
-            .append(sha)
+            .append(ref.sha())
+            .append(" path ")
+            .append(path)
             .append(" ---\n")
             .append(capLines(patch, CITED_COMMIT_TOKEN_CAP))
             .append('\n');
         resolved = true;
       }
     }
+    if (!citation.reviewMdRefs().isEmpty()) {
+      sb.append("被引 REVIEW.md 条目：\n");
+      citation
+          .reviewMdRefs()
+          .forEach(
+              ref ->
+                  sb.append("- ")
+                      .append(ref.section())
+                      .append(": ")
+                      .append(ref.entry().isBlank() ? "（整段，见下方 Review.md 段）" : capLine(ref.entry()))
+                      .append('\n'));
+      resolved = true;
+    }
     if (!resolved) {
-      // 引用不可得（无本地仓库/commit 不存在/引用格式未按 M4f 约定）：finding 自带证据原文兜底
+      // 引用不可得（无本地仓库/commit 不存在/引用格式未按 ContextCitation 约定）：finding 自带证据原文兜底
       sb.append("（被引 commit diff 不可得，以下为结论自带证据原文）\n").append(finding.evidence()).append('\n');
     }
     return sb.toString();
   }
 
-  /** REVIEW.md 证据要求 + context 类相关条目（Product context/Known incidents；可信内容，不定界）。 */
+  /** REVIEW.md 证据要求 + context 类相关条目（Product context/Known incidents/Sniff tests；可信内容，不定界）。 */
   private static String renderPolicySections(
       ReviewPolicy policy, List<FindingAggregator.Scored> batch) {
     StringBuilder sb = new StringBuilder();
@@ -246,16 +297,25 @@ final class VerificationBatchAssembler {
     boolean hasContext =
         batch.stream().anyMatch(s -> s.finding().category() == FindingCategory.CONTEXT);
     if (hasContext) {
-      if (!policy.productContext().isEmpty()) {
-        sb.append("Product context（产品背景与隐含假设）：\n");
-        policy.productContext().forEach(line -> sb.append("- ").append(capLine(line)).append('\n'));
-      }
-      if (!policy.knownIncidents().isEmpty()) {
-        sb.append("Known incidents（历史事故/复盘）：\n");
-        policy.knownIncidents().forEach(line -> sb.append("- ").append(capLine(line)).append('\n'));
-      }
+      appendContextPolicySections(sb, policy);
     }
     return sb.toString();
+  }
+
+  /** context 类 REVIEW.md 产品段（03§4.2 v1.3.1：Product context / Known incidents / Sniff tests）。 */
+  private static void appendContextPolicySections(StringBuilder sb, ReviewPolicy policy) {
+    if (!policy.productContext().isEmpty()) {
+      sb.append("Product context（产品背景与隐含假设）：\n");
+      policy.productContext().forEach(line -> sb.append("- ").append(capLine(line)).append('\n'));
+    }
+    if (!policy.knownIncidents().isEmpty()) {
+      sb.append("Known incidents（历史事故/复盘）：\n");
+      policy.knownIncidents().forEach(line -> sb.append("- ").append(capLine(line)).append('\n'));
+    }
+    if (!policy.sniffTests().isEmpty()) {
+      sb.append("Sniff tests（经验性嗅探检查）：\n");
+      policy.sniffTests().forEach(line -> sb.append("- ").append(capLine(line)).append('\n'));
+    }
   }
 
   /** Judge 涉事上下文：finding 文件优先 + 验证者判定中出现的其他已变更文件，合计 ≤3 文件（03§6）。 */
@@ -285,15 +345,6 @@ final class VerificationBatchAssembler {
   }
 
   // ---------- 工具 ----------
-
-  private static Set<String> extractCommitRefs(CandidateFinding finding, int limit) {
-    Set<String> refs = new LinkedHashSet<>();
-    Matcher matcher = COMMIT_REF.matcher(finding.evidence() + "\n" + finding.description());
-    while (matcher.find() && refs.size() < limit) {
-      refs.add(matcher.group());
-    }
-    return refs;
-  }
 
   /** 按 token 预算截行（保留头部；确定性——同输入同输出，可重放）。 */
   static String capLines(String text, long tokenBudget) {

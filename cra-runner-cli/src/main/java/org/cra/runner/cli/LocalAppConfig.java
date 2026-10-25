@@ -76,6 +76,27 @@ class LocalAppConfig {
   }
 
   @Bean
+  org.cra.core.api.CrossCheckerOptions crossCheckerOptions() {
+    // 05§5 agents.crosschecker：默认关闭；模式串在 CLI 解析期已校验
+    return new org.cra.core.api.CrossCheckerOptions(
+        config.crossCheckerEnabled(),
+        parseCrossCheckerModes(config.crossCheckerModes()),
+        config.crossCheckerHistoryWeeks());
+  }
+
+  private static java.util.Set<org.cra.core.api.CrossCheckerOptions.Mode> parseCrossCheckerModes(
+      String modes) {
+    java.util.Set<org.cra.core.api.CrossCheckerOptions.Mode> out =
+        java.util.EnumSet.noneOf(org.cra.core.api.CrossCheckerOptions.Mode.class);
+    for (String part : modes.split(",")) {
+      if (!part.isBlank()) {
+        out.add(org.cra.core.api.CrossCheckerOptions.Mode.parse(part));
+      }
+    }
+    return out;
+  }
+
+  @Bean
   org.cra.core.api.PipelineOptions pipelineOptions() {
     return new org.cra.core.api.PipelineOptions(
         config.runTotalTokens(),
@@ -97,6 +118,7 @@ class LocalAppConfig {
       SubAgent<VerificationBatchInput> verifier,
       SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
+      org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
       LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
         adapter,
@@ -107,6 +129,7 @@ class LocalAppConfig {
         judge,
         Path.of(config.runRoot()),
         pipelineOptions,
-        localRepoContext);
+        localRepoContext,
+        crossCheckerOptions);
   }
 }

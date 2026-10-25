@@ -65,6 +65,10 @@ final class FindingJsonCodec {
     FindingCategory categoryEnum = FindingCategory.valueOf(category.toUpperCase().strip());
     Severity severity =
         Severity.valueOf(requireText(node, "severity_proposed").toUpperCase().strip());
+    if (categoryEnum == FindingCategory.CONTEXT && severity == Severity.NIT) {
+      // 05§1.1：context 类默认 important 档——业务/产品矛盾不产 nit（schema 归一，不因 LLM 降级而漏）
+      severity = Severity.IMPORTANT;
+    }
     Side side =
         node.hasNonNull("side")
             ? Side.valueOf(node.get("side").asText().toUpperCase().strip())

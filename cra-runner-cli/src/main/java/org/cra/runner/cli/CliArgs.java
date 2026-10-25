@@ -35,6 +35,8 @@ final class CliArgs {
     boolean dryRunArgSeen = false;
     boolean securityBlock = false;
     boolean local = false;
+    boolean crossChecker = false;
+    boolean crossCheckerSeen = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -48,6 +50,18 @@ final class CliArgs {
         }
         case "--security-block" -> securityBlock = true;
         case "--local" -> local = true;
+        case "--crosschecker" -> {
+          crossChecker = true;
+          crossCheckerSeen = true;
+        }
+        case "--crosschecker=true" -> {
+          crossChecker = true;
+          crossCheckerSeen = true;
+        }
+        case "--crosschecker=false" -> {
+          crossChecker = false;
+          crossCheckerSeen = true;
+        }
         case "--repo",
             "--pr",
             "--base",
@@ -69,7 +83,9 @@ final class CliArgs {
             "--model-light",
             "--fallback-chain",
             "--rpm",
-            "--spot-check-percent" -> {
+            "--spot-check-percent",
+            "--crosschecker-modes",
+            "--crosschecker-history-weeks" -> {
           if (i + 1 >= args.length) {
             throw new CraConfigException("参数缺值: " + arg);
           }
@@ -145,6 +161,22 @@ final class CliArgs {
       throw new CraConfigException(
           "--publish-unverified 非法: " + publishUnverified + "（never|labeled）");
     }
+    // 05§5 agents.crosschecker：默认关闭（关闭不动 Standard 基线算术，04§2.2）
+    boolean crossCheckerEnabled =
+        crossCheckerSeen
+            ? crossChecker
+            : Boolean.parseBoolean(env.getOrDefault("CRA_CROSSCHECKER_ENABLED", "false"));
+    String crossCheckerModes =
+        named.getOrDefault(
+            "--crosschecker-modes", env.getOrDefault("CRA_CROSSCHECKER_MODES", "assumption,sniff"));
+    validateCrossCheckerModes(crossCheckerModes);
+    int crossCheckerHistoryWeeks =
+        parseIntOption(
+            "--crosschecker-history-weeks",
+            named.containsKey("--crosschecker-history-weeks")
+                ? named.get("--crosschecker-history-weeks")
+                : env.get("CRA_CROSSCHECKER_HISTORY_WEEKS"),
+            8);
     return new CraConfig(
         ownerRepo == null ? null : ownerRepo[0],
         ownerRepo == null ? null : ownerRepo[1],
@@ -176,7 +208,29 @@ final class CliArgs {
         named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT")),
         named.getOrDefault(
             "--fallback-chain", env.getOrDefault("CRA_LLM_FALLBACK_CHAIN", "standard,light")),
-        named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")));
+        named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")),
+        crossCheckerEnabled,
+        crossCheckerModes,
+        crossCheckerHistoryWeeks);
+  }
+
+  /** 模式串校验（assumption|sniff，逗号分隔，至少一个；03§3.1）。 */
+  private static void validateCrossCheckerModes(String modes) {
+    boolean any = false;
+    for (String part : modes.split(",")) {
+      if (part.isBlank()) {
+        continue;
+      }
+      try {
+        org.cra.core.api.CrossCheckerOptions.Mode.parse(part);
+      } catch (IllegalArgumentException e) {
+        throw new CraConfigException("--crosschecker-modes 非法: " + modes + "（assumption|sniff）");
+      }
+      any = true;
+    }
+    if (!any) {
+      throw new CraConfigException("--crosschecker-modes 不能为空（assumption|sniff）");
+    }
   }
 
   private static String expandUserHome(String path) {
@@ -239,6 +293,10 @@ final class CliArgs {
 
   private static int parseIntOption(Map<String, String> named, String key, int defaultValue) {
     String value = named.get(key);
+    return parseIntOption(key, value, defaultValue);
+  }
+
+  private static int parseIntOption(String key, String value, int defaultValue) {
     if (value == null) {
       return defaultValue;
     }

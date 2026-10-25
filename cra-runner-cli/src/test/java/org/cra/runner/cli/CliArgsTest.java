@@ -195,6 +195,55 @@ class CliArgsTest {
   }
 
   @Test
+  void crossCheckerDefaultsOffAndParsesConfig() {
+    // 05§5 agents.crosschecker：默认关闭；显式开关 + 模式 + 历史周数
+    CraConfig defaults = CliArgs.parse(baseArgs(), ENV);
+    assertThat(defaults.crossCheckerEnabled()).isFalse();
+    assertThat(defaults.crossCheckerModes()).isEqualTo("assumption,sniff");
+    assertThat(defaults.crossCheckerHistoryWeeks()).isEqualTo(8);
+
+    CraConfig enabled =
+        CliArgs.parse(
+            concat(
+                baseArgs(),
+                "--crosschecker",
+                "--crosschecker-modes",
+                "sniff",
+                "--crosschecker-history-weeks",
+                "12"),
+            ENV);
+    assertThat(enabled.crossCheckerEnabled()).isTrue();
+    assertThat(enabled.crossCheckerModes()).isEqualTo("sniff");
+    assertThat(enabled.crossCheckerHistoryWeeks()).isEqualTo(12);
+
+    // 环境变量形态（CI 配置面）
+    CraConfig fromEnv =
+        CliArgs.parse(
+            baseArgs(),
+            Map.of(
+                "GITHUB_TOKEN", "gh-env-token",
+                "CRA_LLM_API_KEY", "sk-env",
+                "CRA_LLM_BASE_URL", "https://llm.example/v1",
+                "CRA_LLM_MODEL", "glm-x",
+                "CRA_CROSSCHECKER_ENABLED", "true"));
+    assertThat(fromEnv.crossCheckerEnabled()).isTrue();
+  }
+
+  @Test
+  void crossCheckerRejectsInvalidModesAndWeeks() {
+    assertThatThrownBy(
+            () ->
+                CliArgs.parse(
+                    concat(baseArgs(), "--crosschecker", "--crosschecker-modes", "bad"), ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--crosschecker-modes");
+    assertThatThrownBy(
+            () -> CliArgs.parse(concat(baseArgs(), "--crosschecker-history-weeks", "0"), ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("crosschecker-history-weeks");
+  }
+
+  @Test
   void ciModeStillRequiresCoreArgs() {
     // CI 形态回归：--local 之外缺 repo/pr/head/token 仍拒绝启动（LLM 缺失由 missingLlmKeyFails 覆盖）
     assertThatThrownBy(() -> CliArgs.parse(new String[] {}, ENV))

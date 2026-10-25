@@ -1,7 +1,10 @@
 package org.cra.git.api;
 
+import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.cra.common.git.BlameResult;
+import org.cra.common.git.CommitHistoryEntry;
 
 /**
  * 本地仓库上下文（05§2.1 v1.1）：blame 走本地 jgit——GitHub REST/GraphQL 均无行级 blame 端点； CI workflow 本就 checkout
@@ -39,5 +42,23 @@ public interface LocalRepoContext {
    */
   default Optional<String> commitFilePatch(String sha, String path) {
     return Optional.empty();
+  }
+
+  /**
+   * 路径集近期变更史（03§3.1 CrossChecker 模式 A 的额外上下文输入 b：上下游路径集在近 N 周内的 commit 摘要）。
+   *
+   * <p>时间窗口以 {@code headSha} 的 committer time 为锚回溯（不以运行时钟为准——同输入同输出，可重放）；返回 提交时间倒序、仅命中 {@code
+   * paths} 中任一文件的 commit（对首父的 diff 过滤，rename 的新旧路径均参与匹配）。 SPI 演进新增 default 方法（11§4 第 1 条）：
+   * 默认不可得返回空列表——无本地仓库是合法形态，CrossChecker 变更史输入降级为如实声明（同 blame 模式，05§2.1）， 产品背景段（REVIEW.md）检查照常执行。
+   *
+   * <p>best effort 语义：head 不可解析 / 非仓库 / 读取失败均返回空列表，不抛异常不炸 run。
+   *
+   * @param paths 上下游路径集（相对仓库根；空集直接返回空列表）
+   * @param weeks 回溯周数（≤0 视为不可得）
+   * @param headSha 窗口锚点 commit（完整或缩写 sha）
+   * @return commit 摘要列表（时间倒序；不可得为空列表）
+   */
+  default List<CommitHistoryEntry> recentCommits(Set<String> paths, int weeks, String headSha) {
+    return List.of();
   }
 }

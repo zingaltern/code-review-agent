@@ -12,16 +12,36 @@ import java.util.List;
  * @param testReviewer TestReviewer（条件触发：逻辑变更且测试变更比例低）
  * @param conventionReviewer ConventionReviewer（条件触发：REVIEW.md 定义约定时；轻档）
  * @param perfReviewer PerfReviewer（条件触发：Deep 档；按 chunk）
+ * @param crossChecker CrossChecker（M4f-lite：配置开启且 standard/deep 档时全 PR 单实例；null = 未装配/关闭）
  */
 public record ReviewCrew(
     List<SubAgent<ReviewAgentInput>> bugHunters,
     SubAgent<ReviewAgentInput> securityReviewer,
     SubAgent<ReviewAgentInput> testReviewer,
     SubAgent<ReviewAgentInput> conventionReviewer,
-    SubAgent<ReviewAgentInput> perfReviewer) {
+    SubAgent<ReviewAgentInput> perfReviewer,
+    SubAgent<ReviewAgentInput> crossChecker) {
 
   public ReviewCrew {
     bugHunters = List.copyOf(bugHunters == null ? List.of() : bugHunters);
+  }
+
+  /**
+   * M2 形态兼容构造（CrossChecker 未装配；M3 各线现有构造点不改即可编译）。
+   *
+   * @param bugHunters BugHunter 视角定义
+   * @param securityReviewer SecurityReviewer
+   * @param testReviewer TestReviewer
+   * @param conventionReviewer ConventionReviewer
+   * @param perfReviewer PerfReviewer
+   */
+  public ReviewCrew(
+      List<SubAgent<ReviewAgentInput>> bugHunters,
+      SubAgent<ReviewAgentInput> securityReviewer,
+      SubAgent<ReviewAgentInput> testReviewer,
+      SubAgent<ReviewAgentInput> conventionReviewer,
+      SubAgent<ReviewAgentInput> perfReviewer) {
+    this(bugHunters, securityReviewer, testReviewer, conventionReviewer, perfReviewer, null);
   }
 
   /**
@@ -31,6 +51,6 @@ public record ReviewCrew(
    * @return 班组
    */
   public static ReviewCrew ofBugHunters(List<SubAgent<ReviewAgentInput>> bugHunters) {
-    return new ReviewCrew(bugHunters, null, null, null, null);
+    return new ReviewCrew(bugHunters, null, null, null, null, null);
   }
 }

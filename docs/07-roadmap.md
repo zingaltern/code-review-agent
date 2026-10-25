@@ -124,9 +124,9 @@
 - **M4d 夜间存量评审**：产出 issue 而非 PR comment；
 - **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**；
 - **M4f CrossChecker（v1.3 按 03§3.1 详设拆两阶段）**：
-  - **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；
+  - [x] **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；**已落地（2026-10-26）：`cross-checker` 角色 + 单次 LLM 调用（预算 16k/1.5k/2 轮）+ `LocalRepoContext.recentCommits` jgit 实现（窗口以 head committer time 为锚，排除本 PR 自身 commit）+ `agents.crosschecker` 配置（默认关闭，standard/deep 档 1 实例，quick/无数据优雅跳过并进覆盖声明）+ 矛盾来源引用格式权威定义（`ContextCitation`：`commit <sha> path <path>` / `REVIEW.md <段名>: <条目>`）+ verifier/judge 分型组装解析该格式；验收 fixture（真实 git 仓库 + REVIEW.md Known incidents）端到端产出 category=context 的 confirmed finding，见 `CrossCheckPipelineTest`**；
   - **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库，M4b 定时任务）——"检索矛盾事件"的完整数据面； tribal knowledge 不可见是硬边界（01§3.4），本项只覆盖已文档化部分；
-  - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源；该 fixture 同步固化为对抗集第 4 类用例（06§1.2）进 L3 门禁——context 召回有持续度量，不靠单例自证。
+  - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源；该 fixture 同步固化为对抗集第 4 类用例（06§1.2）进 L3 门禁——context 召回有持续度量，不靠单例自证。**执行记录（2026-10-26）**：单测 + 本地 fixture e2e 通过（07§5 门禁开闸条件：M3 T3.1+T3.3 落地前不做 L3 全量验收）；fixture 格式与对抗集对齐由协调者在合并后统一处理（本线未改 cra-eval/dataset）；增量实测：标准 10 文件规模下单次输入 ≈12.6k token（diff 7.2k + 变更史 2.7k + 产品段 1.8k + 系统提示余量），输出预算 1.5k——对照 04§2.2 的 ≈14k in / ≈20k run 增量，属保守上限内的实测值。
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 

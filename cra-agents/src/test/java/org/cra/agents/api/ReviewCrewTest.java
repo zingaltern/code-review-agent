@@ -50,5 +50,9 @@ class ReviewCrewTest {
         .isEqualTo(new AgentBudget(8_000, 1_000, 1, 60_000));
     assertThat(crew.perfReviewer().role().id()).isEqualTo("perf-reviewer");
     assertThat(crew.perfReviewer().budget()).isEqualTo(new AgentBudget(16_000, 1_000, 2, 120_000));
+    // M4f-lite：CrossChecker 装配齐备（触发由编排器按 agents.crosschecker.enabled + 档位判定，05§5 默认 false）
+    assertThat(crew.crossChecker().role().id()).isEqualTo("cross-checker");
+    assertThat(crew.crossChecker().budget()).isEqualTo(new AgentBudget(16_000, 1_500, 2, 240_000));
+    assertThat(crew.crossChecker().tools()).isEqualTo(ToolWhitelist.READ_FILE);
   }
 }
