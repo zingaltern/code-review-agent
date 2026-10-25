@@ -10,6 +10,7 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.cra.common.exception.CraLedgerException;
 import org.cra.common.git.LedgerComment;
@@ -20,12 +21,14 @@ import org.cra.store.api.ReviewLedger;
 /**
  * 本地 SQLite 账本（02§5 本地形态、05§1.5 存储子集；M1 T1.1，M2 本地 pre-PR 模式的账本事实源）。
  *
- * <p>表结构（05§1.5 中 M1 有读写双方的表；verdict/prompt_template_version/published_comment 随各自 数据面——M2 验证器与
- * prompt 版本、M3 处置采集——落地，避免无读取方的投机 schema）：
+ * <p>表结构（05§1.5 中已有读写双方数据的表；verdict/published_comment 随各自数据面——M2 验证器与 M3 处置采集——落地，避免无读取方的投机
+ * schema）：
  *
  * <ul>
  *   <li><b>review_run</b>：run 完成标记（status ∈ DONE|DEGRADED，即 05§1.3 run 完成标记的持久化形态）；
- *   <li><b>finding</b>：已发布 finding 标记（指纹级去重与补发的事实源，02§4.1）。
+ *   <li><b>finding</b>：已发布 finding 标记（指纹级去重与补发的事实源，02§4.1）；
+ *   <li><b>prompt_template_version</b>：run 实际使用的 prompt 模板版本（05§1.2 prompt_template_versions
+ *       的落库形态，T2.11）。
  * </ul>
  *
  * <p>与 GitHub 评论账本的分工（02§5）：CI 形态无本地库（账本 = 评论本身，写入由发布内嵌标记完成）； 本地形态每次 run 显式登记（{@code
@@ -82,6 +85,21 @@ public final class SqliteLedger implements ReviewLedger {
         marker.commitSha(),
         marker.commentId() > 0 ? marker.commentId() : null,
         Instant.now().toString());
+  }
+
+  @Override
+  public void recordTemplateVersions(int prNumber, String runId, Map<String, String> versions) {
+    for (Map.Entry<String, String> entry : versions.entrySet()) {
+      update(
+          "INSERT OR REPLACE INTO prompt_template_version(repo, pr_number, run_id, template_name,"
+              + " template_version, created_at) VALUES (?,?,?,?,?,?)",
+          repoKey,
+          prNumber,
+          runId,
+          entry.getKey(),
+          entry.getValue(),
+          Instant.now().toString());
+    }
   }
 
   @Override
@@ -229,6 +247,11 @@ public final class SqliteLedger implements ReviewLedger {
         stmt.execute(
             "CREATE INDEX IF NOT EXISTS idx_finding_fingerprint"
                 + " ON finding (repo, pr_number, fingerprint)");
+        stmt.execute(
+            "CREATE TABLE IF NOT EXISTS prompt_template_version ("
+                + "repo TEXT NOT NULL, pr_number INTEGER NOT NULL, run_id TEXT NOT NULL,"
+                + " template_name TEXT NOT NULL, template_version TEXT NOT NULL,"
+                + " created_at TEXT NOT NULL, PRIMARY KEY (repo, pr_number, run_id, template_name))");
       }
       return conn;
     } catch (SQLException e) {

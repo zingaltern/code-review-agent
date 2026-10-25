@@ -5,6 +5,7 @@
 > **v1.2**：指纹 v2 + 解析器规则 + 发布侧转义剥离；replies 双端点；workflow draft 过滤与 cli 分发。
 > **v1.2.1**：run 完成标记（status=DONE）；Summary 载体改 issue comment；滑窗容错（02§4.1）。
 > **v1.3.1**：§1.1 Finding 枚举补 **`context`**（v1.3 新增 CrossChecker 的输出类别未传播到 schema，其全部输出会被 schema 校验拒收——四轮里第三次同类病）；§4 补回滚职责注（修复 01§3.4 悬空引用）；§5 补 CrossChecker 配置项。
+> **v1.3.2**（M2 T2.9–T2.11 实现撞墙定点修订，2026-10-25）：§3 本地 CLI 实参补齐（--exec/--ledger-db/三档路由参数）、退出码新增 **4**（本地实跑失败，验收 8 的可判定信号）、本地解析语义（repo/head/token/LLM 可省、pr=0）；§1.4 补 `template_versions` 事件；§1.5 登记 `prompt_template_version` 落地。
 
 ---
 
@@ -118,6 +119,7 @@
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
 {"ts":"…","event":"plan","effective_depth":"standard","chunks":4,"skipped":2}
+{"ts":"…","event":"template_versions","versions":{"general-reviewer":"general@1a2b3c04"}}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"blame_check","note":"…"}
 {"ts":"…","event":"aggregate","candidates":12,"ordered":5,"nit_dropped":2,"suppressed_by_truncation":0}
@@ -129,7 +131,7 @@ brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 
 ### 1.5 存储 Schema
 
-CI 形态无本地库（账本=GitHub）；本地/服务形态：`review_run`、`finding`、`verdict`、`published_comment`、`prompt_template_version` 表，`ReviewLedger` SPI 统一抽象（cra-store）。
+CI 形态无本地库（账本=GitHub）；本地/服务形态：`review_run`、`finding`、`verdict`、`published_comment`、`prompt_template_version` 表，`ReviewLedger` SPI 统一抽象（cra-store）。已落地：M1 建 review_run/finding；M2 T2.11 建 `prompt_template_version`（repo/pr_number/run_id/template_name/template_version，随 run 落库，05§1.2 prompt_template_versions 的持久化形态）；verdict/published_comment 随验证层/处置采集数据面落地。
 
 ## 2. GitPlatformAdapter SPI（v1.1 修订）
 
@@ -198,14 +200,18 @@ public interface CommentSource {                                               /
 cra review --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
   --base "$BASE_SHA" --head "$HEAD_SHA" --depth standard --token "$GITHUB_TOKEN"
 
-# 本地 pre-PR 模式（M2 起；账本=本地 SQLite，默认不回帖）
-cra review --local --base main --depth standard --dry-run=true
+# 本地 pre-PR 模式（M2 起；账本=本地 SQLite，默认 dry-run 不回帖）
+cra review --local [--base main] [--head REF] [--depth standard] [--dry-run=false] \
+  [--exec "mvn -B -ntp verify"] [--ledger-db ~/.cra/ledger.db] \
+  [--model-strong M] [--model-light M] [--fallback-chain standard,light] [--rpm standard=60,strong=30,light=60]
 
 # 处置采集/周报（本地跑，读 GitHub 账本，无常驻服务）
 cra-eval report --repo zingaltern/code-review-agent --since 7d
 ```
 
-退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）。
+本地模式解析语义（v1.3.2 实现落地）：`--repo`/`--head`/`--token`/`CRA_LLM_*` 均可省——仓库身份由 remote origin 推导（兜底 `local/<目录名>`）、head 解析为 HEAD、无 `CRA_LLM_API_KEY` 时评审段**如实跳过**（报告声明，不伪装）；`--pr` 省缺为 0（本地无 PR，账本按 `(repo, 0, commit)` 键控）。
+
+退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）；**`4` 本地 pre-PR 实跑构建/测试失败**（v1.3.2 撞墙定点修订：v1 基线只定义了 0/2/3，而 07 T2.10 验收 8 要求"报告如实展示测试失败输出且退出码非零"——需一个区别于"工具自身故障"的确定性信号。优先级高于评审结论：构建失败时评审照常运行、结果入报告，但退出码恒为 4）。
 
 ## 4. GitHub Actions 集成（v1.2：draft 过滤 + 分发方案 + 限制声明）
 

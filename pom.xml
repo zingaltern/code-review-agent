@@ -35,6 +35,8 @@
     <archunit.version>1.5.1</archunit.version>
     <wiremock.version>3.13.2</wiremock.version>
     <logstash-logback-encoder.version>9.0</logstash-logback-encoder.version>
+    <!-- 08§3.1：slow 标签 e2e 默认排除（08§2.4 场景 16，本地/按需），-Dsurefire.excludedGroups= 可放开 -->
+    <surefire.excludedGroups>slow</surefire.excludedGroups>
   </properties>
 
   <dependencyManagement>
@@ -77,6 +79,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-surefire-plugin</artifactId>
           <version>3.5.4</version>
+          <configuration>
+            <!-- 08§2.4 场景 16：pre-PR 实跑 e2e 标 @Tag("slow")，不进常规 CI 时长预算；
+                 本地按需跑 -Dsurefire.excludedGroups= -Dgroups=slow -->
+            <excludedGroups>${surefire.excludedGroups}</excludedGroups>
+          </configuration>
         </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>

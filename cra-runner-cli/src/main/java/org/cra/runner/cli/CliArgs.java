@@ -7,8 +7,14 @@ import org.cra.common.exception.CraConfigException;
 /**
  * `cra review` 参数解析（05§3 CLI 契约）。缺参/非法值 → CraConfigException（退出码 2）。 参数优先于环境变量；密钥类只认环境变量来源的传递（CI 中经
  * --token 传入亦视为环境侧提供）。
+ *
+ * <p>本地 pre-PR 模式（--local，T2.10）：--repo/--pr/--head/--token 与 CRA_LLM_* 全部转为可选—— 仓库身份由 remote
+ * origin 推导、head 解析为 HEAD、无密钥时评审段如实跳过；dry-run 默认 true（05§3）。
  */
 final class CliArgs {
+
+  /** 本地实跑命令默认值（07 T2.10：默认 mvn -B -ntp verify，docs/00 §4 自检即现成命令）。 */
+  static final String DEFAULT_EXEC = "mvn -B -ntp verify";
 
   private CliArgs() {}
 
@@ -25,14 +31,23 @@ final class CliArgs {
       args = java.util.Arrays.copyOfRange(args, 1, args.length);
     }
     Map<String, String> named = new HashMap<>();
-    boolean dryRun = false;
+    boolean dryRunFlag = false;
+    boolean dryRunArgSeen = false;
     boolean securityBlock = false;
+    boolean local = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
-        case "--dry-run" -> dryRun = true;
-        case "--dry-run=true", "--dry-run=false" -> dryRun = arg.endsWith("true");
+        case "--dry-run" -> {
+          dryRunFlag = true;
+          dryRunArgSeen = true;
+        }
+        case "--dry-run=true", "--dry-run=false" -> {
+          dryRunFlag = arg.endsWith("true");
+          dryRunArgSeen = true;
+        }
         case "--security-block" -> securityBlock = true;
+        case "--local" -> local = true;
         case "--repo",
             "--pr",
             "--base",
@@ -47,7 +62,13 @@ final class CliArgs {
             "--nit-budget",
             "--run-total-tokens",
             "--degrade-at",
-            "--publish-unverified" -> {
+            "--publish-unverified",
+            "--exec",
+            "--ledger-db",
+            "--model-strong",
+            "--model-light",
+            "--fallback-chain",
+            "--rpm" -> {
           if (i + 1 >= args.length) {
             throw new CraConfigException("参数缺值: " + arg);
           }
@@ -56,30 +77,65 @@ final class CliArgs {
         default -> throw new CraConfigException("未知参数: " + arg);
       }
     }
-    String repo = required(named, "--repo", env.get("GITHUB_REPOSITORY"));
-    int pr = parsePr(required(named, "--pr", env.get("PR_NUMBER")));
-    String base = required(named, "--base", env.get("BASE_SHA"));
-    String head = required(named, "--head", env.get("HEAD_SHA"));
+    // dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）
+    boolean dryRun = (local && !dryRunArgSeen) || dryRunFlag;
+
+    String repo = named.get("--repo");
+    if (repo == null || repo.isBlank()) {
+      repo = env.get("GITHUB_REPOSITORY");
+    }
+    String[] ownerRepo = null;
+    if (repo != null && !repo.isBlank()) {
+      ownerRepo = repo.split("/");
+      if (ownerRepo.length != 2) {
+        throw new CraConfigException("--repo 形如 owner/name: " + repo);
+      }
+    }
+    int pr =
+        local
+            ? parseIntOrDefault(named.get("--pr"), 0)
+            : parsePr(required(named, "--pr", env.get("PR_NUMBER")));
+    String base =
+        named.containsKey("--base") || !local
+            ? required(named, "--base", env.get("BASE_SHA"))
+            : "main";
+    // 本地模式 head 可省（= HEAD）；CI 必填
+    String head = named.get("--head");
+    if (head == null || head.isBlank()) {
+      head = local ? null : required(named, "--head", env.get("HEAD_SHA"));
+    }
     String depth = named.getOrDefault("--depth", "standard");
     if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
       throw new CraConfigException("depth 非法: " + depth + "（quick|standard|deep）");
     }
-    String token = required(named, "--token", env.get("GITHUB_TOKEN"));
+    String token = named.get("--token");
+    if (token == null || token.isBlank()) {
+      token = env.get("GITHUB_TOKEN");
+    }
+    if (!local) {
+      if (token == null || token.isBlank()) {
+        throw new CraConfigException("缺参数: --token（或 GITHUB_TOKEN）");
+      }
+      if (ownerRepo == null) {
+        throw new CraConfigException("缺参数: --repo（或 GITHUB_REPOSITORY）");
+      }
+      if (head == null) {
+        throw new CraConfigException("缺参数: --head（或 HEAD_SHA）");
+      }
+    }
     String llmApiKey = env.get("CRA_LLM_API_KEY");
-    if (llmApiKey == null || llmApiKey.isBlank()) {
-      throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
-    }
     String llmBaseUrl = env.get("CRA_LLM_BASE_URL");
-    if (llmBaseUrl == null || llmBaseUrl.isBlank()) {
-      throw new CraConfigException("CRA_LLM_BASE_URL 未设置");
-    }
     String llmModel = env.get("CRA_LLM_MODEL");
-    if (llmModel == null || llmModel.isBlank()) {
-      throw new CraConfigException("CRA_LLM_MODEL 未设置");
-    }
-    String[] ownerRepo = repo.split("/");
-    if (ownerRepo.length != 2) {
-      throw new CraConfigException("--repo 形如 owner/name: " + repo);
+    if (!local) {
+      if (llmApiKey == null || llmApiKey.isBlank()) {
+        throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
+      }
+      if (llmBaseUrl == null || llmBaseUrl.isBlank()) {
+        throw new CraConfigException("CRA_LLM_BASE_URL 未设置");
+      }
+      if (llmModel == null || llmModel.isBlank()) {
+        throw new CraConfigException("CRA_LLM_MODEL 未设置");
+      }
     }
     // 05§5 review.* 与 agents.budget（默认值即文档基准值；REVIEW.md 显式配置在 core 内优先于 nit 默认）
     DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", "0.70,0.85"));
@@ -89,8 +145,8 @@ final class CliArgs {
           "--publish-unverified 非法: " + publishUnverified + "（never|labeled）");
     }
     return new CraConfig(
-        ownerRepo[0],
-        ownerRepo[1],
+        ownerRepo == null ? null : ownerRepo[0],
+        ownerRepo == null ? null : ownerRepo[1],
         pr,
         base,
         head,
@@ -110,7 +166,37 @@ final class CliArgs {
         parseLongOption(named, "--run-total-tokens", 500_000L),
         degradeAt.first(),
         degradeAt.second(),
-        publishUnverified);
+        publishUnverified,
+        local,
+        named.getOrDefault("--exec", DEFAULT_EXEC),
+        expandUserHome(named.getOrDefault("--ledger-db", "~/.cra/ledger.db")),
+        named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG")),
+        named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT")),
+        named.getOrDefault(
+            "--fallback-chain", env.getOrDefault("CRA_LLM_FALLBACK_CHAIN", "standard,light")),
+        named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")));
+  }
+
+  private static String expandUserHome(String path) {
+    if (path.startsWith("~")) {
+      return System.getProperty("user.home") + path.substring(1);
+    }
+    return path;
+  }
+
+  private static int parseIntOrDefault(String value, int defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value);
+      if (parsed < 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("--pr 必须为非负整数（本地模式 0 = 无 PR）: " + value);
+    }
   }
 
   private record DegradeAt(double first, double second) {}

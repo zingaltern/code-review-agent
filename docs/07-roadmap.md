@@ -84,9 +84,9 @@
 - [ ] T2.6 JudgeAgent：INSUFFICIENT 仲裁 + 抽查复核 + **上下文按案件界定**（≤3 文件，03§6）；
 - [ ] T2.7 ConvergenceGuard：轮次上限 3、diff-only 复审、指纹去重（03§5）；
 - [ ] T2.8 精确去重 merge；语义去重留 M3；
-- [ ] T2.9 LlmGateway 模型路由（standard/strong/light）+ per-model RPM + 降级链（02§4.5）；
-- [ ] **T2.10 pre-PR 本地模式（v1.2 补实质）**：`cra review --local` 默认**实跑 `mvn -B -ntp verify`（命令可配）并展示真实输出**（退出码 + 失败摘录置顶报告——对齐博客"必须展示输出而非声称完成"，docs/00 §4 自检即现成命令）；随后本地评审（SQLite 账本、默认 dry-run）+ 建议清单；
-- [ ] T2.11 prompt 模板版本化并与 run 关联（05§1.2）。
+- [x] T2.9 LlmGateway 模型路由（standard/strong/light）+ per-model RPM + 降级链（02§4.5）；**已落地（2026-10-25）：三档端点解析 + 60s 滑窗 per-model RPM + fallback-chain 换端点（重试耗尽/排队超时/4xx 均试链上下一档），降级注记入 LlmResponse 供 stats/Summary**；
+- [x] **T2.10 pre-PR 本地模式（v1.2 补实质）**：`cra review --local` 默认**实跑 `mvn -B -ntp verify`（命令可配）并展示真实输出**（退出码 + 失败摘录置顶报告——对齐博客"必须展示输出而非声称完成"，docs/00 §4 自检即现成命令）；随后本地评审（SQLite 账本、默认 dry-run）+ 建议清单；**已落地：本地 jgit 适配器（diff 与 GitHub 同构）+ 输出实时回显/全量落盘/摘录置顶 + 退出码 4（实跑失败，05§3 v1.3.2）+ 无密钥如实跳过评审；验收 8 e2e（注入挂测试分支）实跑通过**；
+- [x] T2.11 prompt 模板版本化并与 run 关联（05§1.2）；**已落地：trace `template_versions` 事件 + SQLite `prompt_template_version` 表（随发布成功落库）**。
 
 **验收（L3 全量口径：k=3、聚合 Wilson CI 判定，06§1.2；数据集 = T1.8）**：
 1. 对抗集幻觉用例：聚合拒绝率 ≥80%；

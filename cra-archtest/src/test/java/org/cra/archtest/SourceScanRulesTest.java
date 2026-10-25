@@ -95,12 +95,17 @@ class SourceScanRulesTest {
         "无 System.out/printStackTrace/parallelStream",
         (module, path, lines) -> {
           List<String> code = codeLines(lines);
+          // ADR-0007：CLI 展示层（stdout 即用户界面）豁免 System.out/err 禁令——T2.10 实跑真实输出与报告契约；
+          // System.err 同样豁免仅因同属 CLI 展示通道；printStackTrace/parallelStream 全模块维持
+          boolean presentationModule = "cra-runner-cli".equals(module);
           for (int i = 0; i < code.size(); i++) {
             String line = code.get(i);
-            assertClean(
-                module, path, lines, i, !line.contains("System.out."), "禁 System.out（09§5）");
-            assertClean(
-                module, path, lines, i, !line.contains("System.err."), "禁 System.err（09§5）");
+            if (!presentationModule) {
+              assertClean(
+                  module, path, lines, i, !line.contains("System.out."), "禁 System.out（09§5）");
+              assertClean(
+                  module, path, lines, i, !line.contains("System.err."), "禁 System.err（09§5）");
+            }
             assertClean(
                 module,
                 path,

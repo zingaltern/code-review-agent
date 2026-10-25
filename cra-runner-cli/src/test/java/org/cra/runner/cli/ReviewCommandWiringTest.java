@@ -40,7 +40,14 @@ class ReviewCommandWiringTest {
             500_000L,
             0.70,
             0.85,
-            "never");
+            "never",
+            false,
+            "mvn -B -ntp verify",
+            "~/.cra/ledger.db",
+            null,
+            null,
+            "standard,light",
+            "");
     try (var context =
         new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
       context.registerBean(CraConfig.class, () -> config);
@@ -110,7 +117,14 @@ class ReviewCommandWiringTest {
             500_000L,
             0.70,
             0.85,
-            "never");
+            "never",
+            false,
+            "mvn -B -ntp verify",
+            "~/.cra/ledger.db",
+            null,
+            null,
+            "standard,light",
+            "");
     return ReviewCommand.exitCode(result, config);
   }
 }

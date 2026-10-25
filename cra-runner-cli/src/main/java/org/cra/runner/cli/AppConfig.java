@@ -10,7 +10,6 @@ import org.cra.git.github.api.GitHubAssembly;
 import org.cra.git.github.api.GitHubComponents;
 import org.cra.llm.api.LlmAssembly;
 import org.cra.llm.api.LlmGateway;
-import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.store.api.ReviewLedger;
 import org.cra.store.api.StoreAssembly;
 import org.springframework.context.annotation.Bean;
@@ -49,17 +48,8 @@ class AppConfig {
 
   @Bean
   LlmGateway llmGateway() {
-    return LlmAssembly.createGateway(
-        new LlmGatewayConfig(
-            config.llmBaseUrl(),
-            config.llmModel(),
-            config.llmApiKey(),
-            LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
-            LlmGatewayConfig.DEFAULT_MAX_RETRIES,
-            30_000,
-            120_000,
-            1_000,
-            8_000));
+    // T2.9：CI 与本地共用三档路由装配（05§5；--model-strong/--fallback-chain/--rpm 可调）
+    return LlmAssembly.createGateway(LlmConfigFactory.create(config));
   }
 
   @Bean

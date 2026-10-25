@@ -114,7 +114,7 @@ public abstract class CraException extends RuntimeException { … }
 | INFO | run 级里程碑 | run 开始/结束、publish 完成、深度降档 |
 | DEBUG | 代理内部细节（brief 构成、重试明细） | CI 默认 INFO，仅本地复现开 DEBUG |
 
-- **【强制】禁 `System.out` / `printf` / `printStackTrace`**：一律走 SLF4J；检查：规则自检测试。
+- **【强制】禁 `System.out` / `printf` / `printStackTrace`**：一律走 SLF4J；检查：规则自检测试。**例外（ADR-0007）**：`cra-runner-cli` 展示层的 stdout 即用户界面——pre-PR 实跑真实输出回显与报告打印（07 T2.10 契约）豁免 `System.out/err` 禁令；`printStackTrace` 仍全局禁，豁免仅限该模块，其余模块不变。
 - 【建议】不可信内容（diff/注释/finding 文本，04§3.3）不整段进日志，只记摘要与引用；密钥按 05§6 正则掩码。
 
 ## 6. 不可变与并发

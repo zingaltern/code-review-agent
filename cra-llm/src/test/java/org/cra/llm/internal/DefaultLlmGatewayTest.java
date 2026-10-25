@@ -10,16 +10,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmRequest;
 import org.cra.llm.api.LlmResponse;
 import org.cra.llm.api.LlmStatus;
+import org.cra.llm.api.ModelTier;
 import org.cra.llm.api.ResponseMode;
 import org.junit.jupiter.api.Test;
 
 /**
- * 网关行为单测（fake 传输，无网络，08§2.2）：429/5xx 指数退避、耗尽降级、4xx 快速失败、 并发信号量、排队超时降级、JSON 模式请求形状（07 T0.2；07§1 验收 5
- * 的单测侧）。
+ * 网关行为单测（fake 传输，无网络，08§2.2）：429/5xx 指数退避、耗尽降级、4xx 快速失败、 并发信号量、排队超时降级、三档路由与降级链（T2.9，02§4.5/05§5）。
  */
 class DefaultLlmGatewayTest {
 
@@ -68,11 +69,33 @@ class DefaultLlmGatewayTest {
     }
   }
 
+  private static LlmGatewayConfig.ModelEndpoint endpoint(String model) {
+    return new LlmGatewayConfig.ModelEndpoint(model, "http://llm.test/v1/", "test-key");
+  }
+
+  /** M0 形态：三档同端点、降级链只含 standard（既有行为回归基准）。 */
   private static LlmGatewayConfig config(int concurrency, long queueTimeoutMs) {
     return new LlmGatewayConfig(
-        "http://llm.test/v1/",
-        "test-model",
-        "test-key",
+        LlmGatewayConfig.models(
+            endpoint("std-model"), endpoint("std-model"), endpoint("std-model")),
+        List.of(ModelTier.STANDARD),
+        LlmGatewayConfig.defaultRpm(),
+        concurrency,
+        3,
+        queueTimeoutMs,
+        500,
+        10,
+        40);
+  }
+
+  /** 三档独立模型名 + 降级链 standard → light。 */
+  private static LlmGatewayConfig routedConfig(
+      int concurrency, long queueTimeoutMs, java.util.Map<ModelTier, Integer> rpm) {
+    return new LlmGatewayConfig(
+        LlmGatewayConfig.models(
+            endpoint("std-model"), endpoint("strong-model"), endpoint("light-model")),
+        List.of(ModelTier.STANDARD, ModelTier.LIGHT),
+        rpm,
         concurrency,
         3,
         queueTimeoutMs,
@@ -83,6 +106,10 @@ class DefaultLlmGatewayTest {
 
   private static LlmRequest request() {
     return new LlmRequest("sys", "user", ResponseMode.JSON, null, "general-reviewer");
+  }
+
+  private static LlmRequest request(ModelTier tier) {
+    return new LlmRequest("sys", "user", ResponseMode.JSON, null, "general-reviewer", tier);
   }
 
   @Test
@@ -177,5 +204,114 @@ class DefaultLlmGatewayTest {
     gateway.complete(request());
     // 传输层收到的 URL 由 fake 忽略，但编码/拼接不抛异常即覆盖根路径拼接
     assertThat(transport.bodies).hasSize(1);
+  }
+
+  // ---------- T2.9：三档路由与降级链（02§4.5/05§5） ----------
+
+  @Test
+  void requestTierRoutesToMatchingEndpoint() {
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    gateway.complete(request(ModelTier.STRONG));
+    assertThat(transport.bodies.get(0)).contains("strong-model");
+    gateway.complete(request(ModelTier.LIGHT));
+    assertThat(transport.bodies.get(1)).contains("light-model");
+  }
+
+  @Test
+  void fallbackChainSubstitutesEndpointOnRetryExhaustion() {
+    // standard 4 次尝试全 429 → 链上 light 接管成功
+    ScriptedTransport transport = new ScriptedTransport(429, 429, 429, 429, 200);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.STANDARD));
+    assertThat(response.status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies).hasSize(5);
+    assertThat(transport.bodies.get(4)).contains("light-model");
+    assertThat(response.degradation()).isEqualTo("model-fallback:standard→light");
+  }
+
+  @Test
+  void fallbackChainAlsoAppliesToNonRetryable4xx() {
+    // 401 不重试，但换端点重试是降级链语义（02§4.2：主模型 → 备用模型）
+    ScriptedTransport transport = new ScriptedTransport(401, 200);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.STANDARD));
+    assertThat(response.status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies).hasSize(2);
+    assertThat(transport.bodies.get(1)).contains("light-model");
+    assertThat(response.degradation()).isEqualTo("model-fallback:standard→light");
+  }
+
+  @Test
+  void requestedTierTriedFirstEvenWhenChainStartsElsewhere() {
+    ScriptedTransport transport = new ScriptedTransport(200);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.LIGHT));
+    assertThat(response.status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies).hasSize(1);
+    assertThat(transport.bodies.get(0)).contains("light-model");
+    assertThat(response.degradation()).isNull(); // 直达成功无降级注记
+  }
+
+  @Test
+  void allEndpointsExhaustedReturnsUnavailableWithEveryAttempt() {
+    ScriptedTransport transport = new ScriptedTransport(429, 429, 429, 429, 503, 503, 503, 503);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.STANDARD));
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage())
+        .contains("standard")
+        .contains("light")
+        .contains("llm unavailable on all endpoints");
+  }
+
+  @Test
+  void perModelRpmThrottlesThirdImmediateRequest() {
+    // RPM=2：前两请求立即放行，第三请求等待最早时间戳出窗（测试注入时钟前进，无真实睡眠）
+    ScriptedTransport transport = new ScriptedTransport(200, 200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    List<Long> waits = new ArrayList<>();
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, java.util.Map.of(ModelTier.STANDARD, 2, ModelTier.LIGHT, 60)),
+            transport,
+            ms -> {
+              waits.add(ms);
+              clock.addAndGet(ms);
+            },
+            clock::get);
+    assertThat(gateway.complete(request()).status()).isEqualTo(LlmStatus.OK);
+    assertThat(gateway.complete(request()).status()).isEqualTo(LlmStatus.OK);
+    assertThat(gateway.complete(request()).status()).isEqualTo(LlmStatus.OK);
+    assertThat(waits).hasSize(1);
+    assertThat(waits.get(0)).isEqualTo(60_001L); // 0 + 60000 - 0 + 1
+    assertThat(transport.bodies).hasSize(3);
+  }
+
+  @Test
+  void rpmLimitIsIndependentPerTier() {
+    ScriptedTransport transport = new ScriptedTransport(200, 200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, java.util.Map.of(ModelTier.STANDARD, 1, ModelTier.LIGHT, 1)),
+            transport,
+            ms -> clock.addAndGet(ms),
+            clock::get);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    // strong 未配置 RPM → 不限流，立即放行
+    assertThat(gateway.complete(request(ModelTier.STRONG)).status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies).hasSize(3);
   }
 }

@@ -46,6 +46,7 @@ import org.cra.common.run.Coverage;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
+import org.cra.common.run.ReviewSuggestion;
 import org.cra.common.run.RunStatus;
 import org.cra.context.api.ContextAssembler;
 import org.cra.context.api.ContextAssembly;
@@ -215,6 +216,8 @@ public final class ReviewPipeline implements Orchestrator {
               "notes", plan.notes()));
 
       RunOutcome outcome = executeChunks(request, runId, trace, diff, policy, depthPlan, plan);
+      // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
+      trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
         // LLM 不可得：run FAILED，不发布、无 DONE 标记——重跑重试（02§4.2）
         return finish(
@@ -337,7 +340,8 @@ public final class ReviewPipeline implements Orchestrator {
               degradations,
               degraded,
               suspectWarning,
-              coverageLines);
+              coverageLines,
+              outcome.templateVersions());
       int fallbackCount =
           (int)
               aggregation.ordered().stream()
@@ -383,7 +387,8 @@ public final class ReviewPipeline implements Orchestrator {
               stats.suppressedByTruncation(),
               stats.tokensIn(),
               stats.tokensOut());
-      return finish(trace, runId, request, status, stats, summaryLine);
+      return finish(
+          trace, runId, request, status, stats, summaryLine, suggestionsOf(aggregation.ordered()));
     } catch (RuntimeException e) {
       // run 级不可恢复故障统一捕获：落盘 FAILED + trace，不阻塞 PR（02§4.2）
       return finish(
@@ -435,7 +440,8 @@ public final class ReviewPipeline implements Orchestrator {
       boolean stoppedByBudget,
       boolean truncationReached,
       List<String> contextNotes,
-      List<String> trimDecisions) {}
+      List<String> trimDecisions,
+      Map<String, String> templateVersions) {}
 
   private RunOutcome executeChunks(
       ReviewRequest request,
@@ -555,10 +561,13 @@ public final class ReviewPipeline implements Orchestrator {
     boolean llmUnavailable = false;
     String llmError = null;
     List<String> schemaErrors = new ArrayList<>();
+    Map<String, String> templateVersions = new LinkedHashMap<>();
     for (ChunkOutcome outcome : collected) {
       findings.addAll(outcome.findings());
       tokensIn += outcome.tokensIn();
       tokensOut += outcome.tokensOut();
+      // T2.11：本 run 实际使用的模板版本（角色 → 版本；05§1.2 prompt_template_versions）
+      templateVersions.putIfAbsent(outcome.roleId(), outcome.templateVersion());
       if (outcome.llmUnavailable()) {
         llmUnavailable = true;
         llmError = outcome.llmError();
@@ -586,7 +595,8 @@ public final class ReviewPipeline implements Orchestrator {
         stopped,
         truncationReached,
         contextNotes,
-        trimDecisions);
+        trimDecisions,
+        templateVersions);
   }
 
   /** 单 chunk 执行（LLM 调用；异常边界在 AgentRunner 与网关内转换）。 */
@@ -625,6 +635,8 @@ public final class ReviewPipeline implements Orchestrator {
     return new ChunkOutcome(
         chunk.key(),
         chunk.files().size(),
+        reviewer.role().id(),
+        brief.templateVersion(),
         outcome.findings(),
         outcome.tokensIn(),
         outcome.tokensOut(),
@@ -640,6 +652,8 @@ public final class ReviewPipeline implements Orchestrator {
   private record ChunkOutcome(
       String chunkKey,
       int fileCount,
+      String roleId,
+      String templateVersion,
       List<CandidateFinding> findings,
       long tokensIn,
       long tokensOut,
@@ -738,7 +752,8 @@ public final class ReviewPipeline implements Orchestrator {
       List<String> degradations,
       boolean degraded,
       String suspectWarning,
-      List<String> coverageLines) {
+      List<String> coverageLines,
+      Map<String, String> templateVersions) {
     List<FindingAggregator.Scored> fallbacks =
         ordered.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList();
     List<InlineComment> inline =
@@ -826,7 +841,7 @@ public final class ReviewPipeline implements Orchestrator {
       // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾，重跑走指纹级补发（02§4.1）
       return (int) (publishedActual + fallbackActual);
     }
-    recordToLedger(request, runId, ordered, result, skippedDuplicate, degraded);
+    recordToLedger(request, runId, ordered, result, skippedDuplicate, degraded, templateVersions);
     int supersedeFailures = supersedePreviousSummaries(request, runId, trace);
     if (supersedeFailures > 0) {
       degradations.add("summary-supersede-failed:x" + supersedeFailures);
@@ -846,13 +861,16 @@ public final class ReviewPipeline implements Orchestrator {
       List<FindingAggregator.Scored> ordered,
       PrReviewResult result,
       int skippedDuplicate,
-      boolean degraded) {
+      boolean degraded,
+      Map<String, String> templateVersions) {
     String status = degraded ? LedgerRunMarker.STATUS_DEGRADED : LedgerRunMarker.STATUS_DONE;
     long summaryCommentId = result.summaryCommentId().orElseThrow();
     ledger.recordRunCompletion(
         request.prNumber(),
         new LedgerRunMarker(
             runId, request.headSha(), status, ordered.size(), skippedDuplicate, summaryCommentId));
+    // T2.11：模板版本随 run 落库（05§1.5 prompt_template_version；SQLite 形态覆写，GitHub 形态 default 无操作）
+    ledger.recordTemplateVersions(request.prNumber(), runId, templateVersions);
     Map<String, Long> commentIds =
         result.items().stream()
             .filter(i -> i.commentId() != null)
@@ -1139,6 +1157,34 @@ public final class ReviewPipeline implements Orchestrator {
       RunStatus status,
       ReviewStats stats,
       String summaryLine) {
+    return finish(trace, runId, request, status, stats, summaryLine, List.of());
+  }
+
+  /** 聚合后建议快照（本地 pre-PR 报告的建议清单数据源，02§5 本地形态；CI 形态不消费）。 */
+  private static List<ReviewSuggestion> suggestionsOf(List<FindingAggregator.Scored> ordered) {
+    return ordered.stream()
+        .map(
+            s ->
+                new ReviewSuggestion(
+                    s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING
+                        ? "PRE-EXISTING"
+                        : s.finding().severityProposed().name(),
+                    s.finding().title(),
+                    s.finding().file(),
+                    s.finding().line(),
+                    s.finding().description(),
+                    s.finding().suggestion() == null ? "" : s.finding().suggestion()))
+        .toList();
+  }
+
+  private ReviewResult finish(
+      TraceWriter trace,
+      String runId,
+      ReviewRequest request,
+      RunStatus status,
+      ReviewStats stats,
+      String summaryLine,
+      List<ReviewSuggestion> suggestions) {
     Map<String, Object> end = new LinkedHashMap<>();
     end.put("status", status.name().toLowerCase(Locale.ROOT));
     end.put("findings_published", stats.findingsPublished());
@@ -1157,7 +1203,8 @@ public final class ReviewPipeline implements Orchestrator {
         status,
         stats,
         "file://" + trace.runDir(),
-        summaryLine);
+        summaryLine,
+        suggestions);
   }
 
   private static ReviewStats emptyStats(long latencyMs) {

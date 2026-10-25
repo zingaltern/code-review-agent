@@ -9,8 +9,13 @@ import org.slf4j.LoggerFactory;
  * <p>用法（05§3）：
  *
  * <pre>
+ * # CI 模式
  * cra review --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
  *   --base "$BASE_SHA" --head "$HEAD_SHA" --depth standard --token "$GITHUB_TOKEN" [--dry-run] [--security-block]
+ *
+ * # 本地 pre-PR 模式（T2.10：默认实跑 mvn -B -ntp verify + 本地评审，SQLite 账本，默认 dry-run）
+ * cra review --local [--base main] [--depth standard] [--exec "mvn -B -ntp verify"]
+ *            [--ledger-db ~/.cra/ledger.db] [--dry-run=false] [--model-strong M] [--fallback-chain standard,light]
  * </pre>
  */
 public final class Main {
@@ -25,17 +30,26 @@ public final class Main {
    * @param args 命令行参数
    */
   public static void main(String[] args) {
-    int code;
+    System.exit(run(args));
+  }
+
+  /**
+   * 执行入口（返回退出码，不调 System.exit——e2e 测试在进程内驱动，08 场景 16）。
+   *
+   * @param args 命令行参数
+   * @return 退出码（05§3：0/2/3 + 本地实跑失败 4）
+   */
+  static int run(String[] args) {
     try {
       CraConfig config = CliArgs.parse(args, System.getenv());
-      code = new ReviewCommand().execute(config);
+      return new ReviewCommand().execute(config);
     } catch (org.cra.common.exception.CraConfigException e) {
       LOG.error(
-          "参数/配置错误: {}；用法: cra review --repo owner/name --pr N --base SHA --head SHA "
-              + "[--depth quick|standard|deep] [--token T] [--dry-run] [--security-block]",
+          "参数/配置错误: {}；用法: cra review [--local] --repo owner/name --pr N --base SHA --head SHA "
+              + "[--depth quick|standard|deep] [--token T] [--dry-run] [--security-block] "
+              + "[--exec CMD] [--ledger-db PATH]",
           e.getMessage());
-      code = 2;
+      return 2;
     }
-    System.exit(code);
   }
 }

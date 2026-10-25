@@ -137,6 +137,78 @@ class CliArgsTest {
         .hasMessageContaining("--pr");
   }
 
+  // ---------- T2.10：本地 pre-PR 模式（05§3 本地形态） ----------
+
+  private static final Map<String, String> EMPTY_ENV = Map.of();
+
+  @Test
+  void localModeDefaults() {
+    // --local 一无所有也能解析：repo/head/token/LLM 全部转为可选（命令执行期解析或如实跳过）
+    CraConfig config = CliArgs.parse(new String[] {"--local"}, EMPTY_ENV);
+    assertThat(config.local()).isTrue();
+    assertThat(config.repoOwner()).isNull();
+    assertThat(config.prNumber()).isZero();
+    assertThat(config.baseSha()).isEqualTo("main");
+    assertThat(config.headSha()).isNull();
+    assertThat(config.dryRun()).isTrue(); // 本地默认 dry-run（05§3）
+    assertThat(config.execCommand()).isEqualTo(CliArgs.DEFAULT_EXEC);
+    assertThat(config.ledgerDb()).contains("/.cra/ledger.db").doesNotContain("~");
+    assertThat(config.llmApiKey()).isNull();
+    assertThat(config.fallbackChain()).isEqualTo("standard,light");
+    assertThat(config.rpm()).isEmpty();
+  }
+
+  @Test
+  void localModeExplicitOverrides() {
+    CraConfig config =
+        CliArgs.parse(
+            new String[] {
+              "--local",
+              "--base",
+              "develop",
+              "--exec",
+              "gradle check",
+              "--ledger-db",
+              "/tmp/l.db",
+              "--pr",
+              "42",
+              "--dry-run=false",
+              "--model-strong",
+              "glm-strong",
+              "--model-light",
+              "glm-lite",
+              "--fallback-chain",
+              "standard,strong",
+              "--rpm",
+              "standard=10,strong=5"
+            },
+            EMPTY_ENV);
+    assertThat(config.baseSha()).isEqualTo("develop");
+    assertThat(config.execCommand()).isEqualTo("gradle check");
+    assertThat(config.ledgerDb()).isEqualTo("/tmp/l.db");
+    assertThat(config.prNumber()).isEqualTo(42);
+    assertThat(config.dryRun()).isFalse();
+    assertThat(config.llmModelStrong()).isEqualTo("glm-strong");
+    assertThat(config.llmModelLight()).isEqualTo("glm-lite");
+    assertThat(config.fallbackChain()).isEqualTo("standard,strong");
+    assertThat(config.rpm()).isEqualTo("standard=10,strong=5");
+  }
+
+  @Test
+  void ciModeStillRequiresCoreArgs() {
+    // CI 形态回归：--local 之外缺 repo/pr/head/token 仍拒绝启动（LLM 缺失由 missingLlmKeyFails 覆盖）
+    assertThatThrownBy(() -> CliArgs.parse(new String[] {}, ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--pr");
+    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), EMPTY_ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--token");
+    assertThatThrownBy(
+            () -> CliArgs.parse(new String[] {"--local", "--repo", "bad-format"}, EMPTY_ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("owner/name");
+  }
+
   private static String[] concat(String[] a, String... b) {
     String[] out = new String[a.length + b.length];
     System.arraycopy(a, 0, out, 0, a.length);

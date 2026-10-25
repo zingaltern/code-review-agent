@@ -82,4 +82,16 @@ public interface ReviewLedger {
    * @param marker finding 标记
    */
   default void recordPublishedFinding(int prNumber, LedgerFindingMarker marker) {}
+
+  /**
+   * 登记本次 run 实际使用的 prompt 模板版本（角色 → 版本，形如 {@code general-reviewer@1a2b3c04}； 05§1.2
+   * prompt_template_versions 与 run 关联、 05§1.5 prompt_template_version 表；T2.11）。CI 形态版本随 trace
+   * artifact 留痕；可持久化形态（SQLite/PG）覆写落库，GitHub 评论账本保持 default 无操作（评论账本不承载该数据面）。
+   *
+   * @param prNumber PR 编号（本地形态为 0）
+   * @param runId run 标识
+   * @param versions 角色 → 模板版本
+   */
+  default void recordTemplateVersions(
+      int prNumber, String runId, java.util.Map<String, String> versions) {}
 }

@@ -17,4 +17,15 @@ public final class GitAssembly {
   public static LocalRepoContext createLocalRepoContext(Path workspaceRoot) {
     return new org.cra.git.internal.JgitLocalRepoContext(workspaceRoot);
   }
+
+  /**
+   * 打开本地 git 适配器（M2 本地 pre-PR 模式，02§5 本地形态；T2.10）。目录不是 git 仓库时 组装期失败（CraIntegrationException）——与
+   * {@link #createLocalRepoContext(Path)} 的降级形态不同：本地模式的 diff 数据面必须可得。
+   *
+   * @param workspaceRoot 仓库工作树根
+   * @return LocalGitAdapter（用毕 close）
+   */
+  public static LocalGitAdapter createLocalAdapter(Path workspaceRoot) {
+    return new org.cra.git.internal.LocalJgitAdapter(workspaceRoot);
+  }
 }

@@ -18,12 +18,15 @@ final class ReviewCommand {
   private static final Logger LOG = LoggerFactory.getLogger(ReviewCommand.class);
 
   /**
-   * 执行评审命令。
+   * 执行评审命令（CI 形态；本地 pre-PR 模式经 --local 分发至 {@link LocalPrePrCommand}）。
    *
    * @param config 运行配置（CliArgs.parse 产物）
    * @return 进程退出码
    */
   int execute(CraConfig config) {
+    if (config.local()) {
+      return new LocalPrePrCommand().execute(config);
+    }
     try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
       context.registerBean(CraConfig.class, () -> config);
       context.register(AppConfig.class);
@@ -67,7 +70,7 @@ final class ReviewCommand {
     return 0; // 有 finding 不是失败（05§3）
   }
 
-  private static org.cra.common.run.Depth toDepth(String depth) {
+  static org.cra.common.run.Depth toDepth(String depth) {
     return switch (depth) {
       case "quick" -> org.cra.common.run.Depth.QUICK;
       case "deep" -> org.cra.common.run.Depth.DEEP;

@@ -18,8 +18,9 @@ public record PrReviewResult(
     List<ReviewItemResult> items) {
 
   public PrReviewResult {
-    if (prNumber <= 0) {
-      throw new IllegalArgumentException("prNumber must be positive: " + prNumber);
+    // 0 = 本地 pre-PR 模式（postReview 为 no-op 确认，无平台 PR）；CI 形态恒正数
+    if (prNumber < 0) {
+      throw new IllegalArgumentException("prNumber must be non-negative: " + prNumber);
     }
     items = List.copyOf(items == null ? List.of() : items);
   }

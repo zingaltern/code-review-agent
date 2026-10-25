@@ -51,6 +51,12 @@
       <groupId>org.springframework</groupId>
       <artifactId>spring-context</artifactId>
     </dependency>
+    <!-- 本地形态 SQLite 账本驱动（02§5 本地形态；M2 pre-PR local 模式运行时装载，版本入 root dependencyManagement） -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <!-- 结构化 JSON 日志（09§5） -->
     <dependency>
       <groupId>ch.qos.logback</groupId>

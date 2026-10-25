@@ -1,0 +1,140 @@
+package org.cra.runner.cli;
+
+import java.util.List;
+import org.cra.common.run.ReviewResult;
+import org.cra.common.run.ReviewSuggestion;
+
+/**
+ * 本地 pre-PR 报告渲染（07 T2.10）：构建/测试实跑段（退出码 + 失败摘录置顶——对齐"必须展示输出而非 声称完成"）+ 本地评审段（建议清单）。纯文本到
+ * stdout，无状态可单测。
+ */
+final class LocalPrePrReport {
+
+  private LocalPrePrReport() {}
+
+  /**
+   * 渲染完整报告。
+   *
+   * @param config 运行配置（已回填本地身份）
+   * @param exec 实跑结果
+   * @param repoIdentity 仓库身份（owner/name 或 local/&lt;dir&gt;）
+   * @param baseRef 基线 ref 名（如 main）
+   * @param review 评审结果（跳过时 null）
+   * @param reviewSkipReason 评审跳过原因（未跳过为 null）
+   * @param reviewError 评审自身故障（正常为 null）
+   * @return 报告文本
+   */
+  static String render(
+      CraConfig config,
+      BuildVerifyRunner.ExecResult exec,
+      String repoIdentity,
+      String baseRef,
+      ReviewResult review,
+      String reviewSkipReason,
+      String reviewError) {
+    StringBuilder out = new StringBuilder();
+    out.append("\n================ cra pre-PR 本地评审报告 ================\n");
+    out.append("仓库: ")
+        .append(repoIdentity)
+        .append("  区间: ")
+        .append(baseRef)
+        .append('@')
+        .append(shortSha(config.baseSha()))
+        .append("..")
+        .append(shortSha(config.headSha()))
+        .append("（仅已提交变更，未提交工作区改动不在评审内）\n\n");
+
+    out.append("【1】构建/测试实跑（07 T2.10：展示真实输出，不以声称完成代替）\n");
+    out.append("命令: ").append(config.execCommand()).append('\n');
+    out.append("退出码: ")
+        .append(exec.exitCode())
+        .append(exec.failed() ? "（非零——构建/测试失败）" : "（通过）")
+        .append("  耗时: ")
+        .append(exec.durationMs() / 1000.0)
+        .append("s\n");
+    out.append("完整输出: ").append(exec.logFile()).append('\n');
+    if (exec.failed()) {
+      out.append("\n失败摘录（真实输出节选，置顶）:\n");
+      List<String> excerpts = BuildVerifyRunner.failureExcerpts(exec.output());
+      if (excerpts.isEmpty()) {
+        out.append("  （无 [ERROR] 行且输出过短，见完整输出日志）\n");
+      } else {
+        for (String line : excerpts) {
+          out.append("  ").append(line).append('\n');
+        }
+        if (BuildVerifyRunner.excerptTruncated(exec.output())) {
+          out.append("  …（摘录已截断，完整输出见日志文件）\n");
+        }
+      }
+    }
+
+    out.append("\n【2】本地评审\n");
+    out.append("模式: dry-run=")
+        .append(config.dryRun())
+        .append("  账本: ")
+        .append(config.ledgerDb())
+        .append("  PR 编号: ")
+        .append(config.prNumber())
+        .append(config.local() ? "（本地形态无 PR）" : "")
+        .append('\n');
+    if (reviewSkipReason != null) {
+      out.append("状态: 已跳过——").append(reviewSkipReason).append('\n');
+      out.append("建议清单: 未生成（评审未运行）\n");
+    } else if (reviewError != null) {
+      out.append("状态: 评审故障——").append(reviewError).append('\n');
+      out.append("建议清单: 未生成（评审故障）\n");
+    } else if (review != null) {
+      out.append("状态: ")
+          .append(review.status())
+          .append("  ")
+          .append(review.summaryLine())
+          .append('\n');
+      renderSuggestions(out, review.suggestions());
+    }
+    out.append("trace: ")
+        .append(review == null ? "（未运行评审，无 trace）" : review.traceRef())
+        .append('\n');
+    out.append("=========================================================\n");
+    return out.toString();
+  }
+
+  /** 建议清单（无建议时如实声明——不编造）。 */
+  static void renderSuggestions(StringBuilder out, List<ReviewSuggestion> suggestions) {
+    if (suggestions.isEmpty()) {
+      out.append("建议清单: 无（本次未发现新问题）\n");
+      return;
+    }
+    out.append("建议清单（").append(suggestions.size()).append(" 条）:\n");
+    for (int i = 0; i < suggestions.size(); i++) {
+      ReviewSuggestion s = suggestions.get(i);
+      out.append(' ')
+          .append(i + 1)
+          .append(". [")
+          .append(s.severity())
+          .append("] ")
+          .append(s.title())
+          .append(" — `")
+          .append(s.file())
+          .append(':')
+          .append(s.line())
+          .append("`\n");
+      if (!s.description().isBlank()) {
+        out.append("    ").append(singleLine(s.description())).append('\n');
+      }
+      if (!s.suggestion().isBlank()) {
+        out.append("    建议: ").append(singleLine(s.suggestion())).append('\n');
+      }
+    }
+  }
+
+  private static String singleLine(String text) {
+    return text.strip().replaceAll("\\s+", " ");
+  }
+
+  private static String shortSha(String sha) {
+    if (sha == null || sha.isBlank()) {
+      return "?";
+    }
+    return sha.substring(0, Math.min(7, sha.length()));
+  }
+}

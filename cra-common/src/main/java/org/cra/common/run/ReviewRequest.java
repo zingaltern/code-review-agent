@@ -7,7 +7,8 @@ import java.util.Objects;
  *
  * @param repoOwner 仓库属主
  * @param repoName 仓库名
- * @param prNumber PR 编号
+ * @param prNumber PR 编号（0 = 本地 pre-PR 模式无 PR 编号，账本按 (repo, 0, commit) 键控，02§5 本地形态； CI 形态由 CLI
+ *     层强制正数，05§3）
  * @param baseSha 基线 sha
  * @param headSha 目标 sha
  * @param depth 深度档位
@@ -30,8 +31,8 @@ public record ReviewRequest(
     if (repoOwner.isBlank() || repoName.isBlank()) {
       throw new IllegalArgumentException("owner/repo must be non-blank");
     }
-    if (prNumber <= 0) {
-      throw new IllegalArgumentException("prNumber must be positive: " + prNumber);
+    if (prNumber < 0) {
+      throw new IllegalArgumentException("prNumber must be non-negative: " + prNumber);
     }
     Objects.requireNonNull(baseSha, "baseSha");
     Objects.requireNonNull(headSha, "headSha");

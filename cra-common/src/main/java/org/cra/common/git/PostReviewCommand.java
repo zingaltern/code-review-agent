@@ -27,8 +27,9 @@ public record PostReviewCommand(
     if (repoOwner == null || repoOwner.isBlank() || repoName == null || repoName.isBlank()) {
       throw new IllegalArgumentException("repo owner/name must be non-blank");
     }
-    if (prNumber <= 0) {
-      throw new IllegalArgumentException("prNumber must be positive: " + prNumber);
+    // 0 = 本地 pre-PR 模式（无平台 PR）；CI 形态恒正数
+    if (prNumber < 0) {
+      throw new IllegalArgumentException("prNumber must be non-negative: " + prNumber);
     }
     if (commitId == null || commitId.isBlank()) {
       throw new IllegalArgumentException("commitId must be non-blank");

@@ -47,14 +47,15 @@ PR 事件 ─→ 幂等检查(GitHub评论账本) ─→ 上下文组装(窗口/
 
 Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容 LLM 网关（模型无关 + 并发限流 + 异构路由）· jgit（blame/本地模式）· GitHub REST API + 评论账本 · SQLite（本地模式）→ PostgreSQL（服务化）
 
-## 快速开始（M0 完成后可用，当前为设计阶段）
+## 快速开始（M2 部分能力可用，见 docs/07）
 
 ```bash
 # CI 模式（GitHub Actions 内，见 docs/05 §4）
 cra review --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" --base "$BASE_SHA" --head "$HEAD_SHA" --depth standard
 
-# 本地 pre-PR 自评审（M2 起；默认 dry-run，见 docs/05 §3）
-cra review --local --base main --depth standard --dry-run=true
+# 本地 pre-PR 自评审（M2；默认实跑 mvn -B -ntp verify + dry-run + SQLite 账本，见 docs/05 §3）
+# 实跑失败 → 报告展示真实失败输出并退出 4（05§3）；无 CRA_LLM_API_KEY 时评审段如实跳过
+cra review --local --base main --depth standard
 ```
 
 ## 状态
@@ -63,8 +64,8 @@ cra review --local --base main --depth standard --dry-run=true
 - [x] 技术方案 v1.0 → … → v1.3.1 → **v1 基线冻结**（五轮评审 40 项缺陷闭环，对照表见 docs/01 §8）
 - [x] **开发规范包 docs/08–11**（测试策略 / 代码规范 / 架构规范+ADR / 扩展性契约——【强制/建议/可选】三级标注为效率与规范的平衡机制，强制项全部可自动化守护）
 - [x] M0 骨架与最小闭环（含 cra-archtest 架构守护、Spotless 接入、docs/adr/ 目录创建）——代码与测试全部落地（2026-10-25，本地 squash 合入 8 个 feat 分支）；验收 1/3/4 的实跑部分待远端与密钥配置后自举验证（远端操作见 docs/00 §10，仅 owner 执行）
-- [ ] M1 工程化与账本（含最小评测集与 fixture 规格、REVIEW.md 新段落解析）
-- [ ] M2 隔离审查 + 独立复核 + pre-PR 实跑（核心）
+- [x] M1 工程化与账本（含最小评测集与 fixture 规格、REVIEW.md 新段落解析）——v0.2.0（2026-10-25），验收 7/7
+- [ ] M2 隔离审查 + 独立复核 + pre-PR 实跑（核心）——进行中：**T2.9 三档路由 / T2.10 本地 pre-PR（含验收 8 e2e 实跑）/ T2.11 模板版本化已落地**；隔离审查与验证晋升线待合入
 - [ ] M3 评测闭环 + 双验证者投票（最小样本量 + 数据门禁）
 - [ ] M4 服务化与扩展（a 风险分级+签字规矩 / b 服务化 / c push / d 夜间 / e 多平台 / **f CrossChecker（lite/full 两阶段）**）
 

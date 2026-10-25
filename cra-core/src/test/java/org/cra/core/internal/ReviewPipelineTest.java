@@ -310,6 +310,46 @@ class ReviewPipelineTest {
   }
 
   @Test
+  @SuppressWarnings("unchecked")
+  void recordsTemplateVersionsWithRunAndTraceEvent() throws java.io.IOException {
+    // T2.11：模板版本与 run 关联（05§1.2 prompt_template_versions）——trace 事件（05§1.4）+
+    // 发布成功后随 run 落库（05§1.5 prompt_template_version，SQLite 形态）
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<java.util.Map<String, String>> versionsCaptor =
+        ArgumentCaptor.forClass(java.util.Map.class);
+    verify(ledger).recordTemplateVersions(eq(7), eq(result.runId()), versionsCaptor.capture());
+    assertThat(versionsCaptor.getValue()).containsKey("general-reviewer");
+    assertThat(versionsCaptor.getValue().get("general-reviewer")).matches("general@[0-9a-f]{8}");
+    Path runDir = Path.of(result.traceRef().substring("file://".length()));
+    String trace = Files.readString(runDir.resolve("trace.ndjson"));
+    assertThat(trace).contains("\"event\":\"template_versions\"");
+    assertThat(trace).contains("\"general-reviewer\":\"general@");
+  }
+
+  @Test
+  void dryRunNeverRecordsTemplateVersions() {
+    // dry-run 零写（05§6）：模板版本只在 trace，不落账本
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    pipeline.run(request(true));
+    verify(ledger, never()).recordTemplateVersions(anyInt(), anyString(), any());
+  }
+
+  @Test
+  void suggestionsCarriedInResultForLocalReport() {
+    // T2.10：聚合后建议快照进 ReviewResult（本地 pre-PR 报告建议清单的数据源，02§5 本地形态）
+    gatewayReturns(findingsJson("空列表越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.suggestions()).hasSize(1);
+    var s = result.suggestions().get(0);
+    assertThat(s.severity()).isEqualTo("IMPORTANT");
+    assertThat(s.title()).isEqualTo("空列表越界");
+    assertThat(s.file()).isEqualTo(FILE);
+    assertThat(s.line()).isEqualTo(4);
+    assertThat(s.description()).isNotEmpty();
+  }
+
+  @Test
   void recordsDegradedCompletionWhenSchemaDropsAll() {
     // 降级完成也是完整发布（02§4.1）：完成标记以 DEGRADED 入账
     when(gateway.complete(any()))
