@@ -32,7 +32,15 @@ class ReviewCommandWiringTest {
             "sk",
             "http://127.0.0.1:1",
             "m",
-            runRoot.toString());
+            runRoot.toString(),
+            ".",
+            2000,
+            8000,
+            3,
+            500_000L,
+            0.70,
+            0.85,
+            "never");
     try (var context =
         new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
       context.registerBean(CraConfig.class, () -> config);
@@ -64,12 +72,45 @@ class ReviewCommandWiringTest {
             1,
             "h",
             status,
-            new ReviewStats(0, 0, 0, 0, 0, 0, 0, List.of(), securityPublished),
+            new ReviewStats(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                List.of(),
+                securityPublished,
+                new org.cra.common.run.Coverage(0, 0, "")),
             "",
             "");
     CraConfig config =
         new CraConfig(
-            "o", "r", 1, "a", "b", "standard", false, true, "t", "api", "sk", "url", "m", ".");
+            "o",
+            "r",
+            1,
+            "a",
+            "b",
+            "standard",
+            false,
+            true,
+            "t",
+            "api",
+            "sk",
+            "url",
+            "m",
+            ".",
+            ".",
+            2000,
+            8000,
+            3,
+            500_000L,
+            0.70,
+            0.85,
+            "never");
     return ReviewCommand.exitCode(result, config);
   }
 }

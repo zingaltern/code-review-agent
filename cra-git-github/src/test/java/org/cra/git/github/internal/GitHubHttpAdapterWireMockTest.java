@@ -314,6 +314,31 @@ class GitHubHttpAdapterWireMockTest {
   }
 
   @Test
+  void botIdentityFallsBackToActionsBotWhenUserForbidden() {
+    // Actions 集成 token 对 /user 恒 403（App 语义）——回退到 05§2.3 钉死的 CI bot 身份
+    wm.stubFor(
+        get(urlEqualTo("/user"))
+            .willReturn(
+                aResponse()
+                    .withStatus(403)
+                    .withBody("{\"message\":\"Resource not accessible by integration\"}")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":1,\"user\":{\"login\":\"github-actions[bot]\"},"
+                        + "\"body\":\"正文 src/Foo.java\\n<!-- cra:v=2.1 | fp=9f2a1b | file=src/Foo.java "
+                        + "| cat=bug | id=f_1 | run=run_1 | commit=abc1234 | line=87 -->\","
+                        + "\"created_at\":\"2026-10-25T00:00:00Z\",\"commit_id\":\"abc1234\"}]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/7/comments?per_page=100&page=1"))
+            .willReturn(okJson("[]")));
+    CommentLedger ledger = adapter.fetchBotComments(REPO, 7);
+    assertThat(ledger.findingMarkers()).hasSize(1);
+    assertThat(ledger.comments()).hasSize(1);
+  }
+
+  @Test
   void dispositionSignalsNotCollectedInM0() {
     assertThat(adapter.fetchDispositionSignals(REPO, 7)).isEmpty();
   }

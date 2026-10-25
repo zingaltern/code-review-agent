@@ -22,6 +22,63 @@ class CliArgsTest {
   }
 
   @Test
+  void m1ReviewAndBudgetOptionsWithDefaults() {
+    // 05§5 review.* 与 agents.budget：缺省即文档基准值
+    CraConfig config = CliArgs.parse(baseArgs(), ENV);
+    assertThat(config.largeDiffLines()).isEqualTo(2000);
+    assertThat(config.hardCapLines()).isEqualTo(8000);
+    assertThat(config.nitBudget()).isEqualTo(3);
+    assertThat(config.runTotalTokens()).isEqualTo(500_000L);
+    assertThat(config.degradeAtFirst()).isEqualTo(0.70);
+    assertThat(config.degradeAtSecond()).isEqualTo(0.85);
+    assertThat(config.publishUnverified()).isEqualTo("never");
+    assertThat(config.workspace()).isEqualTo(".");
+  }
+
+  @Test
+  void m1OptionsExplicitlySet() {
+    String[] args =
+        concat(
+            baseArgs(),
+            "--large-diff-lines",
+            "3000",
+            "--hard-cap-lines",
+            "9000",
+            "--nit-budget",
+            "0",
+            "--run-total-tokens",
+            "400000",
+            "--degrade-at",
+            "0.60,0.80",
+            "--publish-unverified",
+            "labeled",
+            "--workspace",
+            "/repo/ws");
+    CraConfig config = CliArgs.parse(args, ENV);
+    assertThat(config.largeDiffLines()).isEqualTo(3000);
+    assertThat(config.hardCapLines()).isEqualTo(9000);
+    assertThat(config.nitBudget()).isZero();
+    assertThat(config.runTotalTokens()).isEqualTo(400_000L);
+    assertThat(config.degradeAtFirst()).isEqualTo(0.60);
+    assertThat(config.degradeAtSecond()).isEqualTo(0.80);
+    assertThat(config.publishUnverified()).isEqualTo("labeled");
+    assertThat(config.workspace()).isEqualTo("/repo/ws");
+  }
+
+  @Test
+  void m1OptionsRejectInvalidValues() {
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--degrade-at", "0.9,0.8"), ENV))
+        .isInstanceOf(CraConfigException.class);
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--degrade-at", "1.2,0.9"), ENV))
+        .isInstanceOf(CraConfigException.class);
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--nit-budget", "-1"), ENV))
+        .isInstanceOf(CraConfigException.class);
+    assertThatThrownBy(
+            () -> CliArgs.parse(concat(baseArgs(), "--publish-unverified", "always"), ENV))
+        .isInstanceOf(CraConfigException.class);
+  }
+
+  @Test
   void parsesArgsWithEnvFallback() {
     CraConfig config = CliArgs.parse(baseArgs(), ENV);
     assertThat(config.repoOwner()).isEqualTo("o");

@@ -18,6 +18,12 @@
       <groupId>org.cra</groupId>
       <artifactId>cra-common</artifactId>
     </dependency>
+    <!-- 01§5.2 白名单依赖首装（T1.7 jgit blame，05§2.1）；版本钉在本模块 pom，root pom 不动 -->
+    <dependency>
+      <groupId>org.eclipse.jgit</groupId>
+      <artifactId>org.eclipse.jgit</artifactId>
+      <version>7.2.0.202503040940-r</version>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

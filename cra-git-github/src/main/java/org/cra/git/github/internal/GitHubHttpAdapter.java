@@ -61,6 +61,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   private static final Pattern HUNK_HEADER =
       Pattern.compile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
   private static final int MAX_BACKOFF_RETRIES = 3;
+  private static final String CI_BOT_LOGIN = "github-actions[bot]";
   private static final int PAGE_SIZE = 100;
   private static final int MAX_PAGES = 10;
 
@@ -353,9 +354,22 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       // /user 不在 /repos/{o}/{r} 前缀下（05§2.3：bot 身份按 token 对应 login）
       HttpRequest request =
           request("/user").header("Accept", "application/vnd.github+json").GET().build();
-      cachedLogin = parseJson(execute(request, "/user").body(), "/user").path("login").asText();
+      try {
+        cachedLogin = parseJson(execute(request, "/user").body(), "/user").path("login").asText();
+      } catch (CraIntegrationException e) {
+        if (!isUserForbidden(e)) {
+          throw e;
+        }
+        // Actions 集成 token（GITHUB_TOKEN）是 App 语义，/user 恒 403——CI 内 bot 身份即
+        // 工作流 bot（05§2.3 钉死：CI 内为 github-actions[bot]）
+        cachedLogin = CI_BOT_LOGIN;
+      }
     }
     return cachedLogin;
+  }
+
+  private static boolean isUserForbidden(CraIntegrationException e) {
+    return e.getMessage() != null && e.getMessage().contains("GitHub API 403 on /user");
   }
 
   // ---------- HTTP 基础设施 ----------

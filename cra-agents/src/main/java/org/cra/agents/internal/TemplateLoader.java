@@ -65,7 +65,8 @@ public final class TemplateLoader implements TemplateSupport {
     return out.toString();
   }
 
-  private String load(String path) {
+  private synchronized String load(String path) {
+    // M1 起 chunk 并行渲染同一模板：HashMap + computeIfAbsent 非线程安全，整路径加载串行化（可重入，递归 include 安全）
     return cache.computeIfAbsent(
         path,
         p -> {

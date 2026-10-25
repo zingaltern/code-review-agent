@@ -40,7 +40,14 @@ final class CliArgs {
             "--depth",
             "--token",
             "--github-api",
-            "--run-root" -> {
+            "--run-root",
+            "--workspace",
+            "--large-diff-lines",
+            "--hard-cap-lines",
+            "--nit-budget",
+            "--run-total-tokens",
+            "--degrade-at",
+            "--publish-unverified" -> {
           if (i + 1 >= args.length) {
             throw new CraConfigException("参数缺值: " + arg);
           }
@@ -74,6 +81,13 @@ final class CliArgs {
     if (ownerRepo.length != 2) {
       throw new CraConfigException("--repo 形如 owner/name: " + repo);
     }
+    // 05§5 review.* 与 agents.budget（默认值即文档基准值；REVIEW.md 显式配置在 core 内优先于 nit 默认）
+    DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", "0.70,0.85"));
+    String publishUnverified = named.getOrDefault("--publish-unverified", "never");
+    if (!"never".equals(publishUnverified) && !"labeled".equals(publishUnverified)) {
+      throw new CraConfigException(
+          "--publish-unverified 非法: " + publishUnverified + "（never|labeled）");
+    }
     return new CraConfig(
         ownerRepo[0],
         ownerRepo[1],
@@ -88,7 +102,83 @@ final class CliArgs {
         llmApiKey,
         llmBaseUrl,
         llmModel,
-        named.getOrDefault("--run-root", ".cra/runs"));
+        named.getOrDefault("--run-root", ".cra/runs"),
+        named.getOrDefault("--workspace", "."),
+        parseIntOption(named, "--large-diff-lines", 2000),
+        parseIntOption(named, "--hard-cap-lines", 8000),
+        parseNitBudget(named),
+        parseLongOption(named, "--run-total-tokens", 500_000L),
+        degradeAt.first(),
+        degradeAt.second(),
+        publishUnverified);
+  }
+
+  private record DegradeAt(double first, double second) {}
+
+  private static DegradeAt parseDegradeAt(String value) {
+    String[] parts = value.split(",");
+    if (parts.length != 2) {
+      throw new CraConfigException("--degrade-at 形如 0.70,0.85: " + value);
+    }
+    try {
+      double first = Double.parseDouble(parts[0].strip());
+      double second = Double.parseDouble(parts[1].strip());
+      if (first <= 0 || second <= first || second > 1.0) {
+        throw new NumberFormatException();
+      }
+      return new DegradeAt(first, second);
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("--degrade-at 阈值非法（0 < first < second <= 1）: " + value);
+    }
+  }
+
+  private static int parseNitBudget(Map<String, String> named) {
+    // 04§3.1：0 = 禁止 nit，是合法配置
+    String value = named.get("--nit-budget");
+    if (value == null) {
+      return 3;
+    }
+    try {
+      int parsed = Integer.parseInt(value);
+      if (parsed < 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("--nit-budget 必须为非负整数（0 = 禁止）: " + value);
+    }
+  }
+
+  private static int parseIntOption(Map<String, String> named, String key, int defaultValue) {
+    String value = named.get(key);
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value);
+      if (parsed <= 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为正整数: " + value);
+    }
+  }
+
+  private static long parseLongOption(Map<String, String> named, String key, long defaultValue) {
+    String value = named.get(key);
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      long parsed = Long.parseLong(value);
+      if (parsed <= 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为正整数: " + value);
+    }
   }
 
   private static String required(Map<String, String> named, String key, String envValue) {

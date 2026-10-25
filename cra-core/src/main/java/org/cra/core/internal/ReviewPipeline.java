@@ -10,13 +10,24 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.SplittableRandom;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.GeneralReviewInput;
 import org.cra.agents.api.SubAgent;
+import org.cra.common.context.AssembledContext;
+import org.cra.common.context.ContextInput;
+import org.cra.common.context.ReviewPolicy;
+import org.cra.common.context.TokenMath;
+import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.CandidateFinding;
+import org.cra.common.finding.FindingCategory;
 import org.cra.common.finding.Severity;
 import org.cra.common.finding.Side;
 import org.cra.common.git.DiffFile;
@@ -31,34 +42,54 @@ import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
+import org.cra.common.run.Coverage;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
 import org.cra.common.run.RunStatus;
+import org.cra.context.api.ContextAssembler;
+import org.cra.context.api.ContextAssembly;
+import org.cra.context.api.ReviewPolicyParser;
 import org.cra.core.api.Orchestrator;
+import org.cra.core.api.PipelineOptions;
+import org.cra.core.internal.pipeline.ChunkPlanner;
+import org.cra.core.internal.pipeline.DepthPlan;
+import org.cra.core.internal.pipeline.DepthPolicy;
+import org.cra.core.internal.pipeline.FindingAggregator;
+import org.cra.core.internal.pipeline.PolicySections;
+import org.cra.core.internal.pipeline.PreExistingBlameChecker;
+import org.cra.core.internal.pipeline.RunBudgetTracker;
+import org.cra.core.internal.pipeline.SummarySections;
+import org.cra.core.internal.pipeline.SummarySections.CoverageInput;
 import org.cra.git.api.GitPlatformAdapter;
+import org.cra.git.api.LocalRepoContext;
 import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 
 /**
- * M0 线性流水线（07 T0.5）：assemble → review(×1) → publish。
+ * M1 编排流水线（07 T1.3–T1.7）：幂等闸 → 策略/深度/分块规划 → 按 chunk 扇出评审（阶梯预算内） → 去重/锚定 → blame 复核 → 聚合 → publish。
  *
  * <ul>
  *   <li>第一道闸：commit 级幂等，只认账本中该 commit 的 DONE/DEGRADED 完成标记（02§4.1）；
  *   <li>第二道闸：指纹级去重 exact → ±5 滑窗容错 → possible_duplicate 入 trace（02§4.1，{@link
- *       FingerprintDeduper}）——发布中途掐断的 run 无完成标记，重跑按 指纹补发缺失条目、已发布不重发（07§1 验收 3）；
+ *       FingerprintDeduper}）——发布中途掐断的 run 无完成标记，重跑按指纹补发缺失条目、已发布不重发（07§1 验收 3）；
+ *   <li>上下文：L0 diff + L1 窗口/条件全文（04§1），REVIEW.md 一律读 base SHA（04§3.2）；
+ *   <li>降档阶梯：≥70% 简化剩余 chunk 上下文、≥85% 发布集合截断 top-10、100% 终止剩余 chunk（02§4.4），截断丢弃数进
+ *       stats/Summary（梯度沉默护栏）；
  *   <li>发布顺序：inline review → Summary issue comment（05§2.2）；锚定校验位置非法降级进 Summary（05§2.2）；正文 {@code
  *       <!--} 全量转义、标记行最后追加（05§1.3 规则 3）；
- *   <li>dry-run 全程零写（05§6）；run 级故障统一捕获落盘 FAILED（02§4.2）；trace 事件先行 （07§6.5）。
+ *   <li>dry-run 全程零写（05§6）；run 级故障统一捕获落盘 FAILED（02§4.2）；trace 事件先行（07§6.5）。 *
  * </ul>
  *
- * <p>本类无可事实例状态：一次 run 一个调用栈，run 维度数据全部走参数（09§6 共享可变状态约束）。
+ * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker）与构造期创建的固定线程池（09§6，daemon 线程）。
  */
 public final class ReviewPipeline implements Orchestrator {
 
   private static final SplittableRandom RANDOM = new SplittableRandom();
   private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
   private static final String MARKER_VERSION = "2.1";
+  private static final String REVIEW_MD = "REVIEW.md";
+  private static final int MAX_PARALLEL_CHUNKS = 8;
 
   /** 过期收尾前缀的判定起点（02§5：[已被 run_xxx 取代]；已收尾的评论不再叠加前缀）。 */
   private static final String SUPERSEDED_PREFIX = "[已被 run_";
@@ -71,18 +102,37 @@ public final class ReviewPipeline implements Orchestrator {
   private final AgentRunner agentRunner;
   private final SubAgent<GeneralReviewInput> reviewer;
   private final Path runRoot;
+  private final PipelineOptions options;
+  private final LocalRepoContext localRepoContext;
+  private final ContextAssembler contextAssembler;
+  private final ReviewPolicyParser policyParser;
+  private final ExecutorService chunkPool;
 
   public ReviewPipeline(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
       LlmGateway gateway,
       SubAgent<GeneralReviewInput> reviewer,
-      Path runRoot) {
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext) {
     this.adapter = adapter;
     this.ledger = ledger;
     this.agentRunner = new AgentRunner(gateway);
     this.reviewer = reviewer;
     this.runRoot = runRoot;
+    this.options = options == null ? PipelineOptions.defaults() : options;
+    this.localRepoContext = localRepoContext;
+    this.contextAssembler = ContextAssembly.createContextAssembler();
+    this.policyParser = ContextAssembly.createReviewPolicyParser();
+    this.chunkPool =
+        Executors.newFixedThreadPool(
+            MAX_PARALLEL_CHUNKS,
+            runnable -> {
+              Thread thread = new Thread(runnable, "cra-chunk");
+              thread.setDaemon(true);
+              return thread;
+            });
   }
 
   @Override
@@ -98,6 +148,7 @@ public final class ReviewPipeline implements Orchestrator {
               "pr", request.prNumber(),
               "base", request.baseSha(),
               "head", request.headSha(),
+              "depth", request.depth().name().toLowerCase(Locale.ROOT),
               "dry_run", request.dryRun()));
 
       // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
@@ -111,7 +162,7 @@ public final class ReviewPipeline implements Orchestrator {
             runId,
             request,
             RunStatus.SKIPPED,
-            new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of(), 0),
+            emptyStats(System.currentTimeMillis() - start),
             "commit "
                 + shortSha(request.headSha())
                 + " 已有完成标记（"
@@ -139,33 +190,31 @@ public final class ReviewPipeline implements Orchestrator {
               ? "检测到 " + suspectCount + " 个可疑账本标记（LEDGER_SUSPECT），疑似注入尝试"
               : "";
 
-      // assemble（L0：diff + 变更说明；L1 窗口/REVIEW.md 随 T1.3/T1.4 接入）
       DiffResult diff =
           adapter.fetchDiff(
               new RepoRef(request.repoOwner(), request.repoName()),
               request.baseSha(),
               request.headSha());
-      GeneralReviewInput input = assembleInput(diff, request);
 
-      // review ×1
-      AgentBrief brief = reviewer.buildBrief(input);
-      Path briefPath = trace.persistBrief(brief);
+      // T1.4：REVIEW.md base 读取 + PR 内变更检测（04§3.2）
+      ReviewPolicy policy = loadPolicy(trace, diff, request);
+      boolean policyModified = hasReviewMdChange(diff);
+
+      // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2）
+      DepthPlan depthPlan = DepthPolicy.resolve(request.depth(), diff.totalPatchLines(), options);
+      ChunkPlanner.Plan plan = ChunkPlanner.plan(diff.files(), policy, depthPlan.priorityOnly());
       trace.emit(
-          "agent_start", Map.of("agent", reviewer.role().id(), "brief_path", briefPath.toString()));
-      AgentRunner.AgentRun outcome = agentRunner.execute(brief, runId);
-      trace.emit(
-          "agent_output",
+          "plan",
           Map.of(
-              "agent",
-              reviewer.role().id(),
-              "findings",
-              outcome.findings().size(),
-              "tokens",
-              Map.of("in", outcome.tokensIn(), "out", outcome.tokensOut()),
-              "latency_ms",
-              outcome.latencyMs()));
+              "effective_depth", depthPlan.effectiveDepth().name().toLowerCase(Locale.ROOT),
+              "window_lines", depthPlan.windowLines(),
+              "conditional_full_text", depthPlan.conditionalFullText(),
+              "priority_only", depthPlan.priorityOnly(),
+              "chunks", plan.chunks().size(),
+              "skipped", plan.skippedPaths().size(),
+              "notes", plan.notes()));
 
-      List<String> degradations = new ArrayList<>(outcome.degradations());
+      RunOutcome outcome = executeChunks(request, runId, trace, diff, policy, depthPlan, plan);
       if (outcome.llmUnavailable()) {
         // LLM 不可得：run FAILED，不发布、无 DONE 标记——重跑重试（02§4.2）
         return finish(
@@ -178,22 +227,33 @@ public final class ReviewPipeline implements Orchestrator {
                 0,
                 0,
                 0,
+                0,
+                0,
                 outcome.tokensIn(),
                 outcome.tokensOut(),
                 System.currentTimeMillis() - start,
-                List.copyOf(degradations),
-                0),
+                List.copyOf(outcome.degradations()),
+                0,
+                new Coverage(diff.files().size(), 0, "LLM 不可得，未评审")),
             "LLM 不可得: " + outcome.llmError());
       }
+      List<String> degradations = new ArrayList<>(outcome.degradations());
       boolean degraded = false;
-      if (!outcome.schemaErrors().isEmpty()) {
+      if (!outcome.schemaErrors().isEmpty() && outcome.findings().isEmpty()) {
         // 候选全部被 schema 校验丢弃：run 降级收尾（仍发布完成标记，02§4.1 降级完成语义）
         degradations.add("schema-violation-all-dropped");
         degraded = true;
       }
+      if (outcome.stoppedByBudget()) {
+        degraded = true;
+      }
+      if (!"never".equals(options.publishUnverified())) {
+        // 配置已受理但 M1 无验证层：如实声明不生效（05§5 review.publish-unverified）
+        degradations.add("publish-unverified-labeled-not-effective-m1");
+      }
 
       // 去重（指纹 exact → ±5 滑窗 → possible_duplicate，02§4.1）+ 锚定校验（05§2.2）
-      List<ScoredFinding> publishable = new ArrayList<>();
+      List<FindingAggregator.Scored> candidates = new ArrayList<>();
       int skippedDuplicate = 0;
       Map<String, Optional<String>> contentCache = new HashMap<>();
       for (CandidateFinding finding : outcome.findings()) {
@@ -222,23 +282,74 @@ public final class ReviewPipeline implements Orchestrator {
         }
         AnchorStatus anchor = anchorStatus(diff, finding);
         trace.emit("anchor_check", Map.of("finding_id", finding.id(), "status", anchor.name()));
-        publishable.add(new ScoredFinding(finding, decision.fingerprint(), anchor));
+        candidates.add(
+            new FindingAggregator.Scored(
+                finding, decision.fingerprint(), anchor, PreExistingBlameChecker.Verdict.UNKNOWN));
       }
 
+      // T1.7：pre-existing 嫌疑 jgit blame 复核（05§2；无本地仓库降级声明）
+      PreExistingBlameChecker blameChecker = new PreExistingBlameChecker(localRepoContext);
+      Set<String> prCommitShas =
+          diff.commits().stream()
+              .map(org.cra.common.git.CommitSummary::sha)
+              .collect(Collectors.toSet());
+      PreExistingBlameChecker.Outcome blameOutcome =
+          blameChecker.check(
+              candidates.stream().map(FindingAggregator.Scored::finding).toList(),
+              prCommitShas,
+              request.headSha());
+      blameOutcome.notes().forEach(n -> trace.emit("blame_check", Map.of("note", n)));
+      candidates =
+          candidates.stream()
+              .map(
+                  s ->
+                      new FindingAggregator.Scored(
+                          s.finding(),
+                          s.fingerprint(),
+                          s.anchor(),
+                          blameOutcome.verdictOf(s.finding().id())))
+              .toList();
+
+      // T1.7/T1.6：severity 排序 + nit 预算 + 阶梯截断 top-10（02§4.4）
+      FindingAggregator.Aggregation aggregation =
+          FindingAggregator.aggregate(
+              candidates, policy, options.nitBudgetDefault(), outcome.truncationReached());
+      trace.emit(
+          "aggregate",
+          Map.of(
+              "candidates", candidates.size(),
+              "ordered", aggregation.ordered().size(),
+              "nit_dropped", aggregation.nitDropped(),
+              "suppressed_by_truncation", aggregation.suppressedByTruncation()));
+
       // publish（dry-run 零写）；重试类事件入 stats 但不降级——降级语义 = 未按预期完整发布
+      List<String> coverageLines =
+          coverageLines(
+              diff, policy, depthPlan, plan, outcome, blameOutcome, policyModified, aggregation);
       int publishedCount =
           publish(
               request,
               runId,
               trace,
-              publishable,
+              aggregation.ordered(),
               skippedDuplicate,
+              aggregation.suppressedByTruncation(),
               degradations,
               degraded,
-              suspectWarning);
+              suspectWarning,
+              coverageLines);
       int fallbackCount =
           (int)
-              publishable.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).count();
+              aggregation.ordered().stream()
+                  .filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK)
+                  .count();
+      int preExistingCount =
+          (int)
+              aggregation.ordered().stream()
+                  .filter(
+                      s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
+                  .count();
+      int filesReviewed = plan.chunks().stream().mapToInt(c -> c.files().size()).sum();
 
       RunStatus status = degraded ? RunStatus.DEGRADED : RunStatus.SUCCESS;
       ReviewStats stats =
@@ -247,26 +358,29 @@ public final class ReviewPipeline implements Orchestrator {
               publishedCount,
               skippedDuplicate,
               fallbackCount,
+              preExistingCount,
+              aggregation.suppressedByTruncation(),
               outcome.tokensIn(),
               outcome.tokensOut(),
               System.currentTimeMillis() - start,
               List.copyOf(degradations),
               (int)
-                  publishable.stream()
-                      .filter(
-                          s ->
-                              s.finding().category()
-                                  == org.cra.common.finding.FindingCategory.SECURITY)
-                      .count());
+                  aggregation.ordered().stream()
+                      .filter(s -> s.finding().category() == FindingCategory.SECURITY)
+                      .count(),
+              new Coverage(diff.files().size(), filesReviewed, coverageNote(coverageLines)));
       String summaryLine =
           String.format(
-              "run=%s status=%s candidate=%d published=%d dedup=%d fallback=%d tokens=%d/%d",
+              "run=%s status=%s depth=%s candidate=%d published=%d dedup=%d fallback=%d "
+                  + "suppressed=%d tokens=%d/%d",
               runId,
               status,
+              depthPlan.effectiveDepth().name().toLowerCase(Locale.ROOT),
               stats.findingsCandidate(),
               stats.findingsPublished(),
               stats.skippedDuplicate(),
               stats.anchorFallback(),
+              stats.suppressedByTruncation(),
               stats.tokensIn(),
               stats.tokensOut());
       return finish(trace, runId, request, status, stats, summaryLine);
@@ -277,30 +391,339 @@ public final class ReviewPipeline implements Orchestrator {
           runId,
           request,
           RunStatus.FAILED,
-          new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of(), 0),
+          emptyStats(System.currentTimeMillis() - start),
           "run failed: " + e.getMessage());
     }
   }
 
-  // ---------- 阶段：assemble ----------
+  // ---------- 阶段：策略加载（T1.4） ----------
 
-  private GeneralReviewInput assembleInput(DiffResult diff, ReviewRequest request) {
-    String diffText =
-        diff.files().stream()
-            .map(
-                f ->
-                    "--- a/"
-                        + f.path()
-                        + "\n+++ b/"
-                        + f.path()
-                        + (f.patch() == null ? "" : "\n" + f.patch()))
-            .collect(Collectors.joining("\n\n"));
+  /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */
+  private ReviewPolicy loadPolicy(TraceWriter trace, DiffResult diff, ReviewRequest request) {
+    String markdown;
+    try {
+      FileContent content =
+          adapter.readFile(
+              new RepoRef(request.repoOwner(), request.repoName()), request.baseSha(), REVIEW_MD);
+      markdown = content.binary() ? null : content.text();
+    } catch (CraIntegrationException e) {
+      trace.emit("policy_load", Map.of("present", false, "reason", "read-failed"));
+      return ReviewPolicy.empty();
+    }
+    ReviewPolicy policy = policyParser.parse(markdown);
+    trace.emit(
+        "policy_load",
+        Map.of(
+            "present", policy.present(),
+            "modified_in_pr", hasReviewMdChange(diff),
+            "warnings", policy.warnings()));
+    return policy;
+  }
+
+  // ---------- 阶段：分 chunk 扇出（T1.5/T1.6） ----------
+
+  /** 全部 chunk 的执行产出。 */
+  private record RunOutcome(
+      List<CandidateFinding> findings,
+      Map<String, FileContent> headFiles,
+      long tokensIn,
+      long tokensOut,
+      boolean llmUnavailable,
+      String llmError,
+      List<String> schemaErrors,
+      List<String> degradations,
+      boolean stoppedByBudget,
+      boolean truncationReached,
+      List<String> contextNotes,
+      List<String> trimDecisions) {}
+
+  private RunOutcome executeChunks(
+      ReviewRequest request,
+      String runId,
+      TraceWriter trace,
+      DiffResult diff,
+      ReviewPolicy policy,
+      DepthPlan depthPlan,
+      ChunkPlanner.Plan plan) {
+    Map<String, FileContent> headFiles = prefetchHeadFiles(request, plan);
+    RunBudgetTracker budget = new RunBudgetTracker(options);
     String commitMessages =
         diff.commits().stream()
             .map(c -> c.sha() + " " + c.message())
             .collect(Collectors.joining("\n"));
-    // M0 不拉 pulls 元数据端点：标题以 PR 号占位（fetchPrMeta 随 M1 上下文组装接入）
-    return new GeneralReviewInput("PR #" + request.prNumber(), commitMessages, diffText, "");
+    String prTitle = "PR #" + request.prNumber();
+    String policySection = PolicySections.render(policy, hasReviewMdChange(diff));
+
+    List<Future<ChunkOutcome>> futures = new ArrayList<>();
+    List<ChunkOutcome> collected = new ArrayList<>();
+    List<String> degradations = new ArrayList<>();
+    List<String> contextNotes = new ArrayList<>();
+    List<String> trimDecisions = new ArrayList<>();
+    boolean stopped = false;
+    boolean truncationReached = false;
+    int dispatched = 0;
+    try {
+      while (true) {
+        RunBudgetTracker.Phase phase = budget.phase();
+        if (phase == RunBudgetTracker.Phase.STOP) {
+          // 100%：终止剩余代理，已派发的照常收集（02§4.4 DEGRADED 收尾）
+          if (dispatched < plan.chunks().size()) {
+            degradations.add("budget-exhausted-stop");
+            stopped = true;
+            trace.emit(
+                "budget_check",
+                Map.of(
+                    "phase",
+                    "stop",
+                    "ratio",
+                    budget.ratio(),
+                    "skipped_chunks",
+                    plan.chunks().size() - dispatched));
+          }
+          if (futures.isEmpty()) {
+            break;
+          }
+        } else {
+          // 70%/85% 档：剩余 chunk 简化上下文；85% 档同时置发布截断标记
+          boolean simplified = phase != RunBudgetTracker.Phase.NORMAL;
+          if (phase == RunBudgetTracker.Phase.DEGRADE
+              && !degradations.contains("budget-degrade-70")) {
+            degradations.add("budget-degrade-70");
+            trace.emit("budget_check", Map.of("phase", "degrade", "ratio", budget.ratio()));
+          }
+          if (phase == RunBudgetTracker.Phase.TRUNCATE) {
+            truncationReached = true;
+            if (!degradations.contains("budget-truncate-85")) {
+              degradations.add("budget-truncate-85");
+              trace.emit("budget_check", Map.of("phase", "truncate", "ratio", budget.ratio()));
+            }
+          }
+          while (dispatched < plan.chunks().size() && futures.size() < MAX_PARALLEL_CHUNKS) {
+            ChunkPlanner.Chunk chunk = plan.chunks().get(dispatched++);
+            ContextInput contextInput = buildContextInput(chunk, headFiles, depthPlan, simplified);
+            futures.add(
+                chunkPool.submit(
+                    () ->
+                        runChunk(
+                            request,
+                            runId,
+                            trace,
+                            chunk,
+                            prTitle,
+                            commitMessages,
+                            policySection,
+                            contextInput)));
+          }
+          if (futures.isEmpty()) {
+            break;
+          }
+        }
+        ChunkOutcome outcome = futures.remove(0).get();
+        budget.record(outcome.tokensIn(), outcome.tokensOut());
+        collected.add(outcome);
+        degradations.addAll(outcome.degradations());
+        contextNotes.addAll(outcome.contextNotes());
+        trimDecisions.addAll(outcome.trimDecisions());
+        trace.emit(
+            "chunk_done",
+            Map.of(
+                "chunk", outcome.chunkKey(),
+                "files", outcome.fileCount(),
+                "findings", outcome.findings().size(),
+                "tokens_in", outcome.tokensIn(),
+                "tokens_out", outcome.tokensOut(),
+                "est_tokens", outcome.estimatedTokens()));
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("chunk 执行被中断", e);
+    } catch (ExecutionException e) {
+      Throwable cause = e.getCause() == null ? e : e.getCause();
+      throw new IllegalStateException(
+          "chunk 执行失败: "
+              + cause.getClass().getSimpleName()
+              + ": "
+              + cause.getMessage()
+              + " @ "
+              + (cause.getStackTrace().length > 0 ? cause.getStackTrace()[0] : "?"),
+          cause);
+    }
+
+    List<CandidateFinding> findings = new ArrayList<>();
+    long tokensIn = 0;
+    long tokensOut = 0;
+    boolean llmUnavailable = false;
+    String llmError = null;
+    List<String> schemaErrors = new ArrayList<>();
+    for (ChunkOutcome outcome : collected) {
+      findings.addAll(outcome.findings());
+      tokensIn += outcome.tokensIn();
+      tokensOut += outcome.tokensOut();
+      if (outcome.llmUnavailable()) {
+        llmUnavailable = true;
+        llmError = outcome.llmError();
+      }
+      schemaErrors.addAll(outcome.schemaErrors());
+    }
+    // 终态复查：消耗只增不减，最后一批调用跨越 85%/100% 线时同样生效（02§4.4 按已消耗判定）
+    RunBudgetTracker.Phase finalPhase = budget.phase();
+    if (finalPhase.ordinal() >= RunBudgetTracker.Phase.TRUNCATE.ordinal()) {
+      truncationReached = true;
+      if (!degradations.contains("budget-truncate-85")) {
+        degradations.add("budget-truncate-85");
+        trace.emit("budget_check", Map.of("phase", "truncate-final", "ratio", budget.ratio()));
+      }
+    }
+    return new RunOutcome(
+        findings,
+        headFiles,
+        tokensIn,
+        tokensOut,
+        llmUnavailable,
+        llmError,
+        schemaErrors,
+        degradations,
+        stopped,
+        truncationReached,
+        contextNotes,
+        trimDecisions);
+  }
+
+  /** 单 chunk 执行（LLM 调用；异常边界在 AgentRunner 与网关内转换）。 */
+  private ChunkOutcome runChunk(
+      ReviewRequest request,
+      String runId,
+      TraceWriter trace,
+      ChunkPlanner.Chunk chunk,
+      String prTitle,
+      String commitMessages,
+      String policySection,
+      ContextInput contextInput) {
+    AssembledContext context = contextAssembler.assemble(contextInput);
+    GeneralReviewInput input =
+        new GeneralReviewInput(
+            prTitle, commitMessages, context.diffText(), context.windowText(), policySection);
+    AgentBrief brief = reviewer.buildBrief(input);
+    Path briefPath = trace.persistBrief(brief, chunkBriefSuffix(chunk));
+    trace.emit(
+        "agent_start",
+        Map.of(
+            "agent", reviewer.role().id(),
+            "chunk", chunk.key(),
+            "brief_path", briefPath.toString(),
+            "est_tokens", context.estimatedTokens(),
+            "trim_decisions", context.trimDecisions()));
+    AgentRunner.AgentRun outcome = agentRunner.execute(brief, runId);
+    trace.emit(
+        "agent_output",
+        Map.of(
+            "agent", reviewer.role().id(),
+            "chunk", chunk.key(),
+            "findings", outcome.findings().size(),
+            "tokens", Map.of("in", outcome.tokensIn(), "out", outcome.tokensOut()),
+            "latency_ms", outcome.latencyMs()));
+    return new ChunkOutcome(
+        chunk.key(),
+        chunk.files().size(),
+        outcome.findings(),
+        outcome.tokensIn(),
+        outcome.tokensOut(),
+        outcome.llmUnavailable(),
+        outcome.llmError(),
+        outcome.schemaErrors(),
+        outcome.degradations(),
+        context.coverageNotes(),
+        context.trimDecisions(),
+        context.estimatedTokens());
+  }
+
+  private record ChunkOutcome(
+      String chunkKey,
+      int fileCount,
+      List<CandidateFinding> findings,
+      long tokensIn,
+      long tokensOut,
+      boolean llmUnavailable,
+      String llmError,
+      List<String> schemaErrors,
+      List<String> degradations,
+      List<String> contextNotes,
+      List<String> trimDecisions,
+      long estimatedTokens) {}
+
+  /** L1 预算 = 评审员输入预算 − L0 估算 − 定界/策略占用余量（04§1 预算裁决）；DEGRADE 档收窄窗口并关全文（02§4.4 70% 档的 M1 映射）。 */
+  private ContextInput buildContextInput(
+      ChunkPlanner.Chunk chunk,
+      Map<String, FileContent> headFiles,
+      DepthPlan depthPlan,
+      boolean simplified) {
+    boolean fullText = depthPlan.conditionalFullText() && !simplified;
+    int window = simplified ? Math.min(depthPlan.windowLines(), 15) : depthPlan.windowLines();
+    long reserved = TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000;
+    long l1Budget = Math.max(1_000, reviewer.budget().maxInputTokens() - reserved);
+    return new ContextInput(
+        chunk.files(), headFiles, window, fullText, depthPlan.fullFileMaxLines(), l1Budget);
+  }
+
+  private String estimateChunkL0(ChunkPlanner.Chunk chunk) {
+    StringBuilder sb = new StringBuilder();
+    for (DiffFile file : chunk.files()) {
+      if (file.patch() != null) {
+        sb.append(file.patch());
+      }
+    }
+    return sb.toString();
+  }
+
+  /** head 侧全文预取（cra-context 不发起平台调用，10§2）；不可读文件以 binary 占位（text=null）——指纹与 L1 都按不可得降级。 */
+  private Map<String, FileContent> prefetchHeadFiles(
+      ReviewRequest request, ChunkPlanner.Plan plan) {
+    Map<String, FileContent> headFiles = new HashMap<>();
+    RepoRef repo = new RepoRef(request.repoOwner(), request.repoName());
+    for (ChunkPlanner.Chunk chunk : plan.chunks()) {
+      for (DiffFile file : chunk.files()) {
+        if (headFiles.containsKey(file.path()) || "removed".equals(file.status())) {
+          continue;
+        }
+        try {
+          headFiles.put(file.path(), adapter.readFile(repo, request.headSha(), file.path()));
+        } catch (RuntimeException e) {
+          headFiles.put(file.path(), new FileContent(file.path(), null, true));
+        }
+      }
+    }
+    return headFiles;
+  }
+
+  // ---------- 阶段：聚合辅助 ----------
+
+  private static String coverageNote(List<String> coverageLines) {
+    return String.join("；", coverageLines);
+  }
+
+  private List<String> coverageLines(
+      DiffResult diff,
+      ReviewPolicy policy,
+      DepthPlan depthPlan,
+      ChunkPlanner.Plan plan,
+      RunOutcome outcome,
+      PreExistingBlameChecker.Outcome blameOutcome,
+      boolean policyModified,
+      FindingAggregator.Aggregation aggregation) {
+    int filesReviewed = plan.chunks().stream().mapToInt(c -> c.files().size()).sum();
+    return SummarySections.lines(
+        new CoverageInput(
+            depthPlan,
+            diff.files().size(),
+            filesReviewed,
+            plan.skippedPaths(),
+            outcome.contextNotes(),
+            outcome.trimDecisions(),
+            plan.notes(),
+            PolicySections.warnings(policy, policyModified),
+            blameOutcome.notes(),
+            aggregation.nitDropped(),
+            aggregation.suppressedByTruncation()));
   }
 
   // ---------- 阶段：publish ----------
@@ -309,15 +732,17 @@ public final class ReviewPipeline implements Orchestrator {
       ReviewRequest request,
       String runId,
       TraceWriter trace,
-      List<ScoredFinding> publishable,
+      List<FindingAggregator.Scored> ordered,
       int skippedDuplicate,
+      int suppressedByTruncation,
       List<String> degradations,
       boolean degraded,
-      String suspectWarning) {
-    List<ScoredFinding> fallbacks =
-        publishable.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList();
+      String suspectWarning,
+      List<String> coverageLines) {
+    List<FindingAggregator.Scored> fallbacks =
+        ordered.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList();
     List<InlineComment> inline =
-        publishable.stream()
+        ordered.stream()
             .filter(s -> s.anchor() == AnchorStatus.INLINE)
             .map(
                 s ->
@@ -332,12 +757,14 @@ public final class ReviewPipeline implements Orchestrator {
         summaryBody(
             request,
             runId,
-            publishable,
+            ordered,
             fallbacks,
             skippedDuplicate,
+            suppressedByTruncation,
             degradations,
             degraded,
-            suspectWarning);
+            suspectWarning,
+            coverageLines);
     if (request.dryRun()) {
       // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧
       trace.emit(
@@ -350,10 +777,10 @@ public final class ReviewPipeline implements Orchestrator {
               "skipped_duplicate",
               skippedDuplicate,
               "suppressed_by_truncation",
-              0,
+              suppressedByTruncation,
               "done_marker",
               false));
-      return publishable.size();
+      return ordered.size();
     }
     String reviewBody =
         inline.isEmpty()
@@ -392,14 +819,14 @@ public final class ReviewPipeline implements Orchestrator {
             "skipped_duplicate",
             skippedDuplicate,
             "suppressed_by_truncation",
-            0,
+            suppressedByTruncation,
             "done_marker",
             result.summaryCommentId().isPresent()));
     if (result.summaryCommentId().isEmpty()) {
       // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾，重跑走指纹级补发（02§4.1）
       return (int) (publishedActual + fallbackActual);
     }
-    recordToLedger(request, runId, publishable, result, skippedDuplicate, degraded);
+    recordToLedger(request, runId, ordered, result, skippedDuplicate, degraded);
     int supersedeFailures = supersedePreviousSummaries(request, runId, trace);
     if (supersedeFailures > 0) {
       degradations.add("summary-supersede-failed:x" + supersedeFailures);
@@ -416,7 +843,7 @@ public final class ReviewPipeline implements Orchestrator {
   private void recordToLedger(
       ReviewRequest request,
       String runId,
-      List<ScoredFinding> publishable,
+      List<FindingAggregator.Scored> ordered,
       PrReviewResult result,
       int skippedDuplicate,
       boolean degraded) {
@@ -425,19 +852,14 @@ public final class ReviewPipeline implements Orchestrator {
     ledger.recordRunCompletion(
         request.prNumber(),
         new LedgerRunMarker(
-            runId,
-            request.headSha(),
-            status,
-            publishable.size(),
-            skippedDuplicate,
-            summaryCommentId));
+            runId, request.headSha(), status, ordered.size(), skippedDuplicate, summaryCommentId));
     Map<String, Long> commentIds =
         result.items().stream()
             .filter(i -> i.commentId() != null)
             .collect(
                 Collectors.toMap(
                     ReviewItemResult::findingId, ReviewItemResult::commentId, (a, b) -> a));
-    for (ScoredFinding s : publishable) {
+    for (FindingAggregator.Scored s : ordered) {
       ledger.recordPublishedFinding(
           request.prNumber(),
           new LedgerFindingMarker(
@@ -504,7 +926,7 @@ public final class ReviewPipeline implements Orchestrator {
 
   // ---------- 组装：inline 评论与 Summary 正文 ----------
 
-  private String inlineBody(ScoredFinding s, String runId, String commitSha) {
+  private String inlineBody(FindingAggregator.Scored s, String runId, String commitSha) {
     CandidateFinding f = s.finding();
     StringBuilder body = new StringBuilder();
     body.append("**[")
@@ -546,12 +968,14 @@ public final class ReviewPipeline implements Orchestrator {
   private String summaryBody(
       ReviewRequest request,
       String runId,
-      List<ScoredFinding> publishable,
-      List<ScoredFinding> fallbacks,
+      List<FindingAggregator.Scored> ordered,
+      List<FindingAggregator.Scored> fallbacks,
       int skippedDuplicate,
+      int suppressedByTruncation,
       List<String> degradations,
       boolean degraded,
-      String suspectWarning) {
+      String suspectWarning,
+      List<String> coverageLines) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
     body.append("变更：PR #")
@@ -565,31 +989,44 @@ public final class ReviewPipeline implements Orchestrator {
       // 05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试
       body.append("> ⚠️ ").append(suspectWarning).append("\n\n");
     }
-    List<ScoredFinding> important = bySeverity(publishable, Severity.IMPORTANT);
-    List<ScoredFinding> nits = bySeverity(publishable, Severity.NIT);
-    if (important.isEmpty() && nits.isEmpty() && fallbacks.isEmpty()) {
+    List<FindingAggregator.Scored> important =
+        ordered.stream().filter(s -> s.finding().severityProposed() == Severity.IMPORTANT).toList();
+    List<FindingAggregator.Scored> nits =
+        ordered.stream().filter(s -> s.finding().severityProposed() == Severity.NIT).toList();
+    List<FindingAggregator.Scored> preExisting =
+        ordered.stream()
+            .filter(s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
+            .toList();
+    if (important.isEmpty() && nits.isEmpty() && fallbacks.isEmpty() && preExisting.isEmpty()) {
       body.append(
-          publishable.isEmpty() && skippedDuplicate == 0
+          ordered.isEmpty() && skippedDuplicate == 0
               ? "本次未发现问题（评审返回空结果）。\n\n"
               : "本次无新发现（候选均被指纹去重抑制 " + skippedDuplicate + " 条）。\n\n");
     } else {
       if (!important.isEmpty()) {
         body.append("### Important\n");
-        for (ScoredFinding s : important) {
+        for (FindingAggregator.Scored s : important) {
           body.append(listLine(s));
         }
         body.append("\n");
       }
       if (!nits.isEmpty()) {
         body.append("### Nit\n");
-        for (ScoredFinding s : nits) {
+        for (FindingAggregator.Scored s : nits) {
+          body.append(listLine(s));
+        }
+        body.append("\n");
+      }
+      if (!preExisting.isEmpty()) {
+        body.append("### Pre-existing（jgit blame 确证变更前已存在）\n");
+        for (FindingAggregator.Scored s : preExisting) {
           body.append(listLine(s));
         }
         body.append("\n");
       }
       if (!fallbacks.isEmpty()) {
         body.append("### 位置非法（降级进 Summary）\n");
-        for (ScoredFinding s : fallbacks) {
+        for (FindingAggregator.Scored s : fallbacks) {
           body.append("- **")
               .append(escape(s.finding().title()))
               .append("** — `")
@@ -604,6 +1041,9 @@ public final class ReviewPipeline implements Orchestrator {
       }
     }
     body.append("### 覆盖与统计\n");
+    for (String line : coverageLines) {
+      body.append("- ").append(line).append("\n");
+    }
     body.append("- 指纹去重抑制 ")
         .append(skippedDuplicate)
         .append(" 条；位置非法降级 ")
@@ -622,14 +1062,14 @@ public final class ReviewPipeline implements Orchestrator {
         .append(" | status=")
         .append(degraded ? "DEGRADED" : "DONE")
         .append(" | findings=")
-        .append(publishable.size())
+        .append(ordered.size())
         .append(" | suppressed=")
-        .append(skippedDuplicate)
+        .append(suppressedByTruncation)
         .append(" -->");
     return body.toString();
   }
 
-  private static String listLine(ScoredFinding s) {
+  private static String listLine(FindingAggregator.Scored s) {
     return "- **"
         + escape(s.finding().title())
         + "** — `"
@@ -703,6 +1143,7 @@ public final class ReviewPipeline implements Orchestrator {
     end.put("status", status.name().toLowerCase(Locale.ROOT));
     end.put("findings_published", stats.findingsPublished());
     end.put("skipped_duplicate", stats.skippedDuplicate());
+    end.put("suppressed_by_truncation", stats.suppressedByTruncation());
     end.put("tokens_in", stats.tokensIn());
     end.put("tokens_out", stats.tokensOut());
     end.put("latency_ms", stats.latencyMs());
@@ -719,8 +1160,12 @@ public final class ReviewPipeline implements Orchestrator {
         summaryLine);
   }
 
-  private static List<ScoredFinding> bySeverity(List<ScoredFinding> findings, Severity severity) {
-    return findings.stream().filter(s -> s.finding().severityProposed() == severity).toList();
+  private static ReviewStats emptyStats(long latencyMs) {
+    return new ReviewStats(0, 0, 0, 0, 0, 0, 0, 0, latencyMs, List.of(), 0, new Coverage(0, 0, ""));
+  }
+
+  private static boolean hasReviewMdChange(DiffResult diff) {
+    return diff.files().stream().anyMatch(f -> REVIEW_MD.equals(f.path()));
   }
 
   private static String categoryOf(CandidateFinding finding) {
@@ -743,6 +1188,7 @@ public final class ReviewPipeline implements Orchestrator {
         + String.format("%06x", RANDOM.nextInt(1 << 24));
   }
 
-  /** finding + 指纹 + 锚定状态载体。 */
-  record ScoredFinding(CandidateFinding finding, String fingerprint, AnchorStatus anchor) {}
+  private static String chunkBriefSuffix(ChunkPlanner.Chunk chunk) {
+    return "c" + (Math.abs(chunk.key().hashCode()) % 10000) + "-" + chunk.files().size();
+  }
 }

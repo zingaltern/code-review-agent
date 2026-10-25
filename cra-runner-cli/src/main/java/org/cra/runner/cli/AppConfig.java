@@ -68,12 +68,39 @@ class AppConfig {
   }
 
   @Bean
+  org.cra.git.api.LocalRepoContext localRepoContext() {
+    // 05§2.1：jgit blame 的本地仓库上下文；目录非仓库时 localRepoRoot 为空（合法降级形态）
+    return org.cra.git.api.GitAssembly.createLocalRepoContext(
+        java.nio.file.Path.of(config.workspace()));
+  }
+
+  @Bean
+  org.cra.core.api.PipelineOptions pipelineOptions() {
+    return new org.cra.core.api.PipelineOptions(
+        config.runTotalTokens(),
+        config.degradeAtFirst(),
+        config.degradeAtSecond(),
+        config.largeDiffLines(),
+        config.hardCapLines(),
+        config.nitBudget(),
+        config.publishUnverified());
+  }
+
+  @Bean
   Orchestrator orchestrator(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
       LlmGateway gateway,
-      SubAgent<GeneralReviewInput> reviewer) {
+      SubAgent<GeneralReviewInput> reviewer,
+      org.cra.core.api.PipelineOptions pipelineOptions,
+      org.cra.git.api.LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
-        adapter, ledger, gateway, reviewer, java.nio.file.Path.of(config.runRoot()));
+        adapter,
+        ledger,
+        gateway,
+        reviewer,
+        java.nio.file.Path.of(config.runRoot()),
+        pipelineOptions,
+        localRepoContext);
   }
 }

@@ -1,0 +1,228 @@
+package org.cra.core.internal.pipeline;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.List;
+import org.cra.common.context.ReviewPolicy;
+import org.cra.common.finding.AnchorStatus;
+import org.cra.common.finding.CandidateFinding;
+import org.cra.common.finding.FindingCategory;
+import org.cra.common.finding.Severity;
+import org.cra.common.git.DiffFile;
+import org.cra.common.git.DiffHunk;
+import org.cra.common.run.Depth;
+import org.cra.core.api.PipelineOptions;
+import org.cra.core.internal.pipeline.PreExistingBlameChecker.Verdict;
+import org.junit.jupiter.api.Test;
+
+/** M1 编排纯函数单元测试：深度档位（02§4.3/04§2.2）、分 chunk（04§2.2）、降档阶梯（02§4.4）、聚合规则（T1.7）。 */
+class M1PipelinePoliciesTest {
+
+  private static final PipelineOptions OPTIONS = PipelineOptions.defaults();
+
+  // ---------- DepthPolicy ----------
+
+  @Test
+  void standardSmallDiffAutoQuick() {
+    DepthPlan plan = DepthPolicy.resolve(Depth.STANDARD, 299, OPTIONS);
+    assertThat(plan.effectiveDepth()).isEqualTo(Depth.QUICK);
+    assertThat(plan.conditionalFullText()).isFalse();
+    assertThat(plan.notes()).anyMatch(n -> n.contains("自动 quick"));
+  }
+
+  @Test
+  void standardDefaultIsWindow30WithFullText() {
+    DepthPlan plan = DepthPolicy.resolve(Depth.STANDARD, 300, OPTIONS);
+    assertThat(plan.effectiveDepth()).isEqualTo(Depth.STANDARD);
+    assertThat(plan.windowLines()).isEqualTo(30);
+    assertThat(plan.conditionalFullText()).isTrue();
+    assertThat(plan.priorityOnly()).isFalse();
+  }
+
+  @Test
+  void deepWidensWindowAndFullTextBudget() {
+    DepthPlan plan = DepthPolicy.resolve(Depth.DEEP, 500, OPTIONS);
+    assertThat(plan.windowLines()).isEqualTo(60);
+    assertThat(plan.fullFileMaxLines()).isEqualTo(400);
+  }
+
+  @Test
+  void largeDiffDowngradesQualityRegardlessOfDepth() {
+    DepthPlan plan = DepthPolicy.resolve(Depth.DEEP, 2001, OPTIONS);
+    assertThat(plan.windowLines()).isEqualTo(15);
+    assertThat(plan.conditionalFullText()).isFalse();
+    assertThat(plan.notes()).anyMatch(n -> n.contains("降为 Quick 质量"));
+  }
+
+  @Test
+  void hardCapEnablesPriorityOnly() {
+    DepthPlan plan = DepthPolicy.resolve(Depth.STANDARD, 8001, OPTIONS);
+    assertThat(plan.priorityOnly()).isTrue();
+  }
+
+  // ---------- ChunkPlanner ----------
+
+  private static DiffFile file(String path) {
+    return new DiffFile(
+        path, null, "modified", "@@ -1 +1,2 @@\n+x\n", List.of(new DiffHunk(1, 1, 1, 2)));
+  }
+
+  @Test
+  void groupsByModuleAndCapsThreeFilesPerChunk() {
+    List<ChunkPlanner.Chunk> chunks =
+        ChunkPlanner.plan(
+                List.of(
+                    file("src/main/A.java"),
+                    file("src/main/B.java"),
+                    file("src/main/C.java"),
+                    file("src/main/D.java"),
+                    file("app/E.java")),
+                ReviewPolicy.empty(),
+                false)
+            .chunks();
+    // src/main 4 文件 → 3+1；app 1 文件 → 1
+    assertThat(chunks).hasSize(3);
+    assertThat(chunks.get(0).files()).hasSize(3);
+    assertThat(chunks.get(1).files()).hasSize(1);
+    assertThat(chunks.get(2).key()).isEqualTo("app");
+  }
+
+  @Test
+  void skipPathsRemovedFromScopeAndDeclared() {
+    ChunkPlanner.Plan plan =
+        ChunkPlanner.plan(
+            List.of(file("src/A.java"), file("generated/G.java")),
+            new ReviewPolicy(
+                false,
+                List.of(),
+                null,
+                List.of(),
+                List.of("generated/**"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()),
+            false);
+    assertThat(plan.chunks()).hasSize(1);
+    assertThat(plan.chunks().get(0).files().get(0).path()).isEqualTo("src/A.java");
+    assertThat(plan.skippedPaths()).containsExactly("generated/G.java");
+  }
+
+  @Test
+  void priorityOnlyFiltersAndFallsBackWhenUnconfigured() {
+    ChunkPlanner.Plan filtered =
+        ChunkPlanner.plan(
+            List.of(file("billing/C.java"), file("misc/O.java")),
+            new ReviewPolicy(
+                false,
+                List.of(),
+                null,
+                List.of("billing/**"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()),
+            true);
+    assertThat(filtered.chunks().get(0).files().get(0).path()).isEqualTo("billing/C.java");
+    assertThat(filtered.skippedPaths()).anyMatch(s -> s.startsWith("misc/O.java"));
+
+    ChunkPlanner.Plan fallback =
+        ChunkPlanner.plan(List.of(file("misc/O.java")), ReviewPolicy.empty(), true);
+    assertThat(fallback.chunks()).hasSize(1);
+    assertThat(fallback.notes()).anyMatch(n -> n.contains("未配置 priority_paths"));
+  }
+
+  // ---------- RunBudgetTracker ----------
+
+  @Test
+  void ladderPhasesFollowConsumedRatio() {
+    RunBudgetTracker tracker = new RunBudgetTracker(OPTIONS); // 500k
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.NORMAL);
+    tracker.record(349_000, 0); // 69.8%
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.NORMAL);
+    tracker.record(1_000, 0); // 70%
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.DEGRADE);
+    tracker.record(74_000, 0); // 84.8%
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.DEGRADE);
+    tracker.record(1_000, 0); // 85%
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.TRUNCATE);
+    tracker.record(75_000, 0); // 100%
+    assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.STOP);
+  }
+
+  // ---------- FindingAggregator ----------
+
+  private static CandidateFinding finding(String id, Severity severity, String file, int line) {
+    return new CandidateFinding(
+        id,
+        "run_x",
+        FindingCategory.BUG,
+        "t",
+        "d",
+        "f",
+        file,
+        line,
+        null,
+        "e",
+        null,
+        severity,
+        false,
+        null,
+        "general-reviewer",
+        "glm-x");
+  }
+
+  private static FindingAggregator.Scored scored(CandidateFinding f, Verdict verdict) {
+    return new FindingAggregator.Scored(f, "fp", AnchorStatus.INLINE, verdict);
+  }
+
+  @Test
+  void ordersImportantBeforeNitThenPreExisting() {
+    FindingAggregator.Aggregation aggregation =
+        FindingAggregator.aggregate(
+            List.of(
+                scored(finding("f_n", Severity.NIT, "a.java", 1), Verdict.INTRODUCED_IN_PR),
+                scored(finding("f_p", Severity.NIT, "a.java", 2), Verdict.CONFIRMED_PRE_EXISTING),
+                scored(finding("f_i", Severity.IMPORTANT, "b.java", 1), Verdict.INTRODUCED_IN_PR)),
+            ReviewPolicy.empty(),
+            3,
+            false);
+    assertThat(aggregation.ordered())
+        .extracting(s -> s.finding().id())
+        .containsExactly("f_i", "f_n", "f_p");
+  }
+
+  @Test
+  void nitBudgetZeroDropsAllNits() {
+    FindingAggregator.Aggregation aggregation =
+        FindingAggregator.aggregate(
+            List.of(
+                scored(finding("f_i", Severity.IMPORTANT, "a.java", 1), Verdict.INTRODUCED_IN_PR),
+                scored(finding("f_n", Severity.NIT, "a.java", 2), Verdict.INTRODUCED_IN_PR)),
+            new ReviewPolicy(
+                false, List.of(), 0, List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(), List.of(), List.of()),
+            3,
+            false);
+    assertThat(aggregation.ordered()).extracting(s -> s.finding().id()).containsExactly("f_i");
+    assertThat(aggregation.nitDropped()).isEqualTo(1);
+  }
+
+  @Test
+  void truncationKeepsTop10AndCountsSuppressed() {
+    List<FindingAggregator.Scored> candidates = new java.util.ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      candidates.add(
+          scored(finding("f_" + i, Severity.IMPORTANT, "a.java", i + 1), Verdict.INTRODUCED_IN_PR));
+    }
+    FindingAggregator.Aggregation aggregation =
+        FindingAggregator.aggregate(candidates, ReviewPolicy.empty(), 3, true);
+    assertThat(aggregation.ordered()).hasSize(10);
+    assertThat(aggregation.suppressedByTruncation()).isEqualTo(2);
+  }
+}

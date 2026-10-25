@@ -18,3 +18,6 @@
 
 ## Diff
 {{untrusted_diff}}
+
+## 变更上下文（L1：hunk 窗口与条件全文）
+{{untrusted_l1_context}}

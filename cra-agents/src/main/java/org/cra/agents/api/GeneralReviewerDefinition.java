@@ -32,12 +32,17 @@ public final class GeneralReviewerDefinition implements SubAgent<GeneralReviewIn
             "prompts/reviewer/general.md",
             java.util.Map.of(
                 "untrusted_pr_meta",
-                    TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
-                "untrusted_diff", TemplateSupport.untrusted(input.diffText()),
+                TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
+                "untrusted_diff",
+                TemplateSupport.untrusted(input.diffText()),
+                "untrusted_l1_context",
+                input.windowContext().isBlank()
+                    ? "（无附加上下文）"
+                    : TemplateSupport.untrusted(input.windowContext()),
                 "review_policy_section",
-                    input.reviewPolicySection().isBlank()
-                        ? "（本仓库未配置 REVIEW.md 评审策略）"
-                        : input.reviewPolicySection()));
+                input.reviewPolicySection().isBlank()
+                    ? "（本仓库未配置 REVIEW.md 评审策略）"
+                    : input.reviewPolicySection()));
     int splitAt = rendered.indexOf("\n# User\n");
     if (splitAt < 0) {
       throw new IllegalStateException("general.md 模板缺少 '# User' 分段");

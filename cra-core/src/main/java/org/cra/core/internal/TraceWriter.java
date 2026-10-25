@@ -71,8 +71,23 @@ final class TraceWriter {
    * @return brief 文件路径（进 agent_start 事件的 brief_path）
    */
   Path persistBrief(AgentBrief brief) {
+    return persistBrief(brief, null);
+  }
+
+  /**
+   * brief 全文落盘（M1 分 chunk 形态：同角色多 chunk 以后缀区分文件）。
+   *
+   * @param brief 自包含简报
+   * @param suffix 文件名后缀（如 chunk 序号），null 时用角色 id
+   * @return brief 文件路径
+   */
+  Path persistBrief(AgentBrief brief, String suffix) {
     Map<String, Object> fields = new LinkedHashMap<>();
-    Path path = runDir.resolve("briefs").resolve(brief.role().id() + ".md");
+    String name =
+        suffix == null || suffix.isBlank()
+            ? brief.role().id() + ".md"
+            : brief.role().id() + "-" + suffix + ".md";
+    Path path = runDir.resolve("briefs").resolve(name);
     String content = "# system\n" + brief.systemPrompt() + "\n\n# user\n" + brief.userPrompt();
     try {
       Files.writeString(path, content, StandardCharsets.UTF_8);

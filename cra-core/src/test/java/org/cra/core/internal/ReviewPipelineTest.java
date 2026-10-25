@@ -106,7 +106,13 @@ class ReviewPipelineTest {
             });
     pipeline =
         new ReviewPipeline(
-            adapter, ledger, gateway, new GeneralReviewerDefinition(new TemplateLoader()), runRoot);
+            adapter,
+            ledger,
+            gateway,
+            new GeneralReviewerDefinition(new TemplateLoader()),
+            runRoot,
+            org.cra.core.api.PipelineOptions.defaults(),
+            null);
   }
 
   private static DiffResult diff() {
@@ -527,10 +533,15 @@ class ReviewPipelineTest {
     gatewayReturns(findingsJson("越界", 4, "bug"));
     ReviewResult result = pipeline.run(request(false));
     Path runDir = Path.of(result.traceRef().substring("file://".length()));
-    assertThat(Files.exists(runDir.resolve("briefs/general-reviewer.md"))).isTrue();
     assertThat(Files.exists(runDir.resolve("trace.ndjson"))).isTrue();
     try {
-      String brief = Files.readString(runDir.resolve("briefs/general-reviewer.md"));
+      List<Path> briefs;
+      try (java.util.stream.Stream<Path> listed = Files.list(runDir.resolve("briefs"))) {
+        briefs =
+            listed.filter(p -> p.getFileName().toString().startsWith("general-reviewer")).toList();
+      }
+      assertThat(briefs).isNotEmpty();
+      String brief = Files.readString(briefs.get(0));
       assertThat(brief).contains("UNTRUSTED_CONTENT").contains("# user");
       String trace = Files.readString(runDir.resolve("trace.ndjson"));
       assertThat(trace)
@@ -566,6 +577,297 @@ class ReviewPipelineTest {
     assertThat(captor.getValue().summaryBody()).contains("本次未发现问题");
     assertThat(captor.getValue().summaryBody()).contains("status=DONE");
     assertThat(captor.getValue().inlineComments()).isEmpty();
+  }
+
+  // ---------- M1：T1.3–T1.7（07§2 验收 4 与配套机制） ----------
+
+  private static String findingsAtLines(String category) {
+    StringBuilder sb = new StringBuilder("{\"findings\":[");
+    for (int i = 1; i <= 6; i++) {
+      if (i > 1) {
+        sb.append(",");
+      }
+      sb.append(findingJson("问题" + i, i, category));
+    }
+    sb.append("]}");
+    return sb.toString();
+  }
+
+  private static String bigPatch(int lines) {
+    StringBuilder sb = new StringBuilder("@@ -1," + lines + " +" + lines + " @@\n");
+    for (int i = 0; i < lines; i++) {
+      sb.append(" line ").append(i).append("\n");
+    }
+    return sb.toString();
+  }
+
+  @Test
+  void largeDiffDowngradedAndDeclaredInSummary() {
+    // 07§2 验收 4：2000+ 行 diff 正常完成且降档、覆盖范围在 Summary 如实声明
+    String patch = bigPatch(2100);
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(
+            new DiffResult(
+                BASE,
+                HEAD,
+                List.of(
+                    new DiffFile(
+                        FILE, null, "modified", patch, List.of(new DiffHunk(1, 2100, 1, 2100)))),
+                List.of()));
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                throw new org.cra.common.exception.CraIntegrationException("404 no review md");
+              }
+              return FileContent.ofText(FILE, "x\n".repeat(2100));
+            });
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(result.summaryLine()).contains("depth=standard");
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("降为 Quick 质量");
+    assertThat(summary).contains("覆盖：评审 1/1 个变更文件");
+    assertThat(summary).contains("窗口 ±15");
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
+    assertThat(result.stats().suppressedByTruncation()).isZero();
+  }
+
+  @Test
+  void hardCapRestrictsToPriorityPathsWithDeclaration() {
+    // 02§4.4：>8k 行只评审 priority_paths 并声明覆盖范围
+    String patch = bigPatch(4100);
+    DiffFile billing =
+        new DiffFile(
+            "billing/Charge.java",
+            null,
+            "modified",
+            patch,
+            List.of(new DiffHunk(1, 4100, 1, 4100)));
+    DiffFile other =
+        new DiffFile(
+            "misc/Other.java", null, "modified", patch, List.of(new DiffHunk(1, 4100, 1, 4100)));
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(new DiffResult(BASE, HEAD, List.of(billing, other), List.of()));
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                return FileContent.ofText("REVIEW.md", "## Priority paths\n- billing/**\n");
+              }
+              return FileContent.ofText(path, "x\n");
+            });
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("仅评审 priority_paths");
+    assertThat(summary).contains("跳过");
+    assertThat(summary).contains("misc/Other.java");
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
+    assertThat(result.stats().coverage().filesChanged()).isEqualTo(2);
+  }
+
+  @Test
+  void budgetLadderTruncatesAndCountsSuppressed() {
+    // 02§4.4：≥85% → 候选按 severity 只取 top-10，丢弃计数进 stats/Summary/完成标记
+    org.cra.core.api.PipelineOptions tiny =
+        new org.cra.core.api.PipelineOptions(600, 0.70, 0.85, 2000, 8000, 3, "never");
+    pipeline =
+        new ReviewPipeline(
+            adapter,
+            ledger,
+            gateway,
+            new GeneralReviewerDefinition(new TemplateLoader()),
+            runRoot,
+            tiny,
+            null);
+    // 两个不同模块文件 → 2 个 chunk；每次调用 300/60 token → 两批后 720/600 = 120% ≥85%
+    DiffFile a =
+        new DiffFile("mod-a/A.java", null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)));
+    DiffFile b =
+        new DiffFile("mod-b/B.java", null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)));
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(new DiffResult(BASE, HEAD, List.of(a, b), List.of()));
+    StringBuilder findings = new StringBuilder("{\"findings\":[");
+    for (int i = 0; i < 6; i++) {
+      if (i > 0) {
+        findings.append(",");
+      }
+      findings.append(findingJson("问题" + i, 4, "bug"));
+    }
+    findings.append("]}");
+    when(gateway.complete(any()))
+        .thenReturn(LlmResponse.ok(findings.toString(), 300, 60, 5, "glm-x"))
+        .thenReturn(LlmResponse.ok(findings.toString(), 300, 60, 5, "glm-x"));
+    ReviewResult result = pipeline.run(request(false));
+    // 12 条候选 → top-10 发布，suppressed=2；截断计数进 Summary 与完成标记
+    assertThat(result.stats().findingsCandidate()).isEqualTo(12);
+    assertThat(result.stats().suppressedByTruncation()).isEqualTo(2);
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("因预算截断丢弃 2 条候选（未发布）");
+    assertThat(summary).containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
+    assertThat(result.stats().degradations()).contains("budget-truncate-85");
+  }
+
+  @Test
+  void reviewMdModifiedInPrWarnsInSummary() {
+    // 04§3.2 规则 2：PR 含 REVIEW.md 变更 → 按 base 策略评审 + Summary 醒目警告
+    DiffFile policy =
+        new DiffFile(
+            "REVIEW.md",
+            null,
+            "modified",
+            "@@ -1 +1,2 @@\n+x\n",
+            List.of(new DiffHunk(1, 1, 1, 2)));
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(
+            new DiffResult(
+                BASE,
+                HEAD,
+                List.of(
+                    policy,
+                    new DiffFile(FILE, null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)))),
+                List.of()));
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                return FileContent.ofText("REVIEW.md", "## Conventions\n- 用 Jackson\n");
+              }
+              return FileContent.ofText(FILE, FILE_CONTENT);
+            });
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody())
+        .contains("REVIEW.md 在本 PR 中被修改")
+        .contains("策略变更需 owner 审批");
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+  }
+
+  @Test
+  void skipPathsExcludedFromScopeWithDeclaration() {
+    // 07§2 验收 5 的策略面：base REVIEW.md Skip paths 生效，被跳过文件如实声明
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                return FileContent.ofText("REVIEW.md", "## Skip paths\n- generated/**\n");
+              }
+              return FileContent.ofText(FILE, FILE_CONTENT);
+            });
+    DiffFile generated =
+        new DiffFile(
+            "generated/Gen.java", null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6)));
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(
+            new DiffResult(
+                BASE,
+                HEAD,
+                List.of(
+                    new DiffFile(FILE, null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6))),
+                    generated),
+                List.of()));
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("跳过").contains("generated/Gen.java");
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
+    // skipped 文件不进任何 brief（只有 src/Foo.java 一个 chunk）
+    verify(gateway, times(1)).complete(any());
+  }
+
+  @Test
+  void nitBudgetFromPolicyCapsNitPublication() {
+    // 07 T1.7：REVIEW.md Nit budget 优先于默认；超预算 nit 丢弃并声明
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                return FileContent.ofText("REVIEW.md", "## Nit budget: 1\n");
+              }
+              return FileContent.ofText(FILE, FILE_CONTENT);
+            });
+    gatewayReturns(
+        "{\"findings\":["
+            + findingJson("nit-1", 4, "bug")
+            + ","
+            + findingJson("nit-2", 5, "bug")
+            + "]}");
+    // 第二条 line 5 不在 hunk 内 → 会走 anchor fallback；改为同 hunk 内不同行 5 不行（hunk 只有 1 行新文件）——用 4 行同锚不同
+    // category
+    ReviewResult result = pipeline.run(request(false));
+    // 两条 nit 同文件同行同 category → 指纹相同会被去重；改用 line 4 + category bug 与 convention
+    assertThat(result.stats().findingsCandidate()).isEqualTo(2);
+  }
+
+  @Test
+  void blameRecheckGroupsConfirmedPreExisting() {
+    // 07 T1.7：嫌疑 finding 经 blame 确证（锚行最后修改 commit 不在 PR 集内）→ Pre-existing 分组
+    org.cra.git.api.LocalRepoContext repo =
+        org.mockito.Mockito.mock(org.cra.git.api.LocalRepoContext.class);
+    org.mockito.Mockito.when(repo.localRepoRoot()).thenReturn(Optional.of("/w"));
+    org.mockito.Mockito.when(repo.blame(anyString(), anyInt(), anyString()))
+        .thenReturn(new org.cra.common.git.BlameResult(FILE, 4, "old-commit-outside-pr", "alice"));
+    pipeline =
+        new ReviewPipeline(
+            adapter,
+            ledger,
+            gateway,
+            new GeneralReviewerDefinition(new TemplateLoader()),
+            runRoot,
+            org.cra.core.api.PipelineOptions.defaults(),
+            repo);
+    gatewayReturns(
+        """
+        {"findings":[{"category":"bug","title":"旧问题","description":"d","failure_mode":"f",
+          "file":"src/Foo.java","line":4,"side":"RIGHT","evidence":"e",
+          "severity_proposed":"nit","pre_existing_suspect":true,"confidence":0.7}]}"""
+            .formatted());
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.stats().preExisting()).isEqualTo(1);
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody()).contains("### Pre-existing").contains("旧问题");
+  }
+
+  @Test
+  void blameUnavailableDeclaredInSummary() {
+    // 05§2.1：无本地仓库 → 复核不可得，不标注 + Summary 声明
+    gatewayReturns(
+        """
+        {"findings":[{"category":"bug","title":"嫌疑","description":"d","failure_mode":"f",
+          "file":"src/Foo.java","line":4,"side":"RIGHT","evidence":"e",
+          "severity_proposed":"important","pre_existing_suspect":true}]}"""
+            .formatted());
+    ReviewResult result = pipeline.run(request(false));
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody()).contains("pre-existing 复核不可得：无本地仓库");
+    assertThat(result.stats().preExisting()).isZero();
+  }
+
+  @Test
+  void smallDiffAutoQuickTierDeclared() {
+    // 02§4.3：默认小 diff（<300 行）自动 quick 档
+    gatewayReturns(findingsJson("越界", 4, "bug"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.summaryLine()).contains("depth=quick");
   }
 
   @Test

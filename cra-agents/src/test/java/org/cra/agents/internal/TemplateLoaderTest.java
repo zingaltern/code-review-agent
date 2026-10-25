@@ -20,7 +20,8 @@ class TemplateLoaderTest {
             Map.of(
                 "untrusted_pr_meta", "标题",
                 "review_policy_section", "策略",
-                "untrusted_diff", "diff 内容"));
+                "untrusted_diff", "diff 内容",
+                "untrusted_l1_context", "窗口上下文"));
     assertThat(out).startsWith("# System");
     assertThat(out).contains("# User");
     assertThat(out).contains("<<<UNTRUSTED_CONTENT");
@@ -61,7 +62,8 @@ class TemplateLoaderTest {
             Map.of(
                 "untrusted_pr_meta", "return {if} {x} from map",
                 "review_policy_section", "",
-                "untrusted_diff", "code {a} {{b}"));
+                "untrusted_diff", "code {a} {{b}",
+                "untrusted_l1_context", "ctx {c}"));
     assertThat(out).contains("return {if} {x} from map");
     assertThat(out).contains("code {a} {{b}");
   }
