@@ -109,12 +109,19 @@
 ### 1.4 Trace 格式（NDJSON）
 
 ```json
+{"ts":"…","run_id":"…","event":"run_start","repo":"…","pr":42,"depth":"standard","dry_run":false}
+{"ts":"…","run_id":"…","event":"gate_check","gate":"commit","hit":false}
 {"ts":"…","run_id":"…","event":"agent_start","agent":"bug-hunter/boundary","brief_path":"…"}
 {"ts":"…","event":"agent_output","agent":"…","findings":3,"tokens":{…},"latency_ms":8200}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{…}}
 {"ts":"…","event":"anchor_check","finding_id":"f_…","status":"SUMMARY_FALLBACK"}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
+{"ts":"…","event":"plan","effective_depth":"standard","chunks":4,"skipped":2}
+{"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|none"}
+{"ts":"…","event":"blame_check","note":"…"}
+{"ts":"…","event":"aggregate","candidates":12,"ordered":5,"nit_dropped":2,"suppressed_by_truncation":0}
+{"ts":"…","event":"summary_supersede","comment_id":123,"status":"patched|skipped|unavailable|failed"}
 {"ts":"…","event":"publish","comments":5,"skipped_duplicate":1,"suppressed_by_truncation":0,"done_marker":true}
 ```
 
