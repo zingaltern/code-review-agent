@@ -4,8 +4,10 @@ import java.util.List;
 
 /**
  * 发布命令（GitPlatformAdapter.postReview 入参，05§2.2）：PR review 只装 inline 评论（body 固定 引导语），Summary 走 issue
- * comments 端点（可 PATCH 编辑，载体分离）。
+ * comments 端点（可 PATCH 编辑，载体分离）。repo 维度入命令 （postReview 签名不带 RepoRef，05§2.1）。
  *
+ * @param repoOwner 仓库属主
+ * @param repoName 仓库名
  * @param prNumber PR 编号
  * @param commitId 绑定的 head sha（inline 评论 commit_id）
  * @param reviewBody PR review 的 body 引导语（不能为空）
@@ -13,6 +15,8 @@ import java.util.List;
  * @param summaryBody Summary issue comment 正文（文末带 run 完成标记，05§1.3）
  */
 public record PostReviewCommand(
+    String repoOwner,
+    String repoName,
     int prNumber,
     String commitId,
     String reviewBody,
@@ -20,6 +24,9 @@ public record PostReviewCommand(
     String summaryBody) {
 
   public PostReviewCommand {
+    if (repoOwner == null || repoOwner.isBlank() || repoName == null || repoName.isBlank()) {
+      throw new IllegalArgumentException("repo owner/name must be non-blank");
+    }
     if (prNumber <= 0) {
       throw new IllegalArgumentException("prNumber must be positive: " + prNumber);
     }

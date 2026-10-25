@@ -1,0 +1,324 @@
+package org.cra.git.github.internal;
+
+import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.containing;
+import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.matchingJsonPath;
+import static com.github.tomakehurst.wiremock.client.WireMock.post;
+import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.stubbing.ServeEvent;
+import java.net.http.HttpClient;
+import java.util.ArrayList;
+import java.util.List;
+import org.cra.common.exception.CraIntegrationException;
+import org.cra.common.finding.Side;
+import org.cra.common.git.CommentLedger;
+import org.cra.common.git.DiffFile;
+import org.cra.common.git.DiffResult;
+import org.cra.common.git.FileContent;
+import org.cra.common.git.InlineComment;
+import org.cra.common.git.PostReviewCommand;
+import org.cra.common.git.PrReviewResult;
+import org.cra.common.git.PublishStatus;
+import org.cra.common.git.RepoRef;
+import org.cra.common.git.ReviewItemResult;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * GitHub adapter 端点契约测试（WireMock stub 即端点契约文档，08§8.1；08§5 场景 5/17 的 adapter 侧）。 端点形状对照 GitHub REST
+ * v3 官方文档核查（07 头部第二条腿）： compare / contents(raw) / git trees / pulls reviews / issues comments。
+ */
+class GitHubHttpAdapterWireMockTest {
+
+  private static final RepoRef REPO = new RepoRef("o", "r");
+  private static WireMockServer wm;
+  private GitHubHttpAdapter adapter;
+  private final List<Long> sleeps = new ArrayList<>();
+
+  @BeforeAll
+  static void startWireMock() {
+    wm = new WireMockServer(WireMockConfiguration.options().dynamicPort());
+    wm.start();
+  }
+
+  @AfterAll
+  static void stopWireMock() {
+    wm.stop();
+  }
+
+  @BeforeEach
+  void setUp() {
+    wm.resetAll();
+    sleeps.clear();
+    adapter =
+        new GitHubHttpAdapter(
+            wm.baseUrl(), "test-token", HttpClient.newBuilder().build(), sleeps::add);
+  }
+
+  @AfterEach
+  void tearDown() {
+    // 无残留
+  }
+
+  private static String reviewRequestBody() {
+    return """
+        {"files":[{"filename":"src/Foo.java","status":"modified",
+          "patch":"@@ -10,7 +10,9 @@ context\\n old\\n+new1\\n+new2\\n old2"},
+                 {"filename":"removed.txt","status":"removed","patch":null}],
+         "commits":[{"sha":"c1","commit":{"message":"fix: something"}},
+                    {"sha":"c2","commit":{"message":"fix: more"}}]}""";
+  }
+
+  @Test
+  void fetchDiffMapsFilesAndHunks() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .willReturn(okJson(reviewRequestBody())));
+    DiffResult diff = adapter.fetchDiff(REPO, "base1", "head2");
+    assertThat(diff.files()).hasSize(2);
+    DiffFile foo = diff.files().get(0);
+    assertThat(foo.path()).isEqualTo("src/Foo.java");
+    assertThat(foo.hunks()).hasSize(1);
+    assertThat(foo.containsLine(Side.RIGHT, 10)).isTrue();
+    assertThat(foo.containsLine(Side.RIGHT, 12)).isTrue();
+    assertThat(foo.containsLine(Side.RIGHT, 18)).isTrue();
+    assertThat(foo.containsLine(Side.RIGHT, 19)).isFalse();
+    assertThat(diff.files().get(1).patch()).isNull();
+    assertThat(diff.commits()).extracting("sha").containsExactly("c1", "c2");
+  }
+
+  @Test
+  void readFileUsesRawAcceptAndDecodesText() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/contents/src/Foo.java?ref=head2"))
+            .withHeader("Accept", containing("vnd.github.raw"))
+            .willReturn(aResponse().withStatus(200).withBody("line1\nline2\n")));
+    FileContent content = adapter.readFile(REPO, "head2", "src/Foo.java");
+    assertThat(content.text()).isEqualTo("line1\nline2\n");
+    assertThat(content.binary()).isFalse();
+  }
+
+  @Test
+  void readFileDetectsBinary() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/contents/blob.bin?ref=head2"))
+            .willReturn(
+                aResponse()
+                    .withStatus(200)
+                    .withBody(new byte[] {(byte) 0xff, (byte) 0xfe, (byte) 0x00})));
+    FileContent content = adapter.readFile(REPO, "head2", "blob.bin");
+    assertThat(content.binary()).isTrue();
+    assertThat(content.text()).isNull();
+  }
+
+  @Test
+  void listFilesMatchesGlob() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/git/trees/head2?recursive=1"))
+            .willReturn(
+                okJson(
+                    """
+            {"tree":[{"path":"src/main/java/A.java","type":"blob"},
+                     {"path":"src/test/B.java","type":"blob"},
+                     {"path":"docs/readme.md","type":"blob"},
+                     {"path":"src/main","type":"tree"}]}""")));
+    assertThat(adapter.listFiles(REPO, "head2", "src/**/*.java"))
+        .containsExactly("src/main/java/A.java", "src/test/B.java");
+    assertThat(adapter.listFiles(REPO, "head2", "docs/*")).containsExactly("docs/readme.md");
+  }
+
+  @Test
+  void postReviewPostsInlineThenSummaryInOrder() {
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .willReturn(
+                okJson("""
+            {"id":9001,"comments":[{"id":8001},{"id":8002}]}""")));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/issues/7/comments")).willReturn(okJson("{\"id\":9500}")));
+    PrReviewResult result = adapter.postReview(command(2));
+    assertThat(result.reviewId()).contains("9001");
+    assertThat(result.summaryCommentId()).contains(9500L);
+    assertThat(result.items()).allMatch(i -> i.publishStatus() == PublishStatus.PUBLISHED);
+    assertThat(result.items())
+        .extracting(ReviewItemResult::commentId)
+        .containsExactly(8001L, 8002L);
+    // 发布顺序（05§2.2 规则 3）：inline review 先于 Summary issue comment
+    List<ServeEvent> events = wm.getAllServeEvents();
+    java.util.Collections.reverse(events); // journal 倒序，还原成时间正序
+    List<String> paths = events.stream().map(e -> e.getRequest().getUrl()).toList();
+    assertThat(paths.indexOf("/repos/o/r/pulls/7/reviews"))
+        .isLessThan(paths.indexOf("/repos/o/r/issues/7/comments"));
+    // payload 契约：commit_id 绑定 head sha + event=COMMENT + side 字段
+    wm.verify(
+        postRequestedFor(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .withRequestBody(matchingJsonPath("$[?(@.commit_id == 'head2')]"))
+            .withRequestBody(matchingJsonPath("$[?(@.event == 'COMMENT')]")));
+  }
+
+  @Test
+  void postReviewEmptyInlineSkipsReviewAndOnlyPostsSummary() {
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/issues/7/comments")).willReturn(okJson("{\"id\":9500}")));
+    PostReviewCommand cmd =
+        new PostReviewCommand("o", "r", 7, "head2", "body", List.of(), "summary");
+    PrReviewResult result = adapter.postReview(cmd);
+    assertThat(result.reviewId()).isEmpty();
+    assertThat(result.summaryCommentId()).contains(9500L);
+    wm.verify(0, postRequestedFor(urlEqualTo("/repos/o/r/pulls/7/reviews")));
+  }
+
+  @Test
+  void unprocessableBundleFallsBackToPerItem() {
+    // 整包 422 → 逐条提交：第一条成功，第二条仍 422 → SUMMARY_FALLBACK（08§5 场景 5）
+    // scenario 状态机：整包 → 422；逐条 1 → 201；逐条 2 → 仍 422（SUMMARY_FALLBACK，08§5 场景 5）
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .inScenario("fallback")
+            .whenScenarioStateIs("Started")
+            .willReturn(aResponse().withStatus(422).withBody("{\"message\":\"Validation Failed\"}"))
+            .willSetStateTo("one"));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .inScenario("fallback")
+            .whenScenarioStateIs("one")
+            .willReturn(okJson("{\"id\":9002,\"comments\":[{\"id\":8100}]}"))
+            .willSetStateTo("two"));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .inScenario("fallback")
+            .whenScenarioStateIs("two")
+            .willReturn(
+                aResponse().withStatus(422).withBody("{\"message\":\"Validation Failed\"}")));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/issues/7/comments")).willReturn(okJson("{\"id\":9500}")));
+    PrReviewResult result = adapter.postReview(command(2));
+    assertThat(result.items())
+        .extracting(ReviewItemResult::publishStatus)
+        .containsExactly(PublishStatus.PUBLISHED, PublishStatus.SUMMARY_FALLBACK);
+    assertThat(result.items().get(1).anchorStatus().name()).isEqualTo("SUMMARY_FALLBACK");
+  }
+
+  @Test
+  void non422FailurePropagates() {
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .willReturn(aResponse().withStatus(500).withBody("boom")));
+    assertThatThrownBy(() -> adapter.postReview(command(1)))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("GitHub API 500");
+  }
+
+  @Test
+  void rateLimit429BacksOffThenSucceeds() {
+    // 08§5 场景 17（GitHub 侧）：429 + Retry-After → 退避后成功（05§2.3 ≤3 次）
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .inScenario("limit")
+            .whenScenarioStateIs("Started")
+            .willReturn(
+                aResponse().withStatus(429).withBody("rate limited").withHeader("Retry-After", "1"))
+            .willSetStateTo("recovered"));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .inScenario("limit")
+            .whenScenarioStateIs("recovered")
+            .willReturn(okJson(reviewRequestBody())));
+    DiffResult diff = adapter.fetchDiff(REPO, "base1", "head2");
+    assertThat(diff.files()).hasSize(2);
+    assertThat(sleeps).containsExactly(1000L);
+  }
+
+  @Test
+  void rateLimitExhaustedThrows() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .inScenario("exhaust")
+            .whenScenarioStateIs("Started")
+            .willReturn(
+                aResponse()
+                    .withStatus(429)
+                    .withBody("rate limited")
+                    .withHeader("Retry-After", "1")));
+    assertThatThrownBy(() -> adapter.fetchDiff(REPO, "base1", "head2"))
+        .isInstanceOf(CraIntegrationException.class);
+    assertThat(sleeps).hasSize(3); // 最多 3 次退避（05§2.3）
+  }
+
+  @Test
+  void fetchBotCommentsMergesEndpointsFiltersBotAndParses() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":1,\"user\":{\"login\":\"cra-bot\"},"
+                        + "\"body\":\"正文 src/Foo.java\\n<!-- cra:v=2.1 | fp=9f2a1b | file=src/Foo.java "
+                        + "| cat=bug | id=f_1 | run=run_1 | commit=abc1234 | line=87 -->\","
+                        + "\"created_at\":\"2026-10-25T00:00:00Z\",\"commit_id\":\"abc1234\"},"
+                        + "{\"id\":2,\"user\":{\"login\":\"human\"},\"body\":\"human comment\"}]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":3,\"user\":{\"login\":\"cra-bot\"},"
+                        + "\"body\":\"Summary\\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE "
+                        + "| findings=1 | suppressed=0 -->\","
+                        + "\"created_at\":\"2026-10-25T01:00:00Z\"},"
+                        + "{\"id\":4,\"user\":{\"login\":\"cra-bot\"},"
+                        + "\"body\":\"被污染 <!-- cra:v=2.1 -->\"}]")));
+    CommentLedger ledger = adapter.fetchBotComments(REPO, 7);
+    assertThat(ledger.findingMarkers()).hasSize(1);
+    assertThat(ledger.findingMarkers().get(0).fingerprint()).isEqualTo("9f2a1b");
+    assertThat(ledger.runMarkers()).hasSize(1);
+    assertThat(ledger.runMarkers().get(0).status()).isEqualTo("DONE");
+    assertThat(ledger.suspectCount()).isEqualTo(1); // 正文中间的伪造标记（05§1.3 规则 1）
+    assertThat(ledger.comments()).hasSize(3); // 人类评论被过滤
+  }
+
+  @Test
+  void dispositionSignalsNotCollectedInM0() {
+    assertThat(adapter.fetchDispositionSignals(REPO, 7)).isEmpty();
+  }
+
+  private static PostReviewCommand command(int count) {
+    List<InlineComment> inline = new ArrayList<>();
+    for (int i = 0; i < count; i++) {
+      inline.add(
+          new InlineComment(
+              "src/Foo.java",
+              10 + i,
+              Side.RIGHT,
+              "finding "
+                  + i
+                  + " src/Foo.java\n<!-- cra:v=2.1 | fp=aa0"
+                  + i
+                  + " | file=src/Foo.java | cat=bug | id=f_0"
+                  + i
+                  + " | run=run_1 | commit=abc1234 "
+                  + "| line="
+                  + (10 + i)
+                  + " -->",
+              "f_0" + i));
+    }
+    return new PostReviewCommand("o", "r", 7, "head2", "cra: 引导语", inline, "summary");
+  }
+
+  private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder okJson(
+      String body) {
+    return aResponse()
+        .withStatus(200)
+        .withHeader("Content-Type", "application/json")
+        .withBody(body);
+  }
+}
