@@ -97,6 +97,10 @@ public final class EvalStubServer implements AutoCloseable {
     server.stop(0);
   }
 
+  /** contents 路径提取（任意长度 owner/repo；组 1 = 文件路径）。 */
+  private static final java.util.regex.Pattern CONTENTS_PATH =
+      java.util.regex.Pattern.compile("^/repos/[^/]+/[^/]+/contents/(.+)$");
+
   // ---------- 请求分发 ----------
 
   private void handle(HttpExchange exchange) throws IOException {
@@ -123,9 +127,11 @@ public final class EvalStubServer implements AutoCloseable {
       return;
     }
     // /repos/{o}/{r}/contents/{path}
-    if (path.matches("/repos/[^/]+/[^/]+/contents/.+")) {
-      String prefix = path.substring(("/repos/a/b/contents/").length());
-      String filePath = percentDecode(prefix);
+    java.util.regex.Matcher contents = CONTENTS_PATH.matcher(path);
+    if (contents.matches()) {
+      // 前缀解析必须按正则提取（owner/repo 长度不定；硬编码 "/repos/a/b/contents/" 的 substring
+      // 长度在真实 owner/repo 下会截断路径 → 评测形态 REVIEW.md 与文件全文恒 404，M1 起潜伏）
+      String filePath = percentDecode(contents.group(1));
       Path resolved = seed.snapshotRoot().resolve(filePath).normalize();
       if (!resolved.startsWith(seed.snapshotRoot().normalize()) || !Files.isRegularFile(resolved)) {
         respondJson(exchange, 404, Map.of("message", "Not Found"));

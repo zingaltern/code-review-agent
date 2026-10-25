@@ -69,7 +69,10 @@ class EvalStubServerTest {
 
   @Test
   void readFileServesSnapshotBytes() {
-    FileContent content = adapter.readFile(new RepoRef("o", "r"), "head000", "src/Demo.java");
+    // owner/repo 用真实形态（多字符）——硬编码 "/repos/a/b/contents/" 前缀的 substring 长度
+    // 会截断路径导致 404（M1 起潜伏：评测形态 REVIEW.md 与文件全文从未读到）
+    FileContent content =
+        adapter.readFile(new RepoRef("cra-eval-fixture", "bad-Demo"), "head000", "src/Demo.java");
     assertThat(content.binary()).isFalse();
     assertThat(content.text()).contains("1 / 0");
   }
