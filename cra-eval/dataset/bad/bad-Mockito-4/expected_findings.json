@@ -3,12 +3,21 @@
   "expected": [
     {
       "file": "src/org/mockito/exceptions/Reporter.java",
-      "line": 420,
+      "line": 423,
       "category": "bug",
       "keywords": [
         "safelyGetMockName"
       ],
-      "note": "人工确认：删除 safelyGetMockName/exceptionCauseMessageIfAvailable，错误报告丢失 mock 名与原因信息"
+      "note": "复核校准（2026-10-25 取证）：finding 锚 L423（原 L420 ±5 覆盖内，收敛到实际锚）"
+    },
+    {
+      "file": "src/org/mockito/exceptions/Reporter.java",
+      "line": 667,
+      "category": "bug",
+      "keywords": [
+        "getCause"
+      ],
+      "note": "复核校准（2026-10-25 取证）：diff 同时删除 exceptionCauseMessageIfAvailable（cause 空防护）——run1 的 NPE finding（L667）即此缺陷面，原标注漏标"
     }
   ],
   "negative_baits": []

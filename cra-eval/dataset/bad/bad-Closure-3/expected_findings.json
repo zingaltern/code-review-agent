@@ -3,21 +3,12 @@
   "expected": [
     {
       "file": "src/com/google/javascript/jscomp/FlowSensitiveInlineVariables.java",
-      "line": 277,
+      "line": 367,
       "category": "bug",
       "keywords": [
-        "canInline"
+        "catch"
       ],
-      "note": "人工确认：删除 canInline 守卫方法（catch 表达式/含 R-Value 新建对象变量不再豁免内联）"
-    },
-    {
-      "file": "src/com/google/javascript/jscomp/FlowSensitiveInlineVariables.java",
-      "line": 152,
-      "category": "bug",
-      "keywords": [
-        "canInline"
-      ],
-      "note": "人工确认：调用点 if(c.canInline(...)) 守卫一并删除（同一缺陷）"
+      "note": "复核校准（2026-10-25，eval 40205519252 取证）：finding 锚 L367、正文均含 catch 表达式保护描述（实现标识符 canInline 不出现在评审正文，原 L277/L152 关键词+行号双不匹配）"
     }
   ],
   "negative_baits": []

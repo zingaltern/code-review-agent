@@ -3,12 +3,12 @@
   "expected": [
     {
       "file": "src/org/mockito/internal/util/Timer.java",
-      "line": 23,
+      "line": 8,
       "category": "bug",
       "keywords": [
-        "validateInput"
+        "duration"
       ],
-      "note": "人工确认：删除 Timer.validateInput(durationMillis) 调用，负时长不再抛 FriendlyReminderException"
+      "note": "复核校准（2026-10-25 取证）：finding 3/3 锚构造器 L8、正文以 duration/负时长描述（validateInput 仅 1/3 正文出现，原 L23 行号差 15 超 ±5）"
     }
   ],
   "negative_baits": []
