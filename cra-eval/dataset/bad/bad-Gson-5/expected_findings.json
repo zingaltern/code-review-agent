@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/bind/util/ISO8601Utils.java",
+      "line": 212,
+      "category": "bug",
+      "keywords": [
+        "时区",
+        "偏移"
+      ],
+      "note": "人工确认（M3 冒烟校准）：finding 实际为 ISO8601Utils.java:L209 [bug]「移除时区偏移补全逻辑导致短偏移解析异常」——关键词取中文行为词\"时区\"+\"偏移\""
+    }
+  ],
+  "negative_baits": []
+}

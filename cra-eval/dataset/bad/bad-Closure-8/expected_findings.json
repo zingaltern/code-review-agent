@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/com/google/javascript/jscomp/CollapseVariableDeclarations.java",
+      "line": 203,
+      "category": "bug",
+      "keywords": [
+        "parameter",
+        "collaps"
+      ],
+      "note": "人工确认：缺少 isNamedParameter 守卫：命名参数变量被折叠进 var 声明，造成重复声明/覆盖（Issue 820）"
+    }
+  ],
+  "negative_baits": []
+}

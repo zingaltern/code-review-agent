@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/com/google/javascript/jscomp/InlineObjectLiterals.java",
+      "line": 169,
+      "category": "bug",
+      "keywords": [
+        "inlin",
+        "delet"
+      ],
+      "note": "人工确认：缺少 isDelProp 守卫：对象字面量的属性被 delete 引用时仍参与内联，改变删除语义（Issue 851）"
+    }
+  ],
+  "negative_baits": []
+}

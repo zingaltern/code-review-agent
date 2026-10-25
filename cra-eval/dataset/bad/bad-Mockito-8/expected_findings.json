@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/util/reflection/GenericMetadataSupport.java",
+      "line": 79,
+      "category": "bug",
+      "keywords": [
+        "recurs"
+      ],
+      "note": "人工确认：去掉 typeParameter != actualTypeArgument 判断后，自引用泛型上界导致无限递归/StackOverflowError（#114）"
+    }
+  ],
+  "negative_baits": []
+}

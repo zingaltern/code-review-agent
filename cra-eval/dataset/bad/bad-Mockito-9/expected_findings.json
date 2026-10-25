@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/stubbing/answers/CallsRealMethods.java",
+      "line": 36,
+      "category": "bug",
+      "keywords": [
+        "abstract"
+      ],
+      "note": "人工确认：抽象方法未委派默认答案而直接 callRealMethod，spy 抽象类时抛错（#122）"
+    }
+  ],
+  "negative_baits": []
+}

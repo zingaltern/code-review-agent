@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/fasterxml/jackson/databind/introspect/AnnotatedClass.java",
+      "line": 657,
+      "category": "bug",
+      "keywords": [
+        "mixin"
+      ],
+      "note": "人工确认（M3 冒烟校准）：finding 实际锚 AnnotatedClass.java:L657 [bug]「移除 mixin 方法的多级注释合并逻辑」——关键词取 \"mixin\"（技术术语，任何正确描述必含）"
+    }
+  ],
+  "negative_baits": []
+}

@@ -1,0 +1,28 @@
+diff --git a/src/main/java/com/fasterxml/jackson/databind/introspect/AnnotatedClass.java b/src/main/java/com/fasterxml/jackson/databind/introspect/AnnotatedClass.java
+index fa379b104..dcb4866ff 100644
+--- a/src/main/java/com/fasterxml/jackson/databind/introspect/AnnotatedClass.java
++++ b/src/main/java/com/fasterxml/jackson/databind/introspect/AnnotatedClass.java
+@@ -13,7 +13,7 @@ public final class AnnotatedClass
+     extends Annotated
+ {
+     private final static AnnotationMap[] NO_ANNOTATION_MAPS = new AnnotationMap[0];
+-
++    
+     /*
+     /**********************************************************
+     /* Configuration
+@@ -654,13 +654,7 @@ public final class AnnotatedClass
+                      * just placeholder, can't be called)
+                      */
+                 } else {
+-                    // Well, or, as per [Issue#515], multi-level merge within mixins...
+-                    am = mixIns.find(m);
+-                    if (am != null) {
+-                        _addMixUnders(m, am);
+-                    } else {
+-                        mixIns.add(_constructMethod(m));
+-                    }
++                    mixIns.add(_constructMethod(m));
+                 }
+             }
+         }

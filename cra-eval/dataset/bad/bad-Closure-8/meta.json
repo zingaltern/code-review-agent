@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Closure-8",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Closure",
+  "bug_id" : 8,
+  "report_id" : "issue-820.json",
+  "base_sha" : "6300a43566d4adcf8828128267808a8740edc835",
+  "head_sha" : "e237d2643b102fbea616717806391f48e2ce506a",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "1e3a55eaca89b7f10a0b3708d166b604a2ddd710e3886fa4a74ec78785088ef8",
+    "crop_root" : "src/com/google/javascript/jscomp"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Closure-8"
+  },
+  "filtered_test_files" : [ "test/com/google/javascript/jscomp/CollapseVariableDeclarationsTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-dataset",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Closure-8 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 10 行"
+}

@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Mockito-11",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Mockito",
+  "bug_id" : 11,
+  "report_id" : "87",
+  "base_sha" : "1802cf79c482f2df29abb3d6735bcf0b16cedb7d",
+  "head_sha" : "57be784ef15d4d4d685e59d7e855e01de81a77a5",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "ee6386a92a9c87a5ccdf8b651ed3fb7c58fd4fd838e2f72b5563bdccfeaa92e4",
+    "crop_root" : "src/org/mockito/internal/creation"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Mockito-11"
+  },
+  "filtered_test_files" : [ "test/org/mockito/internal/creation/DelegatingMethodTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-dataset",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Mockito-11 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 28 行"
+}

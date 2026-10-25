@@ -1,0 +1,96 @@
+diff --git a/gson/src/main/java/com/google/gson/Gson.java b/gson/src/main/java/com/google/gson/Gson.java
+index c2d7b618..ef8c81e3 100644
+--- a/gson/src/main/java/com/google/gson/Gson.java
++++ b/gson/src/main/java/com/google/gson/Gson.java
+@@ -45,7 +45,6 @@ import java.io.EOFException;
+ import java.io.IOException;
+ import java.io.Reader;
+ import java.io.StringReader;
+-import java.io.StringWriter;
+ import java.io.Writer;
+ import java.lang.reflect.Type;
+ import java.math.BigDecimal;
+@@ -844,7 +843,7 @@ public final class Gson {
+    * @see #toJson(Object)
+    */
+   public String toJson(Object src, Type typeOfSrc) {
+-    StringWriter writer = new StringWriter();
++    StringBuilder writer = new StringBuilder();
+     toJson(src, typeOfSrc, writer);
+     return writer.toString();
+   }
+@@ -962,7 +961,7 @@ public final class Gson {
+    * @since 1.4
+    */
+   public String toJson(JsonElement jsonElement) {
+-    StringWriter writer = new StringWriter();
++    StringBuilder writer = new StringBuilder();
+     toJson(jsonElement, writer);
+     return writer.toString();
+   }
+diff --git a/gson/src/main/java/com/google/gson/JsonElement.java b/gson/src/main/java/com/google/gson/JsonElement.java
+index b7d135b9..d280118d 100644
+--- a/gson/src/main/java/com/google/gson/JsonElement.java
++++ b/gson/src/main/java/com/google/gson/JsonElement.java
+@@ -21,7 +21,6 @@ import com.google.gson.internal.Streams;
+ import com.google.gson.stream.JsonWriter;
+ import java.io.IOException;
+ import java.io.Reader;
+-import java.io.StringWriter;
+ import java.math.BigDecimal;
+ import java.math.BigInteger;
+ 
+@@ -422,13 +421,13 @@ public abstract class JsonElement {
+   @Override
+   public String toString() {
+     try {
+-      StringWriter stringWriter = new StringWriter();
+-      JsonWriter jsonWriter = new JsonWriter(stringWriter);
++      StringBuilder stringBuilder = new StringBuilder();
++      JsonWriter jsonWriter = new JsonWriter(Streams.writerForAppendable(stringBuilder));
+       // Make writer lenient because toString() must not fail, even if for example JsonPrimitive
+       // contains NaN
+       jsonWriter.setStrictness(Strictness.LENIENT);
+       Streams.write(this, jsonWriter);
+-      return stringWriter.toString();
++      return stringBuilder.toString();
+     } catch (IOException e) {
+       throw new AssertionError(e);
+     }
+diff --git a/gson/src/main/java/com/google/gson/TypeAdapter.java b/gson/src/main/java/com/google/gson/TypeAdapter.java
+index 2b6c329b..e33a839d 100644
+--- a/gson/src/main/java/com/google/gson/TypeAdapter.java
++++ b/gson/src/main/java/com/google/gson/TypeAdapter.java
+@@ -16,6 +16,7 @@
+ 
+ package com.google.gson;
+ 
++import com.google.gson.internal.Streams;
+ import com.google.gson.internal.bind.JsonTreeReader;
+ import com.google.gson.internal.bind.JsonTreeWriter;
+ import com.google.gson.stream.JsonReader;
+@@ -24,7 +25,6 @@ import com.google.gson.stream.JsonWriter;
+ import java.io.IOException;
+ import java.io.Reader;
+ import java.io.StringReader;
+-import java.io.StringWriter;
+ import java.io.Writer;
+ 
+ /**
+@@ -157,13 +157,13 @@ public abstract class TypeAdapter<T> {
+    * @since 2.2
+    */
+   public final String toJson(T value) {
+-    StringWriter stringWriter = new StringWriter();
++    StringBuilder stringBuilder = new StringBuilder();
+     try {
+-      toJson(stringWriter, value);
++      toJson(Streams.writerForAppendable(stringBuilder), value);
+     } catch (IOException e) {
+       throw new JsonIOException(e);
+     }
+-    return stringWriter.toString();
++    return stringBuilder.toString();
+   }
+ 
+   /**

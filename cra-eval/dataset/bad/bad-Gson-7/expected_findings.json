@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 954,
+      "category": "bug",
+      "keywords": [
+        "unquoted"
+      ],
+      "note": "人工确认：nextInt 的 PEEKED_UNQUOTED 分支被删，未加引号的数字无法解析（#604）"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 1183,
+      "category": "bug",
+      "keywords": [
+        "unquoted"
+      ],
+      "note": "人工确认：nextLong 同样丢失 PEEKED_UNQUOTED 处理（同一缺陷第二处）"
+    }
+  ],
+  "negative_baits": []
+}

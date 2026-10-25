@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Gson-5",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Gson",
+  "bug_id" : 5,
+  "report_id" : "768",
+  "base_sha" : "8383f5c7fa34ae68323fe2816ef8c1307b5d0f84",
+  "head_sha" : "af68d70cd55826fa7149effd7397d64667ca264c",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "f523bea894dd30540a7e64e4f827873813331b08e15fbde0b5d9b2a675cd3ac4",
+    "crop_root" : "gson/src/main/java/com/google/gson/internal/bind/util"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Gson-5"
+  },
+  "filtered_test_files" : [ "gson/src/test/java/com/google/gson/DefaultDateTypeAdapterTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-dataset",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Gson-5 逆向 patch（fixed→buggy），净化① 剔除 1 个测试文件节；变更 6 行"
+}

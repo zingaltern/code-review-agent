@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/fasterxml/jackson/core/util/TextBuffer.java",
+      "line": 307,
+      "category": "bug",
+      "keywords": [
+        "null",
+        "empty"
+      ],
+      "note": "人工确认：空缓冲时去掉 _currentSegment != null 判断，返回 null 而非空数组，调用方 NPE（#182）"
+    }
+  ],
+  "negative_baits": []
+}

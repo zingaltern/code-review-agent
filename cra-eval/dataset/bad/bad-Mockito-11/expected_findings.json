@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/creation/DelegatingMethod.java",
+      "line": 53,
+      "category": "bug",
+      "keywords": [
+        "equals"
+      ],
+      "note": "人工确认（M3 冒烟校准）：bug finding 实际锚 L57（另有 L48），断言行取 53 使 ±5 同时覆盖 hashCode/equals 两处锚点——关键词 \"equals\""
+    }
+  ],
+  "negative_baits": []
+}

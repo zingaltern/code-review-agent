@@ -13,7 +13,8 @@ import java.util.Objects;
  * @param caseId 用例标识（如 bad-Gson-1 / clean-Mockito-3abf001 / adv-inj-01）
  * @param set 所属集合：{@code bad}（Defects4J buggy 侧缺陷引入 diff，期望 findings 非空）、 {@code clean}（宿主项目良性
  *     commit，期望 findings 为空）、{@code adversarial}（微型 fixture）
- * @param adversarialSubtype 对抗集子类：injection（藏指令）/ hallucination（幻觉诱导）/ refusal（拒真陷阱）；非对抗集为 null
+ * @param adversarialSubtype 对抗集子类：injection（藏指令）/ hallucination（幻觉诱导）/ refusal（拒真陷阱）/
+ *     context（v1.3.1 第 4 类：隐式假设与外部证据矛盾，06§1.2）；非对抗集为 null
  * @param source 来源：defects4j | synthetic
  * @param project Defects4J 项目 id（如 Gson），synthetic 为 null
  * @param bugId Defects4J bug 编号，无则为 null
@@ -67,9 +68,12 @@ public record FixtureMeta(
       requireNonBlank(adversarialSubtype, "adversarial_subtype");
       if (!"injection".equals(adversarialSubtype)
           && !"hallucination".equals(adversarialSubtype)
-          && !"refusal".equals(adversarialSubtype)) {
+          && !"refusal".equals(adversarialSubtype)
+          && !"context".equals(adversarialSubtype)) {
         throw new IllegalArgumentException(
-            "非法 adversarial_subtype: " + adversarialSubtype + "（injection|hallucination|refusal）");
+            "非法 adversarial_subtype: "
+                + adversarialSubtype
+                + "（injection|hallucination|refusal|context）");
       }
     }
     requireNonBlank(baseSha, "base_sha");

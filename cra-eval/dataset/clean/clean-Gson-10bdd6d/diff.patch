@@ -1,0 +1,80 @@
+diff --git a/gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java b/gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java
+index 1286d9be..9dfc7bc9 100644
+--- a/gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java
++++ b/gson/src/main/java/com/google/gson/internal/bind/CollectionTypeAdapterFactory.java
+@@ -49,10 +49,12 @@ public final class CollectionTypeAdapterFactory implements TypeAdapterFactory {
+ 
+     Type elementType = $Gson$Types.getCollectionElementType(type, rawType);
+     TypeAdapter<?> elementTypeAdapter = gson.getAdapter(TypeToken.get(elementType));
++    TypeAdapter<?> wrappedTypeAdapter =
++        new TypeAdapterRuntimeTypeWrapper<>(gson, elementTypeAdapter, elementType);
+     ObjectConstructor<T> constructor = constructorConstructor.get(typeToken);
+ 
+     @SuppressWarnings({"unchecked", "rawtypes"}) // create() doesn't define a type parameter
+-    TypeAdapter<T> result = new Adapter(gson, elementType, elementTypeAdapter, constructor);
++    TypeAdapter<T> result = new Adapter(wrappedTypeAdapter, constructor);
+     return result;
+   }
+ 
+@@ -61,12 +63,8 @@ public final class CollectionTypeAdapterFactory implements TypeAdapterFactory {
+     private final ObjectConstructor<? extends Collection<E>> constructor;
+ 
+     public Adapter(
+-        Gson context,
+-        Type elementType,
+-        TypeAdapter<E> elementTypeAdapter,
+-        ObjectConstructor<? extends Collection<E>> constructor) {
+-      this.elementTypeAdapter =
+-          new TypeAdapterRuntimeTypeWrapper<>(context, elementTypeAdapter, elementType);
++        TypeAdapter<E> elementTypeAdapter, ObjectConstructor<? extends Collection<E>> constructor) {
++      this.elementTypeAdapter = elementTypeAdapter;
+       this.constructor = constructor;
+     }
+ 
+diff --git a/gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java b/gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java
+index 56de0ea3..6b0996e9 100644
+--- a/gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java
++++ b/gson/src/main/java/com/google/gson/internal/bind/MapTypeAdapterFactory.java
+@@ -132,15 +132,19 @@ public final class MapTypeAdapterFactory implements TypeAdapterFactory {
+     }
+ 
+     Type[] keyAndValueTypes = $Gson$Types.getMapKeyAndValueTypes(type, rawType);
+-    TypeAdapter<?> keyAdapter = getKeyAdapter(gson, keyAndValueTypes[0]);
+-    TypeAdapter<?> valueAdapter = gson.getAdapter(TypeToken.get(keyAndValueTypes[1]));
++    Type keyType = keyAndValueTypes[0];
++    Type valueType = keyAndValueTypes[1];
++    TypeAdapter<?> keyAdapter = getKeyAdapter(gson, keyType);
++    TypeAdapter<?> wrappedKeyAdapter =
++        new TypeAdapterRuntimeTypeWrapper<>(gson, keyAdapter, keyType);
++    TypeAdapter<?> valueAdapter = gson.getAdapter(TypeToken.get(valueType));
++    TypeAdapter<?> wrappedValueAdapter =
++        new TypeAdapterRuntimeTypeWrapper<>(gson, valueAdapter, valueType);
+     ObjectConstructor<T> constructor = constructorConstructor.get(typeToken);
+ 
+     @SuppressWarnings({"unchecked", "rawtypes"})
+     // we don't define a type parameter for the key or value types
+-    TypeAdapter<T> result =
+-        new Adapter(
+-            gson, keyAndValueTypes[0], keyAdapter, keyAndValueTypes[1], valueAdapter, constructor);
++    TypeAdapter<T> result = new Adapter(wrappedKeyAdapter, wrappedValueAdapter, constructor);
+     return result;
+   }
+ 
+@@ -157,15 +161,11 @@ public final class MapTypeAdapterFactory implements TypeAdapterFactory {
+     private final ObjectConstructor<? extends Map<K, V>> constructor;
+ 
+     public Adapter(
+-        Gson context,
+-        Type keyType,
+         TypeAdapter<K> keyTypeAdapter,
+-        Type valueType,
+         TypeAdapter<V> valueTypeAdapter,
+         ObjectConstructor<? extends Map<K, V>> constructor) {
+-      this.keyTypeAdapter = new TypeAdapterRuntimeTypeWrapper<>(context, keyTypeAdapter, keyType);
+-      this.valueTypeAdapter =
+-          new TypeAdapterRuntimeTypeWrapper<>(context, valueTypeAdapter, valueType);
++      this.keyTypeAdapter = keyTypeAdapter;
++      this.valueTypeAdapter = valueTypeAdapter;
+       this.constructor = constructor;
+     }
+ 

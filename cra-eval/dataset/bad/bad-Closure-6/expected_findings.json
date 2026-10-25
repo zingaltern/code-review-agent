@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/com/google/javascript/jscomp/TypeValidator.java",
+      "line": 366,
+      "category": "bug",
+      "keywords": [
+        "mismatch"
+      ],
+      "note": "人工确认：内建构造器类型赋值路径被改为 registerMismatch/else 分支，类型不匹配告警路径与接口方法豁免混用（Issue 635 清理过时 hack）"
+    },
+    {
+      "file": "src/com/google/javascript/rhino/jstype/FunctionType.java",
+      "line": 1019,
+      "category": "bug",
+      "keywords": [
+        "构造器"
+      ],
+      "note": "人工确认（M3 冒烟校准）：finding「FunctionType this 类型协变逻辑对构造器放宽导致子类型判断错误」锚 isConstructor() 豁免行；关键词取行为词\"构造器\""
+    }
+  ],
+  "negative_baits": []
+}

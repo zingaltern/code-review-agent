@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/org/jsoup/select/Selector.java",
+      "line": 139,
+      "category": "bug",
+      "keywords": [
+        "括号"
+      ],
+      "note": "人工确认（M3 冒烟校准）：finding 实际为 Selector.java:L139 [bug]「用 consumeToAny 替换 consumeSubQuery 丢失括号/方括号平衡处理」——关键词取行为词\"括号\"（\"方括号\"亦含该子串）"
+    }
+  ],
+  "negative_baits": []
+}

@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/org/mockito/internal/util/reflection/GenericMetadataSupport.java",
+      "line": 379,
+      "category": "bug",
+      "keywords": [
+        "generic"
+      ],
+      "note": "人工确认：未注册类型变量自身（registerTypeParametersOn），深桩泛型响应无法解析（#128）"
+    }
+  ],
+  "negative_baits": []
+}

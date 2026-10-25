@@ -1,0 +1,24 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 587,
+      "category": "bug",
+      "keywords": [
+        "top-level"
+      ],
+      "note": "人工确认：顶层值被要求先 checkLenient（仅数组/对象），与 RFC 7159 允许任意顶层值冲突（#773）"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+      "line": 625,
+      "category": "bug",
+      "keywords": [
+        "top-level"
+      ],
+      "note": "人工确认：writer 侧 beforeValue(root=false) 对非数组/对象顶层值直接抛异常，拒绝合法顶层标量（#773）"
+    }
+  ],
+  "negative_baits": []
+}

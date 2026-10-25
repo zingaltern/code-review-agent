@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "bad-Gson-4",
+  "set" : "bad",
+  "adversarial_subtype" : null,
+  "source" : "defects4j",
+  "project" : "Gson",
+  "bug_id" : 4,
+  "report_id" : "773",
+  "base_sha" : "af68d70cd55826fa7149effd7397d64667ca264c",
+  "head_sha" : "2ab776b5f5075bd98e7eb730cb03772f2b734b45",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "fb41ada9a4b031887b3daca59992b535cf3fea6266cea0102eda9dccee76bf04",
+    "crop_root" : "gson/src/main/java/com/google/gson/stream"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "bad-Gson-4"
+  },
+  "filtered_test_files" : [ "gson/src/test/java/com/google/gson/stream/JsonReaderTest.java", "gson/src/test/java/com/google/gson/stream/JsonWriterTest.java" ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-dataset",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "D4J Gson-4 逆向 patch（fixed→buggy），净化① 剔除 2 个测试文件节；变更 40 行"
+}

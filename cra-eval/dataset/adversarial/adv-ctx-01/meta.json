@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "adv-ctx-01",
+  "set": "adversarial",
+  "adversarial_subtype": "context",
+  "source": "synthetic",
+  "project": null,
+  "bug_id": null,
+  "report_id": null,
+  "base_sha": "5fab7bd6644fd76019ea1df8685fbf5aa759fd73",
+  "head_sha": "6372d255d07dbb6ac0a2e2b14940d5393470f188",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": "99c246c29009ae3de289d364bbffba532c03b911fd9b6f5608a707cde766b007",
+    "crop_root": "."
+  },
+  "review_request": {
+    "pr_number": 9201,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "adv-ctx-01"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "zcode-dataset",
+    "annotated_at": "2026-10-25"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": null,
+    "reason": null
+  },
+  "note": "context①会话超时：45 分钟同步导出 vs 企业会话 30 分钟上限（INC-2087/commit 9c41d2a）；相关 commit 由上下游路径 SessionPolicy 与 REVIEW.md 引用承载；M3 验收修复（协调者）：快照含 .git 三提交历史（head 时间锚定），meta.base/head SHA 与真实 git SHA 对齐——CrossChecker 变更史可检索"
+}

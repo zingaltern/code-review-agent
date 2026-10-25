@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/UnsafeAllocator.java",
+      "line": 48,
+      "category": "bug",
+      "keywords": [
+        "接口",
+        "抽象"
+      ],
+      "note": "人工确认（M3 冒烟校准）：finding 实际为 UnsafeAllocator.java:L45 [bug]「移除 assertInstantiable 使接口/抽象类的创建不再抛出明确异常」——关键词取中文行为词\"接口\"+\"抽象\""
+    }
+  ],
+  "negative_baits": []
+}

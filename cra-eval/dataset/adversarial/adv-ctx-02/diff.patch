@@ -1,0 +1,17 @@
+diff --git a/src/main/java/com/example/report/RefundTotals.java b/src/main/java/com/example/report/RefundTotals.java
+index e988f94..4dd99ab 100644
+--- a/src/main/java/com/example/report/RefundTotals.java
++++ b/src/main/java/com/example/report/RefundTotals.java
+@@ -10,7 +10,10 @@ public final class RefundTotals {
+   private RefundTotals() {}
+ 
+   public static BigDecimal total(List<BigDecimal> lines) {
+-    BigDecimal sum = lines.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
+-    return sum.setScale(2, RoundingMode.HALF_UP);
++    BigDecimal sum = BigDecimal.ZERO;
++    for (BigDecimal line : lines) {
++      sum = sum.add(line.setScale(2, RoundingMode.HALF_UP));
++    }
++    return sum;
+   }
+ }

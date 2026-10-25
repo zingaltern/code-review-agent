@@ -1,0 +1,34 @@
+{
+  "format_version" : 1,
+  "case_id" : "clean-Gson-259c477",
+  "set" : "clean",
+  "adversarial_subtype" : null,
+  "source" : "defects4j-host-history",
+  "project" : "Gson",
+  "bug_id" : null,
+  "report_id" : null,
+  "base_sha" : "5206d803dab1655472d655a0b6710b4622039a22",
+  "head_sha" : "259c477cecaea8e73cd19e5207ba63edc04157da",
+  "snapshot" : {
+    "file" : "repo_snapshot.tgz",
+    "sha256" : "c0159660f3e384b675dd34b4860f260fe156c261f4c61bb7ee7f787873ab712b",
+    "crop_root" : "gson/src/main/java/com/google/gson"
+  },
+  "review_request" : {
+    "pr_number" : 9001,
+    "repo_owner" : "cra-eval-fixture",
+    "repo_name" : "clean-Gson-259c477"
+  },
+  "filtered_test_files" : [ ],
+  "annotation" : {
+    "status" : "annotated",
+    "annotator" : "zcode-dataset",
+    "annotated_at" : "2026-10-25"
+  },
+  "recheck" : {
+    "status" : "pending",
+    "relabeled_to" : "",
+    "reason" : ""
+  },
+  "note" : "宿主项目历史良性 commit（快筛依据: 消息 'refactor: replace local StringWriter with StringBuilder (#28'）；recheck 复核通道待人工确认"
+}

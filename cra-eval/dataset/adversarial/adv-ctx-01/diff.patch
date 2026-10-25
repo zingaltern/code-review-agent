@@ -1,0 +1,12 @@
+diff --git a/src/main/java/com/example/jobs/ReportExportJob.java b/src/main/java/com/example/jobs/ReportExportJob.java
+--- a/src/main/java/com/example/jobs/ReportExportJob.java
++++ b/src/main/java/com/example/jobs/ReportExportJob.java
+@@ -6,7 +6,7 @@
+ public final class ReportExportJob {
+ 
+   /** 单次导出的等待上限。 */
+-  private static final Duration WAIT_LIMIT = Duration.ofMinutes(10);
++  private static final Duration WAIT_LIMIT = Duration.ofMinutes(45);
+ 
+   public void exportSync() throws Exception {
+     exporter.run(WAIT_LIMIT);

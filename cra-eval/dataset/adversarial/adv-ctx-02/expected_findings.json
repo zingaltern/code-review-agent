@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/report/RefundTotals.java",
+      "category": "context",
+      "keywords": [
+        "舍入",
+        "汇总"
+      ],
+      "note": "逐行 setScale 后再求和与 Known incidents 的矛盾：报表 totals 必须与明细同口径（先求和后舍入，INC-1932/commit 5b81e77）——代码孤立看合法，期望 CrossChecker 检出 category=context；M3 验收校准（协调者）：关键词改中文行为词（英文 session/timeout 与中文正文系统性漏配，M2 已入档教训）",
+      "line": 15
+    }
+  ],
+  "negative_baits": []
+}

@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/jobs/ReportExportJob.java",
+      "category": "context",
+      "keywords": [
+        "会话",
+        "超时"
+      ],
+      "note": "diff 本身无缺陷（合法超时常量），但与 REVIEW.md Known incidents 矛盾：企业会话硬上限 30 分钟（commit 9c41d2a），45 分钟同步导出必被中断——期望 CrossChecker 检出 category=context；M3 验收校准（协调者）：关键词改中文行为词（英文 session/timeout 与中文正文系统性漏配，M2 已入档教训）",
+      "line": 9
+    }
+  ],
+  "negative_baits": []
+}
