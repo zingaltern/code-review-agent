@@ -13,6 +13,7 @@ import java.util.List;
  * @param tokensOut 输出 token 总量
  * @param latencyMs run 总耗时（口径：进入 main → 最后一次写调用返回，08§6）
  * @param degradations 降级事件列表（如 verifier-retry-once；M0 事件为空或 schema-retry）
+ * @param securityPublished 已发布 security 类 finding 数（--security-block 退出码 3 判据，05§3）
  */
 public record ReviewStats(
     int findingsCandidate,
@@ -22,7 +23,8 @@ public record ReviewStats(
     long tokensIn,
     long tokensOut,
     long latencyMs,
-    List<String> degradations) {
+    List<String> degradations,
+    int securityPublished) {
 
   public ReviewStats {
     degradations = List.copyOf(degradations == null ? List.of() : degradations);

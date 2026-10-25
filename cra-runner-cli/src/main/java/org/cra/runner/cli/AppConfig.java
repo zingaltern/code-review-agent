@@ -1,0 +1,79 @@
+package org.cra.runner.cli;
+
+import org.cra.agents.api.AgentsAssembly;
+import org.cra.agents.api.GeneralReviewInput;
+import org.cra.agents.api.SubAgent;
+import org.cra.core.api.CoreAssembly;
+import org.cra.core.api.Orchestrator;
+import org.cra.git.api.GitPlatformAdapter;
+import org.cra.git.github.api.GitHubAssembly;
+import org.cra.git.github.api.GitHubComponents;
+import org.cra.llm.api.LlmAssembly;
+import org.cra.llm.api.LlmGateway;
+import org.cra.llm.api.LlmGatewayConfig;
+import org.cra.store.api.ReviewLedger;
+import org.cra.store.api.StoreAssembly;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * 组合根（10§3/10§4：M0–M3 全部对象图在 cra-runner-cli 装配；Spring 仅 DI/配置，@Autowired 零出现——R6/R7 守护）。各模块只经 api
+ * 装配工厂触达（internal 跨模块不可见，R3）。
+ */
+@Configuration
+class AppConfig {
+
+  private final CraConfig config;
+
+  AppConfig(CraConfig config) {
+    this.config = config;
+  }
+
+  @Bean
+  GitHubComponents gitHubComponents() {
+    return GitHubAssembly.createComponents(config.githubApi(), config.githubToken());
+  }
+
+  @Bean
+  GitPlatformAdapter gitPlatformAdapter(GitHubComponents components) {
+    return components.adapter();
+  }
+
+  @Bean
+  ReviewLedger reviewLedger(GitHubComponents components) {
+    // ADR-0005：GitHub 评论账本构造器注入 CommentSource（同一实现的双端口视图）
+    return StoreAssembly.createGitHubLedger(
+        components.commentSource(),
+        new org.cra.common.git.RepoRef(config.repoOwner(), config.repoName()));
+  }
+
+  @Bean
+  LlmGateway llmGateway() {
+    return LlmAssembly.createGateway(
+        new LlmGatewayConfig(
+            config.llmBaseUrl(),
+            config.llmModel(),
+            config.llmApiKey(),
+            LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
+            LlmGatewayConfig.DEFAULT_MAX_RETRIES,
+            30_000,
+            120_000,
+            1_000,
+            8_000));
+  }
+
+  @Bean
+  SubAgent<GeneralReviewInput> generalReviewer() {
+    return AgentsAssembly.createGeneralReviewer();
+  }
+
+  @Bean
+  Orchestrator orchestrator(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      SubAgent<GeneralReviewInput> reviewer) {
+    return CoreAssembly.createOrchestrator(
+        adapter, ledger, gateway, reviewer, java.nio.file.Path.of(config.runRoot()));
+  }
+}

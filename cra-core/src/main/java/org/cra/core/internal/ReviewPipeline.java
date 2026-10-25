@@ -102,7 +102,7 @@ public final class ReviewPipeline implements Orchestrator {
             runId,
             request,
             RunStatus.SKIPPED,
-            new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of()),
+            new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of(), 0),
             "commit "
                 + shortSha(request.headSha())
                 + " 已有完成标记（"
@@ -158,7 +158,8 @@ public final class ReviewPipeline implements Orchestrator {
                 outcome.tokensIn(),
                 outcome.tokensOut(),
                 System.currentTimeMillis() - start,
-                List.copyOf(degradations)),
+                List.copyOf(degradations),
+                0),
             "LLM 不可得: " + outcome.llmError());
       }
       boolean degraded = false;
@@ -201,7 +202,14 @@ public final class ReviewPipeline implements Orchestrator {
               outcome.tokensIn(),
               outcome.tokensOut(),
               System.currentTimeMillis() - start,
-              List.copyOf(degradations));
+              List.copyOf(degradations),
+              (int)
+                  publishable.stream()
+                      .filter(
+                          s ->
+                              s.finding().category()
+                                  == org.cra.common.finding.FindingCategory.SECURITY)
+                      .count());
       String summaryLine =
           String.format(
               "run=%s status=%s candidate=%d published=%d dedup=%d fallback=%d tokens=%d/%d",
@@ -221,7 +229,7 @@ public final class ReviewPipeline implements Orchestrator {
           runId,
           request,
           RunStatus.FAILED,
-          new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of()),
+          new ReviewStats(0, 0, 0, 0, 0, 0, System.currentTimeMillis() - start, List.of(), 0),
           "run failed: " + e.getMessage());
     }
   }
