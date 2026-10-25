@@ -78,6 +78,8 @@ public final class CliProcessRunner {
    * @param headSha head
    * @param depth 深度档位
    * @param stubBaseUrl stub 服务器地址（--github-api）
+   * @param workspace 本地仓库根（--workspace：CrossChecker 变更史 jgit 数据面 = 解包快照根；null 用被测进程 cwd）
+   * @param crosschecker 是否启用 CrossChecker（--crosschecker，M4f-lite；05§5 agents.crosschecker）
    * @param runRoot 该次 run 的 trace 根目录
    * @return 进程参数
    */
@@ -90,26 +92,38 @@ public final class CliProcessRunner {
       String headSha,
       String depth,
       String stubBaseUrl,
-      Path runRoot) {
-    return List.of(
-        cliJar.toString(),
-        "review",
-        "--repo",
-        owner + "/" + name,
-        "--pr",
-        String.valueOf(prNumber),
-        "--base",
-        baseSha,
-        "--head",
-        headSha,
-        "--depth",
-        depth,
-        "--token",
-        "cra-eval-stub-token",
-        "--github-api",
-        stubBaseUrl,
-        "--run-root",
-        runRoot.toString());
+      Path runRoot,
+      Path workspace,
+      boolean crosschecker) {
+    List<String> args =
+        new java.util.ArrayList<>(
+            List.of(
+                cliJar.toString(),
+                "review",
+                "--repo",
+                owner + "/" + name,
+                "--pr",
+                String.valueOf(prNumber),
+                "--base",
+                baseSha,
+                "--head",
+                headSha,
+                "--depth",
+                depth,
+                "--token",
+                "cra-eval-stub-token",
+                "--github-api",
+                stubBaseUrl,
+                "--run-root",
+                runRoot.toString()));
+    if (workspace != null) {
+      args.add("--workspace");
+      args.add(workspace.toString());
+    }
+    if (crosschecker) {
+      args.add("--crosschecker");
+    }
+    return List.copyOf(args);
   }
 
   /**

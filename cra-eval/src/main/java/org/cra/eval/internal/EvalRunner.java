@@ -47,7 +47,8 @@ public final class EvalRunner {
       String depth,
       Path cliJar,
       Path workDir,
-      Map<String, String> processEnv) {
+      Map<String, String> processEnv,
+      boolean crosschecker) {
     FixtureMeta meta = loaded.meta();
     Path runRoot = workDir.resolve("run-" + runIndex);
     List<DiffSplitter.PatchedFile> files = DiffSplitter.split(loaded.diffPatch());
@@ -68,7 +69,9 @@ public final class EvalRunner {
               meta.headSha(),
               depth,
               server.baseUrl(),
-              runRoot.toAbsolutePath());
+              runRoot.toAbsolutePath(),
+              loaded.snapshotRoot(),
+              crosschecker);
       int exitCode =
           invoker.invoke(
               args,

@@ -28,6 +28,12 @@ on:
         description: '仅跑指定用例（逗号分隔，空=全部）——断言校准取证时只跑修改的部分'
         required: false
         default: ''
+      crosschecker:
+        description: '启用 CrossChecker（M4f-lite：context 用例需要；同时透传被测 CLI 与门禁 context 判定）'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
       set:
         description: '集合过滤（L2 口径 = l2；L3 全量 = all；bad = 仅检出复核）'
         required: false
@@ -73,6 +79,7 @@ jobs:
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set ${{ inputs.set }} --k ${{ inputs.k }} --depth ${{ inputs.depth }} \
             --tier ${{ inputs.tier }} --commit "$GITHUB_SHA" --fail-on-red \
+            ${{ inputs.crosschecker == 'true' && '--crosschecker-enabled' || '' }} \
             ${{ inputs.cases != '' && format('--case {0}', inputs.cases) || '' }} \
             --work-dir cra-eval-work --json cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json \
             --sha256-out cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json.sha256 \

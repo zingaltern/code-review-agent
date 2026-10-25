@@ -69,7 +69,9 @@ public final class RunCommand {
       ensureEmptyDir(workDir);
       for (int k = 0; k < args.k(); k++) {
         index++;
-        CaseObservation obs = runner.runOnce(loaded, k, args.depth(), args.cliJar(), workDir, env);
+        CaseObservation obs =
+            runner.runOnce(
+                loaded, k, args.depth(), args.cliJar(), workDir, env, args.crosscheckerEnabled());
         observations.add(obs);
         ReportWriter.printLines(
             List.of(
