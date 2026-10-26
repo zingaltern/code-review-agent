@@ -5,6 +5,7 @@ import java.util.Optional;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
+import org.cra.common.git.ReviewKey;
 
 /**
  * 评审账本 SPI（02§5、05§1.5；11§2 稳定级）。读侧：commit 级幂等闸（只认 DONE/DEGRADED 完成标记，02§4.1）与 指纹级去重（已发布 finding
@@ -94,4 +95,91 @@ public interface ReviewLedger {
    */
   default void recordTemplateVersions(
       int prNumber, String runId, java.util.Map<String, String> versions) {}
+
+  // ---------- 键控扩展（M4c/M4d，05§1.3；SPI 只加 default 方法，11§4 第 1 条） ----------
+
+  /**
+   * 按账本键查询完成标记（PR 形态 = (repo, pr, commit)；push/夜间形态 = (repo, commit)）。
+   *
+   * <p>默认委托既有 PR 形态实现——只读评论账本与 SQLite 形态在 PR 模式下语义不变；无 PR 载体账本覆写本方法， 按载体端点作用域或标记内 commit 过滤。
+   *
+   * @param key 账本键
+   * @return 完成标记；不存在则 empty
+   */
+  default Optional<LedgerRunMarker> findCompletion(ReviewKey key) {
+    return findCompletion(key.prNumber(), key.commitSha());
+  }
+
+  /**
+   * 按账本键查询已发布 finding 指纹。
+   *
+   * @param key 账本键
+   * @return 标记列表（无 PR 载体为单载体评论，通常为空——载体为原子发布，不存在半截补发）
+   */
+  default List<LedgerFindingMarker> publishedFindings(ReviewKey key) {
+    return publishedFindings(key.prNumber());
+  }
+
+  /**
+   * 按账本键查询历史完成标记（过期收尾与收敛轮次数据面）。
+   *
+   * @param key 账本键
+   * @return 完成标记列表
+   */
+  default List<LedgerRunMarker> completedRuns(ReviewKey key) {
+    return completedRuns(key.prNumber());
+  }
+
+  /**
+   * 按账本键统计可疑标记（05§1.3 规则 2）。
+   *
+   * @param key 账本键
+   * @return 可疑标记数
+   */
+  default int suspectMarkerCount(ReviewKey key) {
+    return suspectMarkerCount(key.prNumber());
+  }
+
+  /**
+   * 按账本键取单条载体评论原文（无 PR 形态的载体是 commit comment / issue，id 为对应载体 id）。
+   *
+   * @param key 账本键
+   * @param commentId 载体 id
+   * @return 原文；不存在或形态不持久化原文为 empty
+   */
+  default Optional<LedgerComment> comment(ReviewKey key, long commentId) {
+    return comment(key.prNumber(), commentId);
+  }
+
+  /**
+   * 按账本键登记完成标记（可持久化形态覆写；GitHub 载体账本保持无操作——标记已内嵌载体正文）。
+   *
+   * @param key 账本键
+   * @param marker 完成标记
+   */
+  default void recordRunCompletion(ReviewKey key, LedgerRunMarker marker) {
+    recordRunCompletion(key.prNumber(), marker);
+  }
+
+  /**
+   * 按账本键登记已发布 finding（可持久化形态覆写；GitHub 载体账本保持无操作）。
+   *
+   * @param key 账本键
+   * @param marker finding 标记
+   */
+  default void recordPublishedFinding(ReviewKey key, LedgerFindingMarker marker) {
+    recordPublishedFinding(key.prNumber(), marker);
+  }
+
+  /**
+   * 按账本键登记模板版本。
+   *
+   * @param key 账本键
+   * @param runId run 标识
+   * @param versions 角色 → 模板版本
+   */
+  default void recordTemplateVersions(
+      ReviewKey key, String runId, java.util.Map<String, String> versions) {
+    recordTemplateVersions(key.prNumber(), runId, versions);
+  }
 }

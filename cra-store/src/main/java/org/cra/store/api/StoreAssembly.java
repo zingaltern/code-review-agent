@@ -21,6 +21,22 @@ public final class StoreAssembly {
   }
 
   /**
+   * 创建无 PR 形态的 GitHub 载体账本（M4c push = commit comment；M4d 夜间 = issue，05§1.3 键控扩展）。
+   *
+   * @param source 账本取数端口（cra-git-github 提供 fetchCommitBotComments / fetchIssueBotComments）
+   * @param repo 账本绑定的仓库
+   * @param mode 载体形态（COMMIT | ISSUE；PULL_REQUEST 走两参重载）
+   * @return ReviewLedger
+   */
+  public static ReviewLedger createGitHubLedger(
+      CommentSource source, RepoRef repo, org.cra.common.run.ReviewMode mode) {
+    if (mode == org.cra.common.run.ReviewMode.PULL_REQUEST) {
+      return createGitHubLedger(source, repo);
+    }
+    return new org.cra.store.internal.GitHubCarrierLedger(source, repo, mode);
+  }
+
+  /**
    * 创建本地 SQLite 账本（02§5 本地形态；M2 本地 pre-PR 模式组合根使用）。
    *
    * <p>注意：JDBC 驱动（org.xerial:sqlite-jdbc）由运行时 classpath 提供，cra-store 自身只依赖
