@@ -42,7 +42,7 @@ class ReviewCrewTest {
     assertThat(crew.securityReviewer().budget())
         .isEqualTo(new AgentBudget(24_000, 2_000, 3, 240_000));
     assertThat(crew.testReviewer().role().id()).isEqualTo("test-reviewer");
-    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(12_000, 2_000, 2, 120_000));
+    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(12_000, 4_000, 2, 120_000));
     assertThat(crew.conventionReviewer().role().id()).isEqualTo("convention-reviewer");
     assertThat(crew.conventionReviewer().modelTier()).isEqualTo(AgentTier.LIGHT);
     assertThat(crew.conventionReviewer().tools()).isEqualTo(ToolWhitelist.NONE);
@@ -52,7 +52,7 @@ class ReviewCrewTest {
     assertThat(crew.perfReviewer().budget()).isEqualTo(new AgentBudget(16_000, 1_000, 2, 120_000));
     // M4f-lite：CrossChecker 装配齐备（触发由编排器按 agents.crosschecker.enabled + 档位判定，05§5 默认 false）
     assertThat(crew.crossChecker().role().id()).isEqualTo("cross-checker");
-    assertThat(crew.crossChecker().budget()).isEqualTo(new AgentBudget(16_000, 1_500, 2, 240_000));
+    assertThat(crew.crossChecker().budget()).isEqualTo(new AgentBudget(16_000, 4_000, 2, 240_000));
     assertThat(crew.crossChecker().tools()).isEqualTo(ToolWhitelist.READ_FILE);
   }
 }

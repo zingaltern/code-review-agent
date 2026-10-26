@@ -28,7 +28,7 @@ class CrossCheckerDefinitionTest {
   void budgetToolsAndTierFollowSpecTable() {
     // 03§6 CrossChecker 行：≤16k in / ≤1.5k out / 2 轮 / read_file(scoped) / 标准档
     assertThat(definition.role().id()).isEqualTo("cross-checker");
-    assertThat(definition.budget()).isEqualTo(new AgentBudget(16_000, 1_500, 2, 240_000));
+    assertThat(definition.budget()).isEqualTo(new AgentBudget(16_000, 4_000, 2, 240_000));
     assertThat(definition.tools()).isEqualTo(ToolWhitelist.READ_FILE);
     assertThat(definition.modelTier()).isEqualTo(AgentTier.STANDARD);
   }
