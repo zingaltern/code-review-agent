@@ -1,11 +1,13 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
 > **v1.2**：指纹 v2 + 解析器规则 + 发布侧转义剥离；replies 双端点；workflow draft 过滤与 cli 分发。
 > **v1.2.1**：run 完成标记（status=DONE）；Summary 载体改 issue comment；滑窗容错（02§4.1）。
 > **v1.3.1**：§1.1 Finding 枚举补 **`context`**（v1.3 新增 CrossChecker 的输出类别未传播到 schema，其全部输出会被 schema 校验拒收——四轮里第三次同类病）；§4 补回滚职责注（修复 01§3.4 悬空引用）；§5 补 CrossChecker 配置项。
 > **v1.3.2**（M2 T2.9–T2.11 实现撞墙定点修订，2026-10-25）：§3 本地 CLI 实参补齐（--exec/--ledger-db/三档路由参数）、退出码新增 **4**（本地实跑失败，验收 8 的可判定信号）、本地解析语义（repo/head/token/LLM 可省、pr=0）；§1.4 补 `template_versions` 事件；§1.5 登记 `prompt_template_version` 落地。
+> **v1.4**（M4c push 直推 + M4d 夜间存量定点修订，2026-10-26）：§1.3 账本键控扩展（`ReviewKey` = repo + 形态 + (pr|commit)；无 PR 载体粒度 = 载体评论级；**标记格式不变**）；§1.4 trace 增 `mode`/`carrier` 字段；§2.1 SPI 增 commit/issue 载体 default 方法与 `LocalRepoContext.firstParentChain`；§2.4/§2.5 载体语义；§2.3 端点清单补 commit comment 与 issues 列表/创建；§3 CLI 增 `--push` / `sweep`；§4 触发边界表补 push 与夜间定时的平台事实；§6 token 权限补 push 形态 `contents: write`。
 
 ---
 
@@ -107,6 +109,23 @@
 4. **一致性校验**：标记内 `commit` 须与该评论所属 PR 的 run 上下文一致（run 上下文由同 PR 的 DONE 标记链提供，不依赖运行器侧记录）；标记 `file` 与评论正文 file:line 不一致 → 忽略并告警；
 5. **兜底分层**（对应 02§4.1）：解析不到任何有效标记 → 退回 **commit 级幂等闸**（有 DONE 才跳过），仅指纹级去重失效；**永不**退到"空账本全量重发"。
 
+**键控扩展（v1.4，M4c/M4d）：有 PR 形态 vs 无 PR 形态**
+
+标记格式**不变**（`v=2.1`、字段顺序、末位规则全部照旧）——只扩展"这份标记属于谁"的键：
+
+| 形态 | 账本键 `ReviewKey` | 载体 | 键的落地方式 |
+|---|---|---|---|
+| PR（M0–M3） | `repo + pr + commit` | inline review + Summary issue comment | 评论端点按 PR 作用域（05§2.2） |
+| push 直推（M4c） | `repo + commit`（pr=0） | 单条 commit comment | `GET /commits/{sha}/comments` 端点本身按 commit 作用域（05§2.4） |
+| 夜间存量（M4d） | `repo + commit`（被评审对象是历史 PR） | 单条 issue | 列出 bot 的 issue，按标记内 `commit=` 过滤（05§2.5） |
+
+约定【强制】：
+
+1. **无 PR 形态的账本粒度 = 载体评论级**：一条 commit comment / 一条 issue 只承载一个末位 run 完成标记（finding 详情在正文里是**渲染**，不生成 finding 级标记——否则同一评论内多个标记全部命中"仅认末位"规则被判 LEDGER_SUSPECT）。因此无 PR 形态**不做指纹级补发**：载体是单条原子发布，不存在"发布 3/8 条后崩溃"的半截状态；发布失败 = 无标记 = 整条重发（02§4.1 兜底分层）。
+2. **键的实现面**：`ReviewLedger` 只加 default 键控方法（`findCompletion(ReviewKey)` 等，11§4 第 1 条），PR 评论账本、commit 账本、issue 账本各自按载体取数；SQLite 形态按 `pr_number` 落库（无 PR 形态 pr=0，本地模式不使用）。
+3. **夜间 issue 的 PR 归属**：issue 载体不带 PR 号字段，按 head sha 过滤即完成键控（同一 commit 全局唯一）；issue 标题/正文携带 PR 号仅供人读，不参与幂等判定。
+4. **同一 PR 不同 head**：夜间形态每次评审的键随 head 变化，互不抑制（每个 commit 一次完整发布）；PR 形态的跨 commit 指纹去重语义不变（02§4.1）。
+
 ### 1.4 Trace 格式（NDJSON）
 
 > **v1.3.2**（2026-10-25，M2 隔离运行时事件先行定点修订，07§6.5）：注册 `tool_call` / `tool_result` / `agent_budget_exceeded` 事件与 `agent_output.termination` 字段；`dedup.match` 增 `in-run-exact` 取值（M2 跨代理精确去重合并，03§4.5 汇聚侧，T2.8 的验证侧分组复用同一键）。
@@ -145,11 +164,15 @@
 
 **v1.2 补登（M2 T2.4–T2.8 实现面）**：`convergence`（轮次与 diff-only 基点，03§5）、`merge`/`merge_summary`（run 内精确去重，03§4.5）、`verify`（三值判定计数，03§4.2）、`verify_retry`（验证不可得缩上下文重试，02§4.2）、`verify_followup`（INSUFFICIENT 受控补查，03§4.2）、`anti_anchor_check`（反锚定质控信号 PASS/FAIL，不阻断晋升）、`judge_start`/`judge`（仲裁与抽查复核，03§4.4）、`promotion`（晋升决定与抽查保险丝命中，03§4.3）。
 
+**v1.4 字段扩展（M4c/M4d）**：`run_start` 增 `mode`（`pull_request|commit|issue`）；`publish` 增 `mode` 与 `carrier`（PR 形态无 `carrier`；无 PR 形态为 `commit_comment|issue`，`comments` 为该载体条数 0/1）。事件名不变，旧消费方按缺省字段兼容。
+
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 
 ### 1.5 存储 Schema
 
 CI 形态无本地库（账本=GitHub）；本地/服务形态：`review_run`、`finding`、`verdict`、`published_comment`、`prompt_template_version` 表，`ReviewLedger` SPI 统一抽象（cra-store）。已落地：M1 建 review_run/finding；M2 T2.11 建 `prompt_template_version`（repo/pr_number/run_id/template_name/template_version，随 run 落库，05§1.2 prompt_template_versions 的持久化形态）；verdict/published_comment 随验证层/处置采集数据面落地。
+
+**M4b 服务形态（2026-10-26，ADR-0008）**：`cra-store` 新增 `PostgresLedger`（`StoreAssembly.createPostgresLedger`），五表全部建表（`db/postgres/ledger.sql`，手写幂等 DDL）；读写语义与 SQLite 形态一致——完成标记只认 DONE|DEGRADED、commit 匹配大小写不敏感、同 finding_id 重登记幂等（`ON CONFLICT ... DO UPDATE`）。`verdict`/`published_comment` 当前只有表与迁移，读取方随验证层/处置采集数据面接入（不建无读取方的投机 SPI 方法）。server 自有表 `webhook_delivery`（delivery 幂等键）、`report_attestation`（签发审计）、`schema_migration` 由 `db/postgres/server.sql` 创建。
 
 ## 2. GitPlatformAdapter SPI（v1.1 修订）
 
@@ -163,11 +186,17 @@ public interface GitPlatformAdapter {
     PrReviewResult postReview(PostReviewCommand cmd);                          // §2.2 锚定与降级
     CommentLedger fetchBotComments(RepoRef repo, int prNumber);                // 账本（§1.3）
     DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);   // 处置采集（06§1.1）
+
+    // v1.4（M4c/M4d，SPI 只加 default，11§4 第 1 条）：无 PR 载体的发布；
+    // 默认实现抛 UnsupportedOperationException = "不可得"显式拒绝（不得静默丢发布，§2.4/§2.5）
+    default Optional<Long> postCommitReview(PostCommitReviewCommand cmd);      // §2.4 commit comment
+    default Optional<Long> postIssueReview(PostIssueCommand cmd);              // §2.5 issue
 }
 
 public interface LocalRepoContext {                                            // v1.1 新增
     BlameResult blame(String path, int line, String sha);                      // jgit 实现
     Optional<String> localRepoRoot();                                          // CI checkout / 本地模式存在；纯 API 模式为空
+    default List<String> firstParentChain(String headSha, int limit);          // v1.4：push 基线解析（§2.4）；不可得=空列表
 }
 
 public interface CommentSource {                                               // v1 基线新增（ADR-0005，10§6）：账本与处置采集的取数端口
@@ -203,6 +232,27 @@ resolve 仍不采（GraphQL-only）。
 1. 提交前逐条校验：finding 的 (file, line) 必须落在该 PR diff 的某个 hunk 内；不满足者 `anchor_status=SUMMARY_FALLBACK`（正文进 Summary 列表）；
 2. 提交策略：整包一次 review 请求；收到 422 → 降级为逐条提交，仍失败的按 SUMMARY_FALLBACK；全部结果回写账本。
 
+### 2.4 push 直推载体：commit comment（v1.4，M4c）
+
+**平台事实**：commit comment（`POST /repos/{o}/{r}/commits/{sha}/comments`）只能锚定到 commit，**没有 diff 行级锚点**，因此 push 形态**不发布 inline 评论**。
+
+- **载体**：单条 commit comment，正文 = Summary（概述/分级列表/覆盖声明/截断与预算声明）+ 全部 finding 的**详情块**（描述/失败模式/证据/建议，与 inline 正文同构）+ 末位 run 完成标记（§1.3）；正文 `<!--` 照旧全量转义；
+- **锚定降级规则复用**：finding 的 (file,line) 仍过锚定校验并如实进 stats/trace，但发布分派不看 INLINE/SUMMARY_FALLBACK——无行级锚时全部 finding 走"详情进正文"一条路（Summary 中声明"载体无行级锚"）；锚定校验失败的 finding 不会因此丢失；
+- **base 语义**：head = 本次 push 的最新 commit；base = **上一完成 commit**——CLI 沿首父链（head 起，`--lookback` 默认 20 步）逐 commit 查 commit comment 账本，取最近带 DONE/DEGRADED 的 commit；首次评审取仓库初版 commit 作基线（根 commit 自身变更无父可对比，不计入）；`--base`/`--baseline` 可显式指定基线；本地仓库不可得时**拒绝启动**并要求显式基线（不猜）；
+- **幂等**：同一 head commit 重跑命中 DONE 闸 → 全量跳过，不重复发 commit comment（§1.3 键控）；
+- **过期收尾不适用**：commit comment 按 commit 隔离，没有"同 PR 旧 Summary"需要加取代前缀。
+
+### 2.5 夜间存量载体：issue（v1.4，M4d）
+
+**为什么不是 PR comment**：存量评审面向已合并/已关闭的历史 PR，向其评论流回帖没有通知与归属语义；产品形态是"一条可跟踪的 issue"。
+
+- **对象**：窗口内（`--since`，按 updated_at）最近的 `--max-prs` 个 PR（含 open/closed/merged），diff 语义与 PR 形态一致（base.sha..head.sha）；
+- **载体**：**每条被评审 PR 一个 issue**，标题 `[cra-nightly] PR #N <sha7> 存量评审`，正文 = Summary + 全部 finding 详情块 + 末位 run 完成标记（§1.3）；标签 `cra-nightly`（标签不存在时平台忽略，幂等不依赖标签）；
+- **汇总 issue**：一次夜间实际评审 ≥1 个 PR 时，另发一条 `[cra-nightly] 汇总 <date>`——范围、逐 PR 结果表、tokens、截断与降级声明；**汇总 issue 不承载账本标记**（它不是评审载体）。同日汇总已存在（按正文首行判定）则不重复发布；本次全部 PR 被幂等闸跳过时不发汇总（第二次夜间跑零产物）；
+- **范围/截断与失败声明**：汇总 issue 明确窗口内 PR 总数、本次评审数、被 `--max-prs` 截断数；汇总发布失败不回滚已发布的逐 PR issue，但进程以退出码 2 收尾（失败如实声明）；
+- **幂等**：DONE 闸按 `repo + head commit` 查 issue 载体账本（§1.3）；同一 head 已被任一夜间 issue 完整发布过 → 跳过；
+- **预算/截断声明复用**：逐 PR issue 内为完整 Summary（含覆盖声明、截断抑制数、降级事件），与 PR 形态同源同口径。
+
 ### 2.3 GitHub 实现要点（v1.2.1 端点清单修正）
 
 认证 `GITHUB_TOKEN`；读 `X-RateLimit-Remaining` 主动节流 + 指数退避（≤3 次）；inline comment 走 PR Review API（`commit_id` 绑定 head sha, event=COMMENT）；**Summary 走 issue comments 端点**（§2.2）；bot 身份识别按 token 对应 login（CI 内为 `github-actions[bot]`）。
@@ -217,6 +267,11 @@ resolve 仍不采（GraphQL-only）。
 | 账本拉取 | `GET /pulls/comments` + `GET /issues/{n}/comments` + review replies 线索 | bot 的 inline 与 Summary 分属不同端点，合并去重（v1.2 已定）；人类 reply 含 `in_reply_to_id`（v1.3.3 处置采集） |
 | 周报 PR 发现 | `GET /pulls?state=all&sort=updated&direction=desc` | T3.4 `listPullRequests`：按 updated_at 过滤窗口（05§2.1） |
 | Summary 满意度 | `GET /issues/comments/{id}/reactions` | T3.4：👍/👎 记 run 满意度，不参与单 finding 分类（06§1.1） |
+| push 载体发布 | `POST /repos/{o}/{r}/commits/{sha}/comments` | M4c：commit comment（无行级锚，§2.4） |
+| commit 账本拉取 | `GET /repos/{o}/{r}/commits/{sha}/comments` | M4c：键 = repo + commit；只认 bot 自身评论 |
+| 夜间 issue 发布 | `POST /repos/{o}/{r}/issues` | M4d：逐 PR issue + 汇总 issue（§2.5） |
+| 夜间 issue 账本/汇总判重 | `GET /repos/{o}/{r}/issues?state=all&sort=updated&direction=desc` | M4d：按 bot 登录名过滤；**排除 `pull_request` 条目**（/issues 同时返回 PR）；按标记内 commit 过滤 |
+| 夜间扫描范围 | `GET /pulls?state=all&sort=updated&direction=desc` | 复用 T3.4 `listPullRequests`；v1.4 起返回 `base.sha`（diff 基线，§2.5） |
 
 **resolve 状态为 GraphQL-only**：REST v3 锁定下不采、不操作（06§1.1、02§5）。
 
@@ -241,7 +296,22 @@ cra-eval report --repo zingaltern/code-review-agent --since 7d \
 cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled \
   --dataset cra-eval/dataset [--to-set bad|clean] [--case-id ID] [--annotator NAME] [--reason TEXT] \
   [--diff-file PATH] [--snapshot-dir DIR] [--artifact-root DIR] [--token TOKEN] [--api-base URL]
+
+# push 直推评审（M4c，05§2.4；无 PR，载体 = commit comment）
+cra review --push --repo "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
+  [--base SHA | --baseline SHA] [--lookback 20] --depth standard --token "$GITHUB_TOKEN"
+
+# 夜间存量评审（M4d，05§2.5；产出 issue，扫描范围可配）
+cra sweep --repo owner/name --since 30d --max-prs 10 --depth quick --token "$GITHUB_TOKEN" [--dry-run]
 ```
+
+**push 形态参数语义（v1.4）**：`--push` 与 `--pr`/`--local` 互斥；`--base` 省略时由 CLI 沿首父链查 commit
+comment 账本解析"上一完成 commit"（`--lookback` 默认 20；首次 = 仓库初版），`--baseline` 是 `--base` 的同义显式
+基线；本地仓库不可得（纯 API 模式）且未给显式基线 → 退出码 2（不猜）。`--dry-run` 全程零写。
+
+**sweep 参数语义（v1.4）**：`--since` 形如 `7d`/`12h`/`2w`（默认 30d，按 PR updated_at 过滤）；`--max-prs`
+正整数（默认 10）；深度默认 quick（夜间批量成本纪律，06§4）。退出码：0 = 正常（含无可评审 PR、全幂等跳过、
+部分失败已如实进汇总）；2 = 自身故障或存在评审失败（逐 PR 故障隔离，不中断整轮）。
 
 `report` 参数语义：`--since` 支持 `7d`/`12h`/`2w`；token 取 `--token` → `GITHUB_TOKEN` → `GH_TOKEN`；
 无 token 且无 `--ledger-fixture` → 退出码 2。`--ledger-fixture` 为离线账本回放（测试/脱敏样例，报告
@@ -268,17 +338,38 @@ cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
 cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.sha256 \
   --tier l2 --expect-commit "$REPORT_COMMIT"
 
+# M4b 服务端签名路径（04§2.4、ADR-0008）：报告摘要由 cra-server 签发 HMAC 信封
+# 密钥只从环境变量/文件读（默认 CRA_REPORT_SIGNING_KEY；--signing-key-file 用于本地演示）
+cra-eval verify --report eval/l2/report.json --signature eval/l2/report.json.sig \
+  --tier l2 --expect-commit "$REPORT_COMMIT"
+
 # 离线重判（阈值/检查项变更后用同一批观测重算门禁；不重跑 LLM）
 cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256-out PATH]
 ```
 
-`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` 或 `--sha256-file <path>`（二选一）、`--tier`、`--expect-commit`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
+`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` / `--sha256-file <path>` / `--signature <path>`（至少一个）、`--tier`、`--expect-commit`；签名模式下追加 `--signing-key-env`（默认 `CRA_REPORT_SIGNING_KEY`）或 `--signing-key-file`，可选 `--signing-key-id`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
 
 退出码：`0` 正常完成或 verify/gate 通过；`2` 自身故障（参数/数据集/被测对象启动失败）；**`5` 门禁红或 verify 校验失败**（`--fail-on-red` / `gate` 生效时；CI 的 L1/L2 job 以此判定，04§2.4）。门禁结论同时写入 JSON 报告的 `gate` 字段（`passed` + 逐项 `checks`），文本报告头部输出同一结论。`gate` 重判不修改源报告；`--json-out` 另行落盘重判结果（含新 gate 与哈希），用于阈值变更后的取证（评测重跑范围纪律：只重判、不整轮重跑）。
 
 ## 4. GitHub Actions 集成（v1.2：draft 过滤 + 分发方案 + 限制声明）
 
 **已知平台限制（显式声明，见 02§5 触发边界表）**：冲突 PR（mergeable=conflicting）的 `pull_request` workflow **不触发**（GitHub 官方行为）——该场景静默无评审，冲突解决后的 synchronize 会正常触发；fork PR 无 secrets 访问（当前个人仓库无碍，多协作者时引入 App token）。
+
+**M4c/M4d 触发补充（v1.4）**：
+
+| 场景 | 行为 | 处置（workflow / CLI） |
+|---|---|---|
+| 直推受保护分支 | `push` workflow 触发（`branches: [main]` 为分支过滤；多分支在此追加） | `cra review --push`；base 由 CLI 解析为上一完成 commit（§2.4） |
+| merge commit | 无独立变更语义，重复评审合并结果只会产生噪声 | workflow `if` 跳过 `Merge ` / `Merge pull request` 前缀的 head commit |
+| bot 自己的提交（自举循环） | 本组件不给自己回帖/反复评审 | workflow `if` 跳过 `github-actions[bot]` 与 actor 以 `[bot]` 结尾的提交 |
+| push 并发 | 同一 ref 连续直推 | `concurrency.group` 含 ref，`cancel-in-progress=false`（串行；被掐断的 run 无 DONE，重跑会重发） |
+| 夜间定时 | 每日一次批量存量评审（默认 UTC 18:00 / Asia/Shanghai 02:00）+ 支持 `workflow_dispatch` 手动补跑 | 独立 workflow：`contents: read` + `pull-requests: read` + `issues: write`；`cra sweep --since 30d --max-prs 10 --depth quick` |
+| 夜间并发 | 同仓库多实例会重复评审同一批 PR | `concurrency.group: review-nightly` 串行；幂等闸兜底（同 head 已有 DONE 则跳过） |
+
+workflow 实现见 `.github/workflows/code-review-agent.yml`（`review` / `review-push` 两个 job）与
+`.github/workflows/code-review-agent-nightly.yml`（`sweep`）。下方 M0 示例只示 PR job，push job 的差异是：
+`contents: write`（commit comment 权限）、`--push --head "$GITHUB_SHA"`（无 `--pr`/`--base`）、trace artifact
+名带 `push-<sha>`。
 
 **回滚兜底职责（v1.3.1 补注，兑现 01§3.4"先兜底再减负"约束的引用）**：快速回滚能力属**部署侧**而非本组件——启用本评审组件削减人工逐行审查的仓库，应同时配置：分支保护 + 按风险分级的人工审批（M4a 建议输出）、合并队列、必要时特性开关；本组件不提供也不假装提供回滚能力。
 
@@ -372,6 +463,6 @@ cra:
 - [ ] **账本解析只认末位/代码块外/版本合法的标记**；正文 `<!--` 全量转义；解析兜底退 commit 级闸、永不全量重发（05§1.3）；
 - [ ] **pre-PR 本地模式实跑构建/测试并展示真实输出**，不以"声称完成"代替（07 T2.10）；
 - [ ] 处置采集不依赖 GraphQL-only 的 resolve 状态（05§2.3、06§1.1）；
-- [ ] GitHub token 最小权限（contents:read + pull-requests:write）；
+- [ ] GitHub token 最小权限：PR 形态 `contents:read + pull-requests:write`；push 形态另需 `contents:write`（commit comment 载体，§2.4）；夜间形态 `contents:read + pull-requests:read + issues:write`（§2.5）——按 job 分别授予，不整仓库放宽；
 - [ ] dry-run 模式全程零写操作（单测断言零写调用）；
 - [ ] diff/文件内容只发往配置的 LLM 端点，不落第三方。

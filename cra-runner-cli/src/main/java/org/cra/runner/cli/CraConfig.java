@@ -1,5 +1,7 @@
 package org.cra.runner.cli;
 
+import org.cra.common.run.ReviewMode;
+
 /**
  * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量，密钥只从环境变量读， 05§6）。组装期校验：缺项/非法值即 CraConfigException →
  * 退出码 2（05§3）。
@@ -42,6 +44,8 @@ package org.cra.runner.cli;
  * @param crossCheckerModes 模式开关（--crosschecker-modes / CRA_CROSSCHECKER_MODES，默认 assumption,sniff）
  * @param crossCheckerHistoryWeeks 上下游变更史回溯周数（--crosschecker-history-weeks /
  *     CRA_CROSSCHECKER_HISTORY_WEEKS，默认 8）
+ * @param reviewMode 发布形态（M4c --push = COMMIT；M4d sweep = ISSUE；默认 PULL_REQUEST，05§2.2）
+ * @param pushLookback push 模式沿首父链回溯查找"上一完成 commit"的最大步数（--lookback，默认 20，05§2.4）
  */
 public record CraConfig(
     String repoOwner,
@@ -77,7 +81,124 @@ public record CraConfig(
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
-    String llmTemperature) {
+    String llmTemperature,
+    int pushLookback,
+    ReviewMode reviewMode) {
+
+  /**
+   * M4c 前形态兼容构造（发布形态 = PR）。
+   *
+   * @param repoOwner 仓库属主
+   * @param repoName 仓库名
+   * @param prNumber PR 编号
+   * @param baseSha 基线 sha
+   * @param headSha 目标 sha
+   * @param depth 深度档位
+   * @param dryRun dry-run
+   * @param securityBlock --security-block
+   * @param githubToken GitHub token
+   * @param githubApi GitHub API 根
+   * @param llmApiKey LLM 密钥
+   * @param llmBaseUrl LLM 端点
+   * @param llmModel 模型名
+   * @param runRoot trace 落盘根
+   * @param workspace 本地工作区根
+   * @param largeDiffLines 大 diff 降档线
+   * @param hardCapLines 硬上限
+   * @param nitBudget nit 预算默认
+   * @param runTotalTokens run 级预算
+   * @param degradeAtFirst 第一降档阈值
+   * @param degradeAtSecond 第二降档阈值
+   * @param publishUnverified UNVERIFIED 发布策略
+   * @param spotCheckPercent 抽查保险丝百分比
+   * @param local 本地 pre-PR 模式
+   * @param execCommand 本地实跑命令
+   * @param ledgerDb 本地账本
+   * @param llmModelStrong strong 档模型
+   * @param llmModelLight light 档模型
+   * @param fallbackChain 降级链
+   * @param rpm per-model RPM
+   * @param crossCheckerEnabled CrossChecker 总开关
+   * @param crossCheckerModes 模式开关
+   * @param crossCheckerHistoryWeeks 变更史回溯周数
+   * @param llmTemperature 采样温度
+   */
+  public CraConfig(
+      String repoOwner,
+      String repoName,
+      int prNumber,
+      String baseSha,
+      String headSha,
+      String depth,
+      boolean dryRun,
+      boolean securityBlock,
+      String githubToken,
+      String githubApi,
+      String llmApiKey,
+      String llmBaseUrl,
+      String llmModel,
+      String runRoot,
+      String workspace,
+      int largeDiffLines,
+      int hardCapLines,
+      int nitBudget,
+      long runTotalTokens,
+      double degradeAtFirst,
+      double degradeAtSecond,
+      String publishUnverified,
+      int spotCheckPercent,
+      boolean local,
+      String execCommand,
+      String ledgerDb,
+      String llmModelStrong,
+      String llmModelLight,
+      String fallbackChain,
+      String rpm,
+      boolean crossCheckerEnabled,
+      String crossCheckerModes,
+      int crossCheckerHistoryWeeks,
+      String llmTemperature) {
+    this(
+        repoOwner,
+        repoName,
+        prNumber,
+        baseSha,
+        headSha,
+        depth,
+        dryRun,
+        securityBlock,
+        githubToken,
+        githubApi,
+        llmApiKey,
+        llmBaseUrl,
+        llmModel,
+        runRoot,
+        workspace,
+        largeDiffLines,
+        hardCapLines,
+        nitBudget,
+        runTotalTokens,
+        degradeAtFirst,
+        degradeAtSecond,
+        publishUnverified,
+        spotCheckPercent,
+        local,
+        execCommand,
+        ledgerDb,
+        llmModelStrong,
+        llmModelLight,
+        fallbackChain,
+        rpm,
+        crossCheckerEnabled,
+        crossCheckerModes,
+        crossCheckerHistoryWeeks,
+        llmTemperature,
+        DEFAULT_PUSH_LOOKBACK,
+        ReviewMode.PULL_REQUEST);
+  }
+
+  /** push 基线解析默认回溯步数（05§2.4）。 */
+  public static final int DEFAULT_PUSH_LOOKBACK = 20;
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
@@ -178,7 +299,9 @@ public record CraConfig(
         false,
         "assumption,sniff",
         8,
-        null);
+        null,
+        DEFAULT_PUSH_LOOKBACK,
+        ReviewMode.PULL_REQUEST);
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -218,6 +341,54 @@ public record CraConfig(
         crossCheckerEnabled(),
         crossCheckerModes(),
         crossCheckerHistoryWeeks(),
-        llmTemperature());
+        llmTemperature(),
+        pushLookback(),
+        reviewMode());
+  }
+
+  /**
+   * push 直推 base 解析回填（M4c：上一完成 commit / 可配置基线，05§2.4）。
+   *
+   * @param resolvedBase 解析出的基线 sha
+   * @return 回填后的配置
+   */
+  public CraConfig withResolvedPushBase(String resolvedBase) {
+    return new CraConfig(
+        repoOwner(),
+        repoName(),
+        prNumber(),
+        resolvedBase,
+        headSha(),
+        depth(),
+        dryRun(),
+        securityBlock(),
+        githubToken(),
+        githubApi(),
+        llmApiKey(),
+        llmBaseUrl(),
+        llmModel(),
+        runRoot(),
+        workspace(),
+        largeDiffLines(),
+        hardCapLines(),
+        nitBudget(),
+        runTotalTokens(),
+        degradeAtFirst(),
+        degradeAtSecond(),
+        publishUnverified(),
+        spotCheckPercent(),
+        local(),
+        execCommand(),
+        ledgerDb(),
+        llmModelStrong(),
+        llmModelLight(),
+        fallbackChain(),
+        rpm(),
+        crossCheckerEnabled(),
+        crossCheckerModes(),
+        crossCheckerHistoryWeeks(),
+        llmTemperature(),
+        pushLookback(),
+        reviewMode());
   }
 }

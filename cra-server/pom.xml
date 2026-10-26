@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.cra</groupId>
+    <artifactId>code-review-agent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>cra-server</artifactId>
+  <name>cra-server</name>
+  <description>M4b webhook 常驻服务（第二组合根）：GitHub 验签 + 有界队列 + PostgreSQL 账本 + 服务端报告签名</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-llm</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git-github</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-context</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-agents</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-store</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-core</artifactId>
+    </dependency>
+    <!-- Spring 仅组合根（10§5 R6 扩展集：cra-server 为第二组合根，ADR-0008） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+    <!-- HikariCP + spring-jdbc：PG 账本连接池（cra-store 只依赖 java.sql） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <!-- 结构化 JSON 日志（09§5，与 CLI 同实现） -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>net.logstash.logback</groupId>
+      <artifactId>logstash-logback-encoder</artifactId>
+      <version>${logstash-logback-encoder.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <version>${spring-boot.version}</version>
+        <configuration>
+          <!-- 可执行 fat jar 以 classifier 附加：主 artifact 保持普通 jar，供 cra-archtest 的类视图导入
+               （repackaged jar 的类在 BOOT-INF/classes 下，ArchUnit 无法导入） -->
+          <classifier>exec</classifier>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

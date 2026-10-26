@@ -33,9 +33,10 @@ class ArchitectureRulesTest {
           Map.entry("store", "org.cra.store"),
           Map.entry("core", "org.cra.core"),
           Map.entry("cli", "org.cra.runner.cli"),
-          Map.entry("eval", "org.cra.eval"));
+          Map.entry("eval", "org.cra.eval"),
+          Map.entry("server", "org.cra.server"));
 
-  /** 10§2 矩阵：行 → 允许依赖的列（common 与自身恒允许，不列；M4 的 cra-server 未建，无行）。 */
+  /** 10§2 矩阵：行 → 允许依赖的列（common 与自身恒允许，不列；M4b 起 cra-server 行生效）。 */
   private static final Map<String, Set<String>> MATRIX_ALLOWED =
       Map.ofEntries(
           Map.entry("llm", Set.of()),
@@ -46,9 +47,11 @@ class ArchitectureRulesTest {
           Map.entry("store", Set.of()),
           Map.entry("core", Set.of("llm", "git", "context", "agents", "store")),
           Map.entry("cli", Set.of("llm", "git", "git-gh", "context", "agents", "store", "core")),
-          Map.entry("eval", Set.of("git", "git-gh", "store")));
+          Map.entry("eval", Set.of("git", "git-gh", "store")),
+          Map.entry(
+              "server", Set.of("llm", "git", "git-gh", "context", "agents", "store", "core")));
 
-  /** 含 internal 包、适用 R3 的模块（10§3：common 与 cli 免二分；archtest 无主代码）。 */
+  /** 含 internal 包、适用 R3 的模块（10§3：common/cli/server 免二分；archtest 无主代码）。 */
   private static final List<String> MODULES_WITH_INTERNAL =
       List.of("llm", "git", "git-gh", "context", "agents", "store", "core", "eval");
 
@@ -71,20 +74,24 @@ class ArchitectureRulesTest {
             .definedBy("org.cra.runner.cli..")
             .layer("Eval")
             .definedBy("org.cra.eval..")
+            .layer("Server")
+            .definedBy("org.cra.server..")
             .whereLayer("Shell")
             .mayNotBeAccessedByAnyLayer()
             .whereLayer("Eval")
             .mayNotBeAccessedByAnyLayer()
+            .whereLayer("Server")
+            .mayNotBeAccessedByAnyLayer()
             .whereLayer("Core")
-            .mayOnlyBeAccessedByLayers("Shell")
+            .mayOnlyBeAccessedByLayers("Shell", "Server")
             .whereLayer("Agents")
-            .mayOnlyBeAccessedByLayers("Core", "Shell")
+            .mayOnlyBeAccessedByLayers("Core", "Shell", "Server")
             .whereLayer("Store")
-            .mayOnlyBeAccessedByLayers("Core", "Shell", "Eval")
+            .mayOnlyBeAccessedByLayers("Core", "Shell", "Eval", "Server")
             // Infra 对 Eval 放开 = ADR-0005（eval→git(+git-gh) 仅 api 取数）；eval→llm/context
             // 仍由矩阵逐对规则封死（10§2 单一事实源，10§5 R1 片段未含 Eval 的差异按矩阵修）
             .whereLayer("Infra")
-            .mayOnlyBeAccessedByLayers("Core", "Shell", "Eval");
+            .mayOnlyBeAccessedByLayers("Core", "Shell", "Eval", "Server");
     layered.check(importedClasses());
   }
 
@@ -159,11 +166,11 @@ class ArchitectureRulesTest {
   void r6SpringOnlyInCompositionRoot() {
     noClasses()
         .that()
-        .resideOutsideOfPackage("org.cra.runner.cli..")
+        .resideOutsideOfPackages("org.cra.runner.cli..", "org.cra.server..")
         .should()
         .dependOnClassesThat()
         .resideInAPackage("org.springframework..")
-        .because("10§5 R6：Spring 仅 DI/配置且仅在组合根（01§5.1、02§7）")
+        .because("10§5 R6：Spring 仅 DI/配置且仅在组合根（cra-runner-cli / cra-server，ADR-0008）")
         .check(importedClasses());
   }
 
