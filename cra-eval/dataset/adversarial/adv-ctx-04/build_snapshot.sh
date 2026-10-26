@@ -23,7 +23,7 @@ HEAD_DATE="2026-10-20T12:00:00+08:00"
 
 ROOT_MSG="chore: initial export service skeleton"
 CONSTRAINT_MSG="fix: make export async outside session with notify on completion (INC-2201, ref 8c2e91a)"
-HEAD_MSG="refactor: simplify export call chain to submit-and-wait; add payload codec"
+HEAD_MSG="refactor: add direct sync export entry for legacy callers; add payload codec"
 
 EMIT_SHAS=0
 if [ "${1:-}" = "--emit-shas" ]; then

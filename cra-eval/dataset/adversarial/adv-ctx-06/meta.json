@@ -7,8 +7,8 @@
   "project": null,
   "bug_id": null,
   "report_id": null,
-  "base_sha": "1b03bca1d2332f558b1d13e8e281e265cba3e502",
-  "head_sha": "a478a6dc62265c77971caeb42a1e31eb023962b8",
+  "base_sha": "9d68ebac0bd5f048c2f69608e3cebf3968c934fd",
+  "head_sha": "a0afc87194b0255955fd63e955a64ebdce203fca",
   "snapshot": {
     "file": "repo_snapshot.tgz",
     "sha256": null,
@@ -30,5 +30,5 @@
     "relabeled_to": null,
     "reason": null
   },
-  "note": "context⑥时区口径（M4 context 扩充）：报表日期存储口径 UTC→Asia/Shanghai vs 矛盾 commit 1b03bca1 规定的一律 UTC 存储（INC-2210，其 diff 内含 STORAGE_ZONE=UTC 与绑定注释，触及 PR 变更文件 DailyReportBuilder.java 与 ReportDateUtil.java）；diff 本身无缺陷（显式时区孤立看合法）；REVIEW.md 在 base/head 一致、不随 PR 变更"
+  "note": "context⑥时区口径（M4 context 扩充）：报表日期存储口径 UTC→Asia/Shanghai vs 矛盾 commit 9d68ebac 规定的一律 UTC 存储（INC-2210，其 diff 内含 STORAGE_ZONE=UTC 与绑定注释，触及 PR 变更文件 DailyReportBuilder.java 与 ReportDateUtil.java）；diff 本身无缺陷（显式时区孤立看合法）；REVIEW.md 在 base/head 一致、不随 PR 变更"
 }

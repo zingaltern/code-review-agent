@@ -7,8 +7,8 @@
   "project": null,
   "bug_id": null,
   "report_id": null,
-  "base_sha": "757de6a7d083405e9fcf53eb40a89d3c1eccef43",
-  "head_sha": "99a9e4b7b757487c963959c0a43c162e5b31e641",
+  "base_sha": "1a8843d7457a979c13a3498a5cf580cd3727ccd4",
+  "head_sha": "0c3e3c55883992c2165c84958b752b91fcbc5dea",
   "snapshot": {
     "file": "repo_snapshot.tgz",
     "sha256": null,
@@ -30,5 +30,5 @@
     "relabeled_to": null,
     "reason": null
   },
-  "note": "context③分页默认值（M4 context 扩充）：默认 page size 20→50 vs 下游 UI 按 20 分页的对外契约（INC-2145/矛盾 commit 757de6a 引入 DEFAULT_PAGE_SIZE=20 与绑定注释，触及 PR 变更文件 PageRequest.java）；diff 本身无缺陷（孤立看 50 合法）；REVIEW.md 在 base/head 一致、不随 PR 变更"
+  "note": "context③分页默认值（M4 context 扩充）：默认 page size 20→50 vs 下游 UI 按 20 分页的对外契约（INC-2145/矛盾 commit 1a8843d7 引入 DEFAULT_PAGE_SIZE=20 与绑定注释，触及 PR 变更文件 PageRequest.java）；diff 本身无缺陷（孤立看 50 合法）；REVIEW.md 在 base/head 一致、不随 PR 变更"
 }

@@ -3,7 +3,7 @@ package com.example.pagination;
 /** 分页请求（页码从 1 起）。 */
 public final class PageRequest {
 
-  /** 对外默认页大小：企业前端控件按 20 分页渲染，禁止静默调整（INC-2145/commit 3a7f5c2，调整须先过 UI 联调评审）。 */
+  /** 对外默认页大小。 */
   public static final int DEFAULT_PAGE_SIZE = 50;
 
   private final int page;

@@ -30,7 +30,7 @@ public final class OrderStatsDto {
     this.totalAmount = totalAmount;
     this.refundAmount = refundAmount;
     this.avgOrderAmount = avgOrderAmount;
-    this.topSkuIds = List.copyOf(topSkuIds);
+    this.topSkuIds = topSkuIds == null ? List.of() : List.copyOf(topSkuIds);
   }
 
   /** 组装单日订单统计。 */

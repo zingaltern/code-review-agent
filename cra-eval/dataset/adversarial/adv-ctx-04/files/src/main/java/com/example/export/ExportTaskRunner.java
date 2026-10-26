@@ -1,15 +1,15 @@
 package com.example.export;
 
-/** 导出任务执行器。 */
+/** 导出任务执行器（会话外执行，commit 8c2e91a）。 */
 public final class ExportTaskRunner {
 
-  /** 提交任务到执行队列，返回任务号。 */
+  /** 提交任务到会话外执行队列，立即返回任务号。 */
   public String submit(String reportId) {
     return "task-" + reportId;
   }
 
-  /** 等待任务完成并返回导出文件路径。 */
-  public String await(String taskId) throws Exception {
-    return "/data/exports/" + taskId + ".xlsx";
+  /** 直接执行导出并返回文件路径（同步语义：本次调用内完成工作）。 */
+  public String runAndWait(String reportId) {
+    return "/data/exports/" + reportId + ".xlsx";
   }
 }
