@@ -115,7 +115,7 @@
 {"ts":"…","run_id":"…","event":"run_start","repo":"…","pr":42,"depth":"standard","dry_run":false}
 {"ts":"…","run_id":"…","event":"gate_check","gate":"commit","hit":false}
 {"ts":"…","run_id":"…","event":"agent_start","agent":"bug-hunter/boundary","brief_path":"…"}
-{"ts":"…","event":"agent_output","agent":"…","findings":3,"termination":"completed","tokens":{…},"latency_ms":8200}
+{"ts":"…","event":"agent_output","agent":"…","findings":3,"findings_brief":["bug src/Foo.java:L4 …"],"termination":"completed","tokens":{…},"latency_ms":8200}
 {"ts":"…","event":"tool_call","agent":"…","tool":"read_file","turn":2,"allowed":true}
 {"ts":"…","event":"tool_result","agent":"…","tool":"read_file","chars":1200}
 {"ts":"…","event":"agent_budget_exceeded","agent":"…","limit":"turns|time|input-tokens|output-tokens"}
