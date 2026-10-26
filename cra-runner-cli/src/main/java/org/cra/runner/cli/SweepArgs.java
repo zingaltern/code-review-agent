@@ -129,7 +129,8 @@ final class SweepArgs {
             historyWeeks,
             blankToNull(temperature),
             CraConfig.DEFAULT_PUSH_LOOKBACK,
-            ReviewMode.ISSUE);
+            ReviewMode.ISSUE,
+            SignoffConfig.defaults());
     return new Parsed(config, since, maxPrs);
   }
 

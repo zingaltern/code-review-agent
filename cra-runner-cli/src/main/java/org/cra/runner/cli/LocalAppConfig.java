@@ -98,6 +98,12 @@ class LocalAppConfig {
   }
 
   @Bean
+  org.cra.core.api.SignoffOptions signoffOptions() {
+    // 05§5 agents.signoff（M4a）：本地形态同样生成签字建议（测试状态由实跑结果覆盖）
+    return config.signoff().toOptions();
+  }
+
+  @Bean
   Orchestrator orchestrator(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
@@ -107,6 +113,7 @@ class LocalAppConfig {
       SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
       org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
+      org.cra.core.api.SignoffOptions signoffOptions,
       LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
         adapter,
@@ -118,6 +125,7 @@ class LocalAppConfig {
         Path.of(config.runRoot()),
         pipelineOptions,
         localRepoContext,
-        crossCheckerOptions);
+        crossCheckerOptions,
+        signoffOptions);
   }
 }

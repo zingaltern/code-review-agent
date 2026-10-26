@@ -40,6 +40,10 @@ import org.cra.common.run.Depth;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
+import org.cra.common.signoff.RiskTier;
+import org.cra.common.signoff.SignoffContext;
+import org.cra.common.signoff.TestsStatus;
+import org.cra.core.api.SignoffOptions;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.store.api.ReviewLedger;
 import org.junit.jupiter.api.BeforeEach;
@@ -1030,5 +1034,141 @@ class ReviewPipelineTest {
             org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
             org.mockito.ArgumentMatchers.anyString(),
             org.mockito.ArgumentMatchers.anyMap());
+  }
+
+  // ---------- M4a：风险分级与签字建议（07§5；01§3.4） ----------
+
+  private static DiffResult highRiskDiff() {
+    return new DiffResult(
+        BASE,
+        HEAD,
+        List.of(
+            new DiffFile(
+                "src/main/java/com/acme/auth/AuthService.java",
+                null,
+                "modified",
+                PATCH,
+                List.of(new DiffHunk(1, 5, 1, 6)))),
+        List.of(new org.cra.common.git.CommitSummary("c1", "fix: auth")));
+  }
+
+  private ReviewPipeline signoffPipeline(SignoffOptions options) {
+    return new ReviewPipeline(
+        adapter,
+        ledger,
+        scripted,
+        ReviewCrew.ofBugHunters(
+            List.of(
+                new BugHunterDefinition(
+                    BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                new BugHunterDefinition(
+                    BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))),
+        new VerifierAgentDefinition(new TemplateLoader()),
+        new JudgeAgentDefinition(new TemplateLoader()),
+        runRoot,
+        org.cra.core.api.PipelineOptions.defaults(),
+        null,
+        org.cra.core.api.CrossCheckerOptions.disabled(),
+        options);
+  }
+
+  @Test
+  void signoffAdviceIsAdvisoryAndBoundToHeadCommit() throws java.io.IOException {
+    // 07§5 M4a 验收：高风险 diff → 建议 2 人签 + 绑定 commit_sha；报告字段显式声明非审批
+    when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(highRiskDiff());
+    pipeline = signoffPipeline(SignoffOptions.defaults(List.of("zingaltern")));
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result =
+        pipeline.run(
+            new ReviewRequest(
+                "o",
+                "r",
+                7,
+                BASE,
+                HEAD,
+                Depth.STANDARD,
+                false,
+                false,
+                new SignoffContext("zingaltern", TestsStatus.PASSED)));
+
+    assertThat(result.signoffAdvice().advisoryOnly()).isTrue();
+    assertThat(result.signoffAdvice().tier()).isEqualTo(RiskTier.HIGH);
+    assertThat(result.signoffAdvice().recommendedSigners()).isEqualTo(2);
+    assertThat(result.signoffAdvice().commitSha()).isEqualTo(HEAD);
+    assertThat(result.signoffAdvice().decision()).isEqualTo("ADVISORY_ONLY");
+    assertThat(result.signoffAdvice().approval()).isFalse();
+    assertThat(result.signoffAdvice().agentApprover()).isFalse();
+
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary)
+        .contains("### 签字建议（建议，非审批）")
+        .contains("风险分级：高风险 → 建议 2 人签字")
+        .contains("绑定 commit：`abc1234`")
+        .contains("approve 只对该 commit 有效")
+        .contains("high-risk-path")
+        .contains("agent 的赞成票不计为审批")
+        .contains("agent 永远不是 approver")
+        .contains("核实本次改动的意图、假设、设计")
+        .contains("指挥 agent 写代码的人必须在签字名单上");
+    Path runDir = Path.of(result.traceRef().substring("file://".length()));
+    assertThat(Files.readString(runDir.resolve("trace.ndjson")))
+        .contains("\"event\":\"signoff_advice\"")
+        .contains("\"agent_approver\":false")
+        .contains("\"recommended_signers\":2");
+  }
+
+  @Test
+  void newCommitMarksPreviousSummarySignoffAdviceStale() {
+    // 07§5 M4a 规矩 2：approve 只对特定 commit 有效——新 commit 取代旧 Summary 时旧建议标 stale（账本比对）
+    String oldCommit = "9999999000000000000000000000000000000000";
+    when(ledger.completedRuns(7))
+        .thenReturn(List.of(new LedgerRunMarker("run_old", oldCommit, "DONE", 1, 0, 88L)));
+    when(ledger.comment(7, 88L))
+        .thenReturn(
+            Optional.of(
+                new LedgerComment(
+                    88L,
+                    LedgerComment.KIND_ISSUE,
+                    "cra-bot",
+                    "## cra 评审 Summary（run_old）\n\n" + "### 签字建议（建议，非审批）\n- 风险分级：高风险 → 建议 2 人签字\n",
+                    Instant.now(),
+                    null)));
+    pipeline = signoffPipeline(SignoffOptions.defaults(List.of("zingaltern")));
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result =
+        pipeline.run(
+            new ReviewRequest(
+                "o",
+                "r",
+                7,
+                BASE,
+                HEAD,
+                Depth.STANDARD,
+                false,
+                false,
+                new SignoffContext("zingaltern", TestsStatus.PASSED)));
+    assertThat(result.signoffAdvice().stale()).isFalse();
+
+    ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+    verify(adapter).updateSummaryComment(any(), eq(7), eq(88L), bodyCaptor.capture());
+    assertThat(bodyCaptor.getValue())
+        .startsWith("[已被 run_")
+        .contains("签字建议已 stale")
+        .contains("`9999999`")
+        .contains("`abc1234`")
+        .contains("须重新核实");
+  }
+
+  @Test
+  void signoffDisabledLeavesSummaryUnchanged() {
+    // 默认（旧构造）关闭签字建议：既有 Summary 行为不变（M0–M3 基线）
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.signoffAdvice().advisoryOnly()).isFalse();
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody()).doesNotContain("### 签字建议");
   }
 }
