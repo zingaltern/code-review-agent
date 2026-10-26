@@ -1,26 +1,34 @@
-# 自举 workflow（docs/05§4：M0–M3 仅 PR 触发 + draft 过滤；cli 分发 = M0 仓库内构建，M2 起 Release 二进制）
+# 自举 workflow（docs/05§4：PR 形态 + M4c push 直推形态；cli 分发 = M0 仓库内构建，M2 起 Release 二进制）
 # 已知平台限制（02§5 触发边界表，显式声明而非假装支持）：
 # - 冲突 PR（mergeable=conflicting）的 pull_request workflow 不触发（GitHub 官方行为），
 #   冲突解决后的 synchronize 正常触发；
-# - fork PR 无 secrets（当前个人仓库无碍，多协作者时引入 App token）。
+# - fork PR 无 secrets（当前个人仓库无碍，多协作者时引入 App token）；
+# - push 形态只评审分支过滤内的直推（默认 main）；merge commit 与 bot 自己的提交不触发（避免自举循环）。
 name: code-review-agent
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]   # ready_for_review 补 draft 转正场景（05§4 v1.2）
+  push:
+    branches: [main]   # 分支过滤（M4c，05§2.4/§4）；需要多分支时在此追加
 
 permissions:
   contents: read
   pull-requests: write
 
 concurrency:
-  group: review-${{ github.event.pull_request.number }}
-  cancel-in-progress: true   # 被掐断的 run 无 DONE 标记 → 重跑走指纹级补发（02§4.1）
+  # PR 形态按 PR 号合并；push 形态按 ref 串行（cancel-in-progress=false——被掐断的 run 无 DONE，
+  # 重跑会重新发布，push 场景宁可排队不并发）
+  group: review-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   review:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.draft == false   # draft PR 不评审（省成本降噪声）
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false   # draft PR 不评审（省成本降噪声）
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4        # 供 jgit blame 与 base 分支 REVIEW.md 读取（M1 起消费）
         with:
@@ -54,5 +62,50 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cra-trace-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+          path: .cra/runs/
+          retention-days: 90
+
+  review-push:
+    runs-on: ubuntu-latest
+    # M4c push 直推（05§2.4）：跳过 merge commit（无独立变更语义）与 bot 提交（自举循环防护）
+    if: >-
+      github.event_name == 'push' &&
+      github.event.head_commit != null &&
+      !startsWith(github.event.head_commit.message, 'Merge ') &&
+      !contains(github.event.head_commit.message, 'Merge pull request') &&
+      github.actor != 'github-actions[bot]' &&
+      !endsWith(github.actor, '[bot]')
+    permissions:
+      contents: write   # 发布载体是 commit comment（contents: write），无 PR 写权限需求
+    steps:
+      - uses: actions/checkout@v4        # fetch-depth 0：首父链 + jgit blame 需要完整历史
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: Build or restore CLI
+        run: mvn -B -ntp -pl cra-runner-cli -am package -DskipTests
+      - name: Run cra review (push mode)
+        # --base 省略：CLI 沿首父链查 commit comment 账本，取"上一完成 commit"（05§2.4）
+        run: |
+          java -jar cra-runner-cli/target/cra-runner-cli-0.1.0.jar review \
+            --push \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$GITHUB_SHA" \
+            --depth standard \
+            --token "$GITHUB_TOKEN"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRA_LLM_API_KEY: ${{ secrets.CRA_LLM_API_KEY }}
+          CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
+          CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
+      - name: persist trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cra-trace-push-${{ github.sha }}
           path: .cra/runs/
           retention-days: 90

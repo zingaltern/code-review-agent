@@ -27,30 +27,39 @@ final class ReviewCommand {
     if (config.local()) {
       return new LocalPrePrCommand().execute(config);
     }
-    try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
-      context.registerBean(CraConfig.class, () -> config);
-      context.register(AppConfig.class);
-      context.refresh();
-      Orchestrator orchestrator = context.getBean(Orchestrator.class);
-      ReviewRequest request =
-          new ReviewRequest(
-              config.repoOwner(),
-              config.repoName(),
-              config.prNumber(),
-              config.baseSha(),
-              config.headSha(),
-              toDepth(config.depth()),
-              config.dryRun(),
-              config.securityBlock());
-      LOG.info(
-          "cra review start: repo={}/{} pr={} head={}",
-          config.repoOwner(),
-          config.repoName(),
-          config.prNumber(),
-          config.headSha());
-      ReviewResult result = orchestrator.run(request);
-      LOG.info("cra review end: {}", result.summaryLine());
-      return exitCode(result, config);
+    try {
+      CraConfig effective =
+          config.reviewMode() == org.cra.common.run.ReviewMode.COMMIT
+              ? config.withResolvedPushBase(PushBaseResolver.resolve(config))
+              : config;
+      try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+        context.registerBean(CraConfig.class, () -> effective);
+        context.register(AppConfig.class);
+        context.refresh();
+        Orchestrator orchestrator = context.getBean(Orchestrator.class);
+        ReviewRequest request =
+            new ReviewRequest(
+                effective.repoOwner(),
+                effective.repoName(),
+                effective.prNumber(),
+                effective.baseSha(),
+                effective.headSha(),
+                toDepth(effective.depth()),
+                effective.dryRun(),
+                effective.securityBlock(),
+                effective.reviewMode());
+        LOG.info(
+            "cra review start: repo={}/{} mode={} pr={} base={} head={}",
+            effective.repoOwner(),
+            effective.repoName(),
+            effective.reviewMode(),
+            effective.prNumber(),
+            effective.baseSha(),
+            effective.headSha());
+        ReviewResult result = orchestrator.run(request);
+        LOG.info("cra review end: {}", result.summaryLine());
+        return exitCode(result, effective);
+      }
     } catch (CraException e) {
       LOG.error("cra review config/bootstrap failure: {}", e.getMessage());
       return 2;

@@ -41,13 +41,20 @@ public final class Main {
    */
   static int run(String[] args) {
     try {
+      if (args.length > 0 && "sweep".equals(args[0])) {
+        // M4d 夜间存量评审（05§3）：`cra sweep --repo owner/name --since 30d --max-prs 10`
+        return new SweepCommand()
+            .execute(
+                SweepArgs.parse(
+                    java.util.Arrays.copyOfRange(args, 1, args.length), System.getenv()));
+      }
       CraConfig config = CliArgs.parse(args, System.getenv());
       return new ReviewCommand().execute(config);
     } catch (org.cra.common.exception.CraConfigException e) {
       LOG.error(
-          "参数/配置错误: {}；用法: cra review [--local] --repo owner/name --pr N --base SHA --head SHA "
+          "参数/配置错误: {}；用法: cra review [--local|--push] --repo owner/name --pr N --base SHA --head SHA "
               + "[--depth quick|standard|deep] [--token T] [--dry-run] [--security-block] "
-              + "[--exec CMD] [--ledger-db PATH]",
+              + "[--exec CMD] [--ledger-db PATH]；或 cra sweep --repo owner/name --since 30d --max-prs 10",
           e.getMessage());
       return 2;
     }
