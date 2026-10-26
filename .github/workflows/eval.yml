@@ -37,7 +37,7 @@ on:
       model_strong:
         description: 'strong 档模型名（verifier/judge 用；空 = 继承 standard，安全默认）'
         required: false
-        default: '' 
+        default: ''
       set:
         description: '集合过滤（L2 口径 = l2；L3 全量 = all；bad = 仅检出复核）'
         required: false
