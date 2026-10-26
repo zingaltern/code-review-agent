@@ -182,7 +182,30 @@ prompt/模型改动与 run 关联（`prompt_template_versions`），线上问题
 
 - 每用例 = `{repo_snapshot.tgz（裁剪到缺陷相关模块，控制上下文成本）, diff.patch, expected_findings.json, meta.json(项目/缺陷类型/标注人)}`；
 - 加载器：解包快照 → 构造 ReviewRequest(base=fixed_sha, head=buggy_sha) → 跑流水线 → 断言器按 expected 匹配（位置 ±5 行 + 类别 + 断言关键词）；
-- 标注工具：`cra-eval annotate` 半自动（patch hunk 预填 + 人工确认断言）；
+- 标注工具：`cra-eval annotate` 半自动——**四步流程 `prefill → 冒烟 → 校准 → confirm`**
+  （prefill 的 hunk 机械预填只是起点，不可直接 confirm；详见下方标注质量 checklist）；
+- **标注质量 checklist（v1.3.2 红驱动，2026-10-26：M3 扩集 18 例中 7 例需校准，全部为标注
+  口径问题而非模型能力）**：
+  1. 【强制】**关键词用 finding 的语言**：流水线正文为中文 → 关键词必须是中文行为/现象词
+     （"环""顶层""自引用""超时"）；**禁止英文词**（session / top-level / recurs / empty——
+     中文正文不出现，AND 语义下系统性漏配）。代码常量名（如 MAX_SEGMENT_LEN）仅当评审
+     必然引用时使用。
+  2. 【强制】**必然性测试**：假设一个评审员正确发现了该缺陷，他是否**必然**在正文写出这个
+     词？否 → 换词。典型错误：取实现标识符（canInline / validateInput）而正确描述是行为
+     （"删除 catch 保护" / "负时长"）。
+  3. 【强制】**行号取评审实际锚点**：标注锚点（代码定义处）与评审锚点（调用点/变更行）可能
+     差数行乃至数百行（本批实测 L580→L586、L587→L574、L625→L325）。**标注后必须冒烟校准**。
+  4. 【强制】**类别与评审口径对齐**：若缺陷自然表现为"行为变更无测试"，**加一条 test 类
+     expected**（多条目 OR），不要用 test 代替 bug；category 必须在 05§1.1 枚举内。
+  5. 【强制】**标注流程四步**：每个新用例先 k=1 真实评审一次 → 读报告的 `findings_brief`
+     → 按"file 相等 + 行 ±5 + category 相等 + 关键词 AND"逐条核对 expected → 按 1–4 校准
+     → confirm。本批 18 例的 7 处校准全部由此发现。
+  6. 【建议】**默认单关键词**：AND 语义下词越多越难过；仅当确认多词必然同时出现时才用多词。
+  7. 【建议】**校准记录入 note**：每次校准写明"取证来源 + 原值→新值 + 原因"（本批 7 处均
+     如此），供 recheck 复核与校准率度量。
+  8. 【度量】**标注校准率进周报**：被校准 expected 数 / 新增 expected 总数（本批 7/18 = 39%
+     ——prefill 不可单独作为断言来源）。冒烟校准按 07§6.0 时间纪律：每批 ≤5 用例（k=1，
+     约 4.5 分钟），禁止为标注校准跑全量。
 - 时序：M1 建 **bad 12 + clean 8 + 对抗 10（注入 3/幻觉 5/拒真 2）**；M3 扩到 bad ≥30 + clean ≥20；
 - 持续回流：自举 PR 的真实 badcase 经 `badcase add` 固化（`meta.source=production`，来源见用例目录 `badcase.json`；对 Defects4J 集的补充，不替代）。
 
