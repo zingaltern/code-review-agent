@@ -110,6 +110,7 @@
 ### 1.4 Trace 格式（NDJSON）
 
 > **v1.3.2**（2026-10-25，M2 隔离运行时事件先行定点修订，07§6.5）：注册 `tool_call` / `tool_result` / `agent_budget_exceeded` 事件与 `agent_output.termination` 字段；`dedup.match` 增 `in-run-exact` 取值（M2 跨代理精确去重合并，03§4.5 汇聚侧，T2.8 的验证侧分组复用同一键）。
+> **M4a 补登（2026-10-26）**：`signoff_advice`（签字建议：决策类型、风险等级、建议人数、commit 绑定、命中规则；`agent_approver` 恒 false——agent 不是 approver）。
 
 ```json
 {"ts":"…","run_id":"…","event":"run_start","repo":"…","pr":42,"depth":"standard","dry_run":false}
@@ -126,6 +127,7 @@
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
 {"ts":"…","event":"plan","effective_depth":"standard","chunks":4,"skipped":2}
+{"ts":"…","event":"signoff_advice","decision":"ADVISORY_ONLY|DISABLED","applicable":true,"tier":"low|medium|high|none","recommended_signers":2,"commit":"abc1234…","stale":false,"agent_approver":false,"rules":["high-risk-path","business-logic"]}
 {"ts":"…","event":"template_versions","versions":{"bug-hunter/dataflow":"dataflow@1a2b3c04","security-reviewer":"security@5e6f7a80"}}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"blame_check","note":"…"}
@@ -252,6 +254,8 @@ cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabe
 
 本地模式解析语义（v1.3.2 实现落地）：`--repo`/`--head`/`--token`/`CRA_LLM_*` 均可省——仓库身份由 remote origin 推导（兜底 `local/<目录名>`）、head 解析为 HEAD、无 `CRA_LLM_API_KEY` 时评审段**如实跳过**（报告声明，不伪装）；`--pr` 省缺为 0（本地无 PR，账本按 `(repo, 0, commit)` 键控）。
 
+M4a 签字建议输入（05§5 `agents.signoff`）：`--pr-author`（缺省 `CRA_PR_AUTHOR` → `GITHUB_ACTOR`；未知作者不满足低风险 0 人签）、`--tests-status passed|failed|unknown`（缺省 `CRA_TESTS_STATUS`；本地 pre-PR 由实跑退出码覆盖）、`--signoff` / `--signoff=false`（缺省 `CRA_SIGNOFF_ENABLED=true`）、`--trusted-authors a,b`（缺省 `CRA_SIGNOFF_TRUSTED_AUTHORS`）。建议绑定 `--head` commit；新 commit 出现后由账本完成标记比对旧建议并标 stale。
+
 退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）；**`4` 本地 pre-PR 实跑构建/测试失败**（v1.3.2 撞墙定点修订：v1 基线只定义了 0/2/3，而 07 T2.10 验收 8 要求"报告如实展示测试失败输出且退出码非零"——需一个区别于"工具自身故障"的确定性信号。优先级高于评审结论：构建失败时评审照常运行、结果入报告，但退出码恒为 4）。
 
 ### 3.1 cra-eval 评测命令契约（T3.1/T3.3 落地，2026-10-25）
@@ -338,11 +342,17 @@ cra:
     # （opencode-go 的路由要求；无需显式配置，网关构建时生成 UUID 会话）
     max-concurrency: 8              # v1.1：LLM 并发信号量
     per-model-rpm: { standard: 60, strong: 30, light: 60 }
-  agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）
+  agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）；M4a：signoff 建议
     crosschecker:
       enabled: false             # M4f-lite 起可开
       mode: [assumption, sniff]  # 模式 A/B 开关（03§3.1）
       history-weeks: 8           # 上下游变更史回溯窗口
+    signoff:                     # M4a（07§5）：只输出建议，不审批——agent 永远不是 approver
+      enabled: true              # false = Summary 不出签字段（评审其余行为不变）
+      trusted-authors: []        # 低风险 0 人签前提之一（login，大小写不敏感）
+      # 路径分级规则取内置默认（core 高危/关键配置/系统提示词/文档/功能开关 glob）；
+      # 运行时输入：--pr-author / CRA_PR_AUTHOR / GITHUB_ACTOR；--tests-status / CRA_TESTS_STATUS
+      # （passed|failed|unknown；本地 pre-PR 由实跑退出码覆盖）
     verifier:
       mode: single                  # M2: single | M3: dual-vote
       dual-vote:
@@ -359,6 +369,15 @@ cra:
     publish-unverified: never       # never | labeled
   trust:
     review-policy-source: base      # v1.1：固定 base，禁 head（04§3.2）
+```
+
+M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
+
+```markdown
+## 签字名单（M4a 建议，非强制）
+- [ ] 指挥 agent 写代码的人已在签字名单上（agent 的赞成票不计为审批）
+- [ ] 本次 approve 针对 commit `<head_sha>`；该 PR 出现新 commit 后须重新核实
+- [ ] 签字语义：我核实过这次改动的意图、假设、设计，而非逐行读过
 ```
 
 ## 6. 安全与合规检查单（v1.1 扩充）

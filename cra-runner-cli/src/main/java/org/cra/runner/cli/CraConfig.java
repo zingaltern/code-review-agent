@@ -42,6 +42,7 @@ package org.cra.runner.cli;
  * @param crossCheckerModes 模式开关（--crosschecker-modes / CRA_CROSSCHECKER_MODES，默认 assumption,sniff）
  * @param crossCheckerHistoryWeeks 上下游变更史回溯周数（--crosschecker-history-weeks /
  *     CRA_CROSSCHECKER_HISTORY_WEEKS，默认 8）
+ * @param signoff 签字建议配置（05§5 agents.signoff；M4a）
  */
 public record CraConfig(
     String repoOwner,
@@ -77,7 +78,123 @@ public record CraConfig(
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
-    String llmTemperature) {
+    String llmTemperature,
+    SignoffConfig signoff) {
+
+  public CraConfig {
+    signoff = signoff == null ? SignoffConfig.defaults() : signoff;
+  }
+
+  /**
+   * M4f-lite 形态兼容构造（签字建议取默认：enabled=true、作者/测试状态未知）。
+   *
+   * @param repoOwner 仓库属主
+   * @param repoName 仓库名
+   * @param prNumber PR 编号
+   * @param baseSha 基线 sha
+   * @param headSha 目标 sha
+   * @param depth 深度档位
+   * @param dryRun dry-run
+   * @param securityBlock --security-block
+   * @param githubToken GitHub token
+   * @param githubApi GitHub API 根
+   * @param llmApiKey LLM 密钥
+   * @param llmBaseUrl LLM 端点
+   * @param llmModel 模型名
+   * @param runRoot trace 落盘根
+   * @param workspace 本地工作区根
+   * @param largeDiffLines 大 diff 降档线
+   * @param hardCapLines 硬上限
+   * @param nitBudget nit 预算默认
+   * @param runTotalTokens run 级预算
+   * @param degradeAtFirst 第一降档阈值
+   * @param degradeAtSecond 第二降档阈值
+   * @param publishUnverified UNVERIFIED 发布策略
+   * @param spotCheckPercent 抽查保险丝百分比
+   * @param local 本地 pre-PR 模式
+   * @param execCommand 本地实跑命令
+   * @param ledgerDb 本地账本
+   * @param llmModelStrong strong 档模型
+   * @param llmModelLight light 档模型
+   * @param fallbackChain 降级链
+   * @param rpm per-model RPM
+   * @param crossCheckerEnabled CrossChecker 开关
+   * @param crossCheckerModes CrossChecker 模式
+   * @param crossCheckerHistoryWeeks 变更史回溯周数
+   * @param llmTemperature 采样温度
+   */
+  public CraConfig(
+      String repoOwner,
+      String repoName,
+      int prNumber,
+      String baseSha,
+      String headSha,
+      String depth,
+      boolean dryRun,
+      boolean securityBlock,
+      String githubToken,
+      String githubApi,
+      String llmApiKey,
+      String llmBaseUrl,
+      String llmModel,
+      String runRoot,
+      String workspace,
+      int largeDiffLines,
+      int hardCapLines,
+      int nitBudget,
+      long runTotalTokens,
+      double degradeAtFirst,
+      double degradeAtSecond,
+      String publishUnverified,
+      int spotCheckPercent,
+      boolean local,
+      String execCommand,
+      String ledgerDb,
+      String llmModelStrong,
+      String llmModelLight,
+      String fallbackChain,
+      String rpm,
+      boolean crossCheckerEnabled,
+      String crossCheckerModes,
+      int crossCheckerHistoryWeeks,
+      String llmTemperature) {
+    this(
+        repoOwner,
+        repoName,
+        prNumber,
+        baseSha,
+        headSha,
+        depth,
+        dryRun,
+        securityBlock,
+        githubToken,
+        githubApi,
+        llmApiKey,
+        llmBaseUrl,
+        llmModel,
+        runRoot,
+        workspace,
+        largeDiffLines,
+        hardCapLines,
+        nitBudget,
+        runTotalTokens,
+        degradeAtFirst,
+        degradeAtSecond,
+        publishUnverified,
+        spotCheckPercent,
+        local,
+        execCommand,
+        ledgerDb,
+        llmModelStrong,
+        llmModelLight,
+        fallbackChain,
+        rpm,
+        crossCheckerEnabled,
+        crossCheckerModes,
+        crossCheckerHistoryWeeks,
+        llmTemperature,
+        SignoffConfig.defaults());
+  }
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
@@ -178,7 +295,8 @@ public record CraConfig(
         false,
         "assumption,sniff",
         8,
-        null);
+        null,
+        SignoffConfig.defaults());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -218,6 +336,7 @@ public record CraConfig(
         crossCheckerEnabled(),
         crossCheckerModes(),
         crossCheckerHistoryWeeks(),
-        llmTemperature());
+        llmTemperature(),
+        signoff());
   }
 }

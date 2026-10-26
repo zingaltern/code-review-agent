@@ -74,6 +74,38 @@ public final class CoreAssembly {
       PipelineOptions options,
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions) {
+    return createOrchestrator(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        crossCheckerOptions,
+        SignoffOptions.disabled());
+  }
+
+  /**
+   * 创建 M4a 形态编排器（追加签字建议配置；disabled 时与 M4f-lite 形态完全一致）。
+   *
+   * @param signoffOptions 签字建议配置（05§5 agents.signoff；null 用默认，默认生成建议）
+   * @return Orchestrator
+   */
+  public static Orchestrator createOrchestrator(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions) {
     return new org.cra.core.internal.ReviewPipeline(
         adapter,
         ledger,
@@ -84,6 +116,7 @@ public final class CoreAssembly {
         runRoot,
         options == null ? PipelineOptions.defaults() : options,
         localRepoContext,
-        crossCheckerOptions);
+        crossCheckerOptions,
+        signoffOptions == null ? SignoffOptions.defaults() : signoffOptions);
   }
 }

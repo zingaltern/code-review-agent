@@ -136,6 +136,8 @@ Anthropic 2026 年发布的内部实践（见 §2）证明了**多子代理并�
 
 **签字语义的转变**（M4a 设计输入）：以前签字 = "逐行研读过"；现在签字 = "**我核实过这次改动的意图、假设、设计**"。底层实现对不对交给测试/仿真/机器 double check——那不是人干的事。
 
+**M4a 落地（2026-10-26）**：签字建议由 `SignoffAdvisor`（cra-core）确定性生成，`SignoffOptions`（`agents.signoff`）配置，输出 `RiskTier` + 建议人数（0/1/2）+ **命中规则清单**（可解释）。三条规矩的工程形态：① agent 永远不是 approver——`SignoffAdvice.agentApprover()` 恒 false，Summary 与 trace 显式声明；② approve 只对特定 commit 有效——建议绑定 `head_sha`，新 commit 出现后由账本完成标记比对（`SignoffBinding.supersedingCommit`）把旧 Summary 的建议标 stale；③ 指挥 agent 写代码的人进签字名单——以 PR 模板提示项写入 Summary 文案（docs 片段，不强加）。分级：高 = 核心高危路径或难恢复关键配置；中 = 常规业务逻辑/系统提示词/REVIEW.md 策略变更；低 = 纯文档或仅功能开关，**且**测试 passed + 作者在 `trusted-authors`（任一不满足自动升为中风险）。
+
 **先兜底再减负（约束）**：任何"少审一些代码"的减负，前提是交付系统**可快速回滚**；无回滚兜底时削减人工审查是反模式。本项目边界：回滚能力属平台部署侧（分支保护/特性开关/合并队列），写入部署文档职责（05§4 注），评审组件自身不假装提供兜底。
 
 **三功能反模式清单（设计时对照，v1.3 新增）**：

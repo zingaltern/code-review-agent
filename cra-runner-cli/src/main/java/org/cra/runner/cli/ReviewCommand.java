@@ -41,7 +41,8 @@ final class ReviewCommand {
               config.headSha(),
               toDepth(config.depth()),
               config.dryRun(),
-              config.securityBlock());
+              config.securityBlock(),
+              config.signoff().context());
       LOG.info(
           "cra review start: repo={}/{} pr={} head={}",
           config.repoOwner(),

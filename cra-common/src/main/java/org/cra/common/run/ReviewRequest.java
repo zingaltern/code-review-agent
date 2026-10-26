@@ -1,6 +1,7 @@
 package org.cra.common.run;
 
 import java.util.Objects;
+import org.cra.common.signoff.SignoffContext;
 
 /**
  * 一次评审请求（02§1 L4 编排层输入；core 全部逻辑与形态无关——CLI/server 只是两种壳，02§5）。
@@ -14,6 +15,7 @@ import java.util.Objects;
  * @param depth 深度档位
  * @param dryRun dry-run 模式：全程零写操作（单测断言零写调用，05§6）
  * @param securityBlock --security-block 模式：存在 confirmed 安全 finding 时退出码 3（05§3）
+ * @param signoff 签字上下文（作者与测试状态；M4a 低风险 0 人签的前置条件，默认未知）
  */
 public record ReviewRequest(
     String repoOwner,
@@ -23,7 +25,8 @@ public record ReviewRequest(
     String headSha,
     Depth depth,
     boolean dryRun,
-    boolean securityBlock) {
+    boolean securityBlock,
+    SignoffContext signoff) {
 
   public ReviewRequest {
     Objects.requireNonNull(repoOwner, "repoOwner");
@@ -40,5 +43,39 @@ public record ReviewRequest(
       throw new IllegalArgumentException("base/head sha must be non-blank");
     }
     depth = depth == null ? Depth.STANDARD : depth;
+    signoff = signoff == null ? SignoffContext.unknown() : signoff;
+  }
+
+  /**
+   * 无签字上下文的兼容构造（作者/测试状态未知——低风险 0 人签条件不满足）。
+   *
+   * @param repoOwner 仓库属主
+   * @param repoName 仓库名
+   * @param prNumber PR 编号
+   * @param baseSha 基线 sha
+   * @param headSha 目标 sha
+   * @param depth 深度档位
+   * @param dryRun dry-run
+   * @param securityBlock --security-block
+   */
+  public ReviewRequest(
+      String repoOwner,
+      String repoName,
+      int prNumber,
+      String baseSha,
+      String headSha,
+      Depth depth,
+      boolean dryRun,
+      boolean securityBlock) {
+    this(
+        repoOwner,
+        repoName,
+        prNumber,
+        baseSha,
+        headSha,
+        depth,
+        dryRun,
+        securityBlock,
+        SignoffContext.unknown());
   }
 }

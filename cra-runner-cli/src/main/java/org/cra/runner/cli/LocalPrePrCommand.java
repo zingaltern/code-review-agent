@@ -63,11 +63,18 @@ final class LocalPrePrCommand {
       ReviewResult review = null;
       String reviewSkipReason = null;
       String reviewError = null;
+      // M4a：本地实跑给出真实测试状态（低风险 0 人签的前提之一）；作者仍来自 --pr-author/GITHUB_ACTOR
+      org.cra.common.signoff.TestsStatus testsStatus =
+          exec.failed()
+              ? org.cra.common.signoff.TestsStatus.FAILED
+              : org.cra.common.signoff.TestsStatus.PASSED;
+      org.cra.common.signoff.SignoffContext signoffContext =
+          new org.cra.common.signoff.SignoffContext(config.signoff().author(), testsStatus);
       if (config.llmApiKey() == null || config.llmApiKey().isBlank()) {
         reviewSkipReason = "未配置 CRA_LLM_API_KEY（密钥只从环境变量读，05§6）——LLM 评审未运行，本报告仅含构建/测试实跑结果";
       } else {
         try {
-          review = runReview(config, git);
+          review = runReview(config, git, signoffContext);
         } catch (CraException e) {
           // 评审段自身故障（配置/账本/网关）：不掩盖实跑结论，报告中如实声明
           LOG.error("本地评审段失败: {}", e.getMessage());
@@ -111,7 +118,8 @@ final class LocalPrePrCommand {
     return git.remoteOriginOwnerSlashName().orElseGet(() -> "local/" + workspace.getFileName());
   }
 
-  private ReviewResult runReview(CraConfig config, LocalGitAdapter git) {
+  private ReviewResult runReview(
+      CraConfig config, LocalGitAdapter git, org.cra.common.signoff.SignoffContext signoffContext) {
     if (config.llmBaseUrl() == null
         || config.llmBaseUrl().isBlank()
         || config.llmModel() == null
@@ -133,7 +141,8 @@ final class LocalPrePrCommand {
               config.headSha(),
               ReviewCommand.toDepth(config.depth()),
               config.dryRun(),
-              config.securityBlock());
+              config.securityBlock(),
+              signoffContext);
       return orchestrator.run(request);
     }
   }

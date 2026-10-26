@@ -1,6 +1,7 @@
 package org.cra.runner.cli;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 
@@ -37,6 +38,8 @@ final class CliArgs {
     boolean local = false;
     boolean crossChecker = false;
     boolean crossCheckerSeen = false;
+    boolean signoff = false;
+    boolean signoffSeen = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -62,6 +65,18 @@ final class CliArgs {
           crossChecker = false;
           crossCheckerSeen = true;
         }
+        case "--signoff" -> {
+          signoff = true;
+          signoffSeen = true;
+        }
+        case "--signoff=true" -> {
+          signoff = true;
+          signoffSeen = true;
+        }
+        case "--signoff=false" -> {
+          signoff = false;
+          signoffSeen = true;
+        }
         case "--repo",
             "--pr",
             "--base",
@@ -85,7 +100,10 @@ final class CliArgs {
             "--rpm",
             "--spot-check-percent",
             "--crosschecker-modes",
-            "--crosschecker-history-weeks" -> {
+            "--crosschecker-history-weeks",
+            "--trusted-authors",
+            "--pr-author",
+            "--tests-status" -> {
           if (i + 1 >= args.length) {
             throw new CraConfigException("参数缺值: " + arg);
           }
@@ -177,6 +195,32 @@ final class CliArgs {
                 ? named.get("--crosschecker-history-weeks")
                 : env.get("CRA_CROSSCHECKER_HISTORY_WEEKS"),
             8);
+    // 05§5 agents.signoff（M4a）：默认开启；作者/测试状态未知时低风险 0 人签条件不满足
+    boolean signoffEnabled =
+        signoffSeen
+            ? signoff
+            : Boolean.parseBoolean(env.getOrDefault("CRA_SIGNOFF_ENABLED", "true"));
+    List<String> trustedAuthors =
+        parseCsv(
+            named.getOrDefault(
+                "--trusted-authors", env.getOrDefault("CRA_SIGNOFF_TRUSTED_AUTHORS", "")));
+    String prAuthor = blankToNull(named.get("--pr-author"));
+    if (prAuthor == null) {
+      prAuthor = blankToNull(env.get("CRA_PR_AUTHOR"));
+    }
+    if (prAuthor == null) {
+      prAuthor = blankToNull(env.get("GITHUB_ACTOR"));
+    }
+    String testsStatus =
+        named.getOrDefault("--tests-status", env.getOrDefault("CRA_TESTS_STATUS", "unknown"));
+    try {
+      org.cra.common.signoff.TestsStatus.parse(testsStatus);
+    } catch (IllegalArgumentException e) {
+      throw new CraConfigException("--tests-status 非法: " + testsStatus + "（passed|failed|unknown）");
+    }
+    SignoffConfig signoffConfig =
+        new SignoffConfig(
+            signoffEnabled, trustedAuthors, prAuthor == null ? "" : prAuthor, testsStatus);
     return new CraConfig(
         ownerRepo == null ? null : ownerRepo[0],
         ownerRepo == null ? null : ownerRepo[1],
@@ -212,7 +256,22 @@ final class CliArgs {
         crossCheckerEnabled,
         crossCheckerModes,
         crossCheckerHistoryWeeks,
-        blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))));
+        blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))),
+        signoffConfig);
+  }
+
+  /** 逗号分隔列表（空/空白项丢弃；用于 trusted-authors 与模式串）。 */
+  private static List<String> parseCsv(String raw) {
+    if (raw == null || raw.isBlank()) {
+      return List.of();
+    }
+    List<String> values = new java.util.ArrayList<>();
+    for (String part : raw.split(",")) {
+      if (!part.isBlank()) {
+        values.add(part.strip());
+      }
+    }
+    return List.copyOf(values);
   }
 
   /** 空白值归一为 null：GitHub Actions 的空 env 是 ""，语义等同未设置（档位缺省继承 standard）。 */

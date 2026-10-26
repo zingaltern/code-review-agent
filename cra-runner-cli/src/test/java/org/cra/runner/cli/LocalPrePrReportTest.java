@@ -185,4 +185,109 @@ class LocalPrePrReportTest {
             "SQLite 账本连接失败");
     assertThat(report).contains("状态: 评审故障——SQLite 账本连接失败").contains("退出码: 1（非零——构建/测试失败）");
   }
+
+  @Test
+  void signoffAdviceRenderedAsAdvisoryWithCommitBinding() {
+    // 07§5 M4a：本地报告同样输出风险建议 + commit 绑定 + 非审批声明
+    org.cra.common.signoff.SignoffAdvice advice =
+        org.cra.common.signoff.SignoffAdvice.advisory(
+            org.cra.common.signoff.RiskTier.HIGH,
+            "def5678000000000000000000000000000000000",
+            new org.cra.common.signoff.SignoffContext(
+                "zingaltern", org.cra.common.signoff.TestsStatus.PASSED),
+            List.of(
+                new org.cra.common.signoff.SignoffRuleHit(
+                    "high-risk-path",
+                    org.cra.common.signoff.RiskTier.HIGH,
+                    "命中核心高危路径（安全/支付/鉴权区域）",
+                    List.of("src/main/java/com/acme/auth/AuthService.java"))));
+    ReviewResult review =
+        new ReviewResult(
+            "run_3",
+            "zingaltern",
+            "cra",
+            0,
+            "def5678000000000000000000000000000000000",
+            RunStatus.SUCCESS,
+            new ReviewStats(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                10,
+                List.of(),
+                0,
+                new org.cra.common.run.Coverage(1, 1, "全量")),
+            "file://.cra/runs/run_3",
+            "run=run_3",
+            List.of(),
+            advice);
+    String report =
+        LocalPrePrReport.render(
+            config(true, false),
+            exec(0, "[INFO] BUILD SUCCESS"),
+            "zingaltern/cra",
+            "main",
+            review,
+            null,
+            null);
+    assertThat(report)
+        .contains("签字建议（advisory，非审批）: 高风险 → 建议 2 人签字")
+        .contains("绑定 commit def5678")
+        .contains("high-risk-path")
+        .contains("agent 永远不是 approver")
+        .contains("核实意图/假设/设计")
+        .contains("指挥 agent 写代码的人必须在签字名单上");
+  }
+
+  @Test
+  void disabledSignoffDeclaredHonestly() {
+    ReviewResult review =
+        new ReviewResult(
+            "run_4",
+            "zingaltern",
+            "cra",
+            0,
+            "def5678000000000000000000000000000000000",
+            RunStatus.SUCCESS,
+            new ReviewStats(
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                10,
+                List.of(),
+                0,
+                new org.cra.common.run.Coverage(0, 0, "")),
+            "file://.cra/runs/run_4",
+            "run=run_4",
+            List.of(),
+            org.cra.common.signoff.SignoffAdvice.disabled(
+                "def5678000000000000000000000000000000000",
+                org.cra.common.signoff.SignoffContext.unknown()));
+    String report =
+        LocalPrePrReport.render(
+            config(true, false),
+            exec(0, "[INFO] BUILD SUCCESS"),
+            "zingaltern/cra",
+            "main",
+            review,
+            null,
+            null);
+    assertThat(report).contains("签字建议: 已关闭（agents.signoff.enabled=false）");
+  }
 }

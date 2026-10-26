@@ -262,6 +262,55 @@ class CliArgsTest {
   }
 
   @Test
+  void signoffDefaultsAndExplicitOptions() {
+    // 05§5 agents.signoff（M4a）：默认开启；作者回退 GITHUB_ACTOR；测试状态默认 unknown
+    java.util.Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("GITHUB_ACTOR", "octocat");
+    CraConfig defaults = CliArgs.parse(baseArgs(), env);
+    assertThat(defaults.signoff().enabled()).isTrue();
+    assertThat(defaults.signoff().author()).isEqualTo("octocat");
+    assertThat(defaults.signoff().trustedAuthors()).isEmpty();
+    assertThat(defaults.signoff().testsStatus()).isEqualTo("unknown");
+
+    CraConfig explicit =
+        CliArgs.parse(
+            concat(
+                baseArgs(),
+                "--signoff=false",
+                "--trusted-authors",
+                "alice, bob ,",
+                "--pr-author",
+                "carol",
+                "--tests-status",
+                "passed"),
+            env);
+    assertThat(explicit.signoff().enabled()).isFalse();
+    assertThat(explicit.signoff().trustedAuthors()).containsExactly("alice", "bob");
+    assertThat(explicit.signoff().author()).isEqualTo("carol");
+    assertThat(explicit.signoff().testsStatus()).isEqualTo("passed");
+    assertThat(explicit.signoff().context().testsStatus())
+        .isEqualTo(org.cra.common.signoff.TestsStatus.PASSED);
+  }
+
+  @Test
+  void signoffOptionsFromEnvAndInvalidTestsStatus() {
+    java.util.Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_SIGNOFF_ENABLED", "false");
+    env.put("CRA_SIGNOFF_TRUSTED_AUTHORS", "zed");
+    env.put("CRA_PR_AUTHOR", "dana");
+    env.put("CRA_TESTS_STATUS", "failed");
+    CraConfig config = CliArgs.parse(baseArgs(), env);
+    assertThat(config.signoff().enabled()).isFalse();
+    assertThat(config.signoff().trustedAuthors()).containsExactly("zed");
+    assertThat(config.signoff().author()).isEqualTo("dana");
+    assertThat(config.signoff().testsStatus()).isEqualTo("failed");
+
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--tests-status", "green"), ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--tests-status");
+  }
+
+  @Test
   void ciModeStillRequiresCoreArgs() {
     // CI 形态回归：--local 之外缺 repo/pr/head/token 仍拒绝启动（LLM 缺失由 missingLlmKeyFails 覆盖）
     assertThatThrownBy(() -> CliArgs.parse(new String[] {}, ENV))

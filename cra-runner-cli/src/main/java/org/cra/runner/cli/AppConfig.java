@@ -100,6 +100,12 @@ class AppConfig {
   }
 
   @Bean
+  org.cra.core.api.SignoffOptions signoffOptions() {
+    // 05§5 agents.signoff（M4a）：开关与可信作者；路径分级规则取内置默认
+    return config.signoff().toOptions();
+  }
+
+  @Bean
   Orchestrator orchestrator(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
@@ -109,6 +115,7 @@ class AppConfig {
       SubAgent<JudgeCaseInput> judge,
       org.cra.core.api.PipelineOptions pipelineOptions,
       org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
+      org.cra.core.api.SignoffOptions signoffOptions,
       org.cra.git.api.LocalRepoContext localRepoContext) {
     return CoreAssembly.createOrchestrator(
         adapter,
@@ -120,6 +127,7 @@ class AppConfig {
         java.nio.file.Path.of(config.runRoot()),
         pipelineOptions,
         localRepoContext,
-        crossCheckerOptions);
+        crossCheckerOptions,
+        signoffOptions);
   }
 }

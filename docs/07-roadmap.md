@@ -157,7 +157,7 @@
 
 ## 5. M4：可选池（按需排期，互不依赖）
 
-- **M4a 风险分级建议（v1.3 吸收三条签字规矩与分级表，01§3.4 担责）**：输出 Low/Medium/High 建议（只建议不审批——**agent 永远不算 approver**）；三条规矩入设计：① agent 赞成票不计为审批（已有原则）；② **approve 只对特定 commit 有效，新 commit 必须重审**——与账本 DONE/指纹的 commit 绑定语义同源（05§1.3），建议输出绑定 commit_sha；③ **指挥 agent 写代码的人必须在签字名单上**（PR 模板提示项）；分级参考（Anthropic 形态）：低风险（纯文档/功能开关，测试全过 + 可信作者 → 建议 0 人签）/ 中风险（常规业务逻辑、系统提示词 → 1 人）/ 高风险（核心高危路径、难恢复的关键配置 → 2 人）；签字语义 = 核实**意图/假设/设计**而非逐行读过（01§3.4）；
+- [x] **M4a 风险分级建议（v1.3 吸收三条签字规矩与分级表，01§3.4 担责）**：输出 Low/Medium/High 建议（只建议不审批——**agent 永远不算 approver**）；三条规矩入设计：① agent 赞成票不计为审批（已有原则）；② **approve 只对特定 commit 有效，新 commit 必须重审**——与账本 DONE/指纹的 commit 绑定语义同源（05§1.3），建议输出绑定 commit_sha；③ **指挥 agent 写代码的人必须在签字名单上**（PR 模板提示项）；分级参考（Anthropic 形态）：低风险（纯文档/功能开关，测试全过 + 可信作者 → 建议 0 人签）/ 中风险（常规业务逻辑、系统提示词 → 1 人）/ 高风险（核心高危路径、难恢复的关键配置 → 2 人）；签字语义 = 核实**意图/假设/设计**而非逐行读过（01§3.4）。**已落地（2026-10-26）**：`SignoffAdvisor`（cra-core，确定性路径规则，不调用 LLM）输出三档 + 建议人数 + 命中规则证据；`SignoffAdvice`/`SignoffBinding`（cra-common）承载 commit 绑定与 stale 判定（账本 `completedRuns` 发布序比对，与 05§1.3 同源）；ReviewResult 携 `signoffAdvice`，Summary 增"签字建议（建议，非审批）"段（固定三条规矩文案），旧 Summary 被新 commit 取代时追写 stale 声明；本地 pre-PR 报告同源渲染；配置 `agents.signoff`（05§5：enabled/trusted-authors + 运行时 `--pr-author`/`--tests-status`）。规则：高 = 核心高危路径或难恢复关键配置；中 = 常规业务逻辑/系统提示词/REVIEW.md 策略；低 = 纯文档或仅功能开关且测试 passed + 可信作者（不满足自动升中）；trace 事件 `signoff_advice`（05§1.4）。
 - **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；承担 M4f-full 的事件史采集定时任务；
 - **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）；
 - **M4d 夜间存量评审**：产出 issue 而非 PR comment；

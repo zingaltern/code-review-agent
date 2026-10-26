@@ -6,6 +6,7 @@ import java.util.Set;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.Severity;
 import org.cra.common.run.ReviewRequest;
+import org.cra.common.signoff.SignoffAdvice;
 import org.cra.common.text.Texts;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PreExistingBlameChecker;
@@ -79,7 +80,8 @@ final class ReviewBodyRenderer {
       List<String> coverageLines,
       String convergenceAdvice,
       Set<String> unverifiedIds,
-      int unverifiedUnpublished) {
+      int unverifiedUnpublished,
+      SignoffAdvice signoff) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
     body.append("变更：PR #")
@@ -152,6 +154,10 @@ final class ReviewBodyRenderer {
     if (convergenceAdvice != null && !convergenceAdvice.isBlank()) {
       // T2.7 轮次超限（03§5）：停止一切新 finding，建议打回重新设计——人在这一关踩刹车
       body.append("### 收敛控制\n> ⚠️ ").append(convergenceAdvice).append("\n\n");
+    }
+    // 07§5 M4a：签字建议（建议型，非审批；绑定 head commit）——覆盖声明之前独立成段
+    for (String line : SignoffSections.lines(signoff)) {
+      body.append(line).append("\n");
     }
     body.append("### 覆盖与统计\n");
     for (String line : coverageLines) {

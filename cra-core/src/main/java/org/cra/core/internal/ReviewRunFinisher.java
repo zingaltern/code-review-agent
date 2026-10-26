@@ -14,6 +14,7 @@ import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
 import org.cra.common.run.ReviewSuggestion;
 import org.cra.common.run.RunStatus;
+import org.cra.common.signoff.SignoffAdvice;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PreExistingBlameChecker;
@@ -55,6 +56,26 @@ final class ReviewRunFinisher {
       ReviewStats stats,
       String summaryLine,
       List<ReviewSuggestion> suggestions) {
+    return finish(
+        trace,
+        runId,
+        request,
+        status,
+        stats,
+        summaryLine,
+        suggestions,
+        SignoffAdvice.disabled(request.headSha(), request.signoff()));
+  }
+
+  static ReviewResult finish(
+      TraceWriter trace,
+      String runId,
+      ReviewRequest request,
+      RunStatus status,
+      ReviewStats stats,
+      String summaryLine,
+      List<ReviewSuggestion> suggestions,
+      SignoffAdvice signoff) {
     Map<String, Object> end = new LinkedHashMap<>();
     end.put("status", status.name().toLowerCase(Locale.ROOT));
     end.put("findings_published", stats.findingsPublished());
@@ -74,7 +95,8 @@ final class ReviewRunFinisher {
         stats,
         "file://" + trace.runDir(),
         summaryLine,
-        suggestions);
+        suggestions,
+        signoff);
   }
 
   /** 聚合后建议快照（本地 pre-PR 报告的建议清单数据源，02§5 本地形态；CI 形态不消费）。 */
