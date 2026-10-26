@@ -91,6 +91,7 @@ final class LocalPrePrReport {
           .append(review.summaryLine())
           .append('\n');
       renderSuggestions(out, review.suggestions());
+      renderSignoff(out, review.signoffAdvice());
     }
     out.append("trace: ")
         .append(review == null ? "（未运行评审，无 trace）" : review.traceRef())
@@ -126,6 +127,57 @@ final class LocalPrePrReport {
         out.append("    建议: ").append(singleLine(s.suggestion())).append('\n');
       }
     }
+  }
+
+  /** 签字建议（M4a；advisory 非审批——agent 永远不是 approver）。 */
+  static void renderSignoff(StringBuilder out, org.cra.common.signoff.SignoffAdvice advice) {
+    if (advice == null) {
+      return;
+    }
+    if (!advice.advisoryOnly()) {
+      out.append("签字建议: 已关闭（agents.signoff.enabled=false）\n");
+      return;
+    }
+    out.append("签字建议（advisory，非审批）: ")
+        .append(advice.tier().displayName())
+        .append(" → 建议 ")
+        .append(advice.recommendedSigners())
+        .append(" 人签字；绑定 commit ")
+        .append(shortSha(advice.commitSha()))
+        .append("（approve 只对该 commit 有效；新 commit 出现即 stale）\n");
+    out.append("  触发规则:\n");
+    for (org.cra.common.signoff.SignoffRuleHit hit : advice.rules()) {
+      out.append("  - ")
+          .append(hit.id())
+          .append("（")
+          .append(hit.tier().displayName())
+          .append("）：")
+          .append(singleLine(hit.reason()));
+      if (!hit.evidence().isEmpty()) {
+        out.append("——证据：").append(String.join("、", fold(hit.evidence())));
+      }
+      out.append('\n');
+    }
+    out.append("  条件: 作者 ")
+        .append(advice.context().authorKnown() ? advice.context().author() : "未知")
+        .append("；测试状态 ")
+        .append(advice.context().testsStatus().name().toLowerCase(java.util.Locale.ROOT))
+        .append('\n');
+    out.append("  声明: agent 的赞成票不计为审批（agent 永远不是 approver）；签字语义 = 核实意图/假设/设计，不是逐行读过\n");
+    out.append("  名单: 指挥 agent 写代码的人必须在签字名单上（PR 模板提示项，05§5）\n");
+    if (advice.stale()) {
+      out.append("  ⚠️ 已 stale: ").append(singleLine(advice.staleReason())).append('\n');
+    }
+  }
+
+  private static List<String> fold(List<String> values) {
+    int max = 5;
+    if (values.size() <= max) {
+      return values;
+    }
+    List<String> folded = new java.util.ArrayList<>(values.subList(0, max));
+    folded.add("等 " + values.size() + " 个");
+    return folded;
   }
 
   private static String singleLine(String text) {

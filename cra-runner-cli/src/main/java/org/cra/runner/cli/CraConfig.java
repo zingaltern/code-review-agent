@@ -46,6 +46,7 @@ import org.cra.common.run.ReviewMode;
  *     CRA_CROSSCHECKER_HISTORY_WEEKS，默认 8）
  * @param reviewMode 发布形态（M4c --push = COMMIT；M4d sweep = ISSUE；默认 PULL_REQUEST，05§2.2）
  * @param pushLookback push 模式沿首父链回溯查找"上一完成 commit"的最大步数（--lookback，默认 20，05§2.4）
+ * @param signoff 签字建议配置（05§5 agents.signoff；M4a；默认开启、作者/测试状态未知）
  */
 public record CraConfig(
     String repoOwner,
@@ -83,7 +84,12 @@ public record CraConfig(
     int crossCheckerHistoryWeeks,
     String llmTemperature,
     int pushLookback,
-    ReviewMode reviewMode) {
+    ReviewMode reviewMode,
+    SignoffConfig signoff) {
+
+  public CraConfig {
+    signoff = signoff == null ? SignoffConfig.defaults() : signoff;
+  }
 
   /**
    * M4c 前形态兼容构造（发布形态 = PR）。
@@ -194,7 +200,8 @@ public record CraConfig(
         crossCheckerHistoryWeeks,
         llmTemperature,
         DEFAULT_PUSH_LOOKBACK,
-        ReviewMode.PULL_REQUEST);
+        ReviewMode.PULL_REQUEST,
+        SignoffConfig.defaults());
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -301,7 +308,8 @@ public record CraConfig(
         8,
         null,
         DEFAULT_PUSH_LOOKBACK,
-        ReviewMode.PULL_REQUEST);
+        ReviewMode.PULL_REQUEST,
+        SignoffConfig.defaults());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -343,7 +351,8 @@ public record CraConfig(
         crossCheckerHistoryWeeks(),
         llmTemperature(),
         pushLookback(),
-        reviewMode());
+        reviewMode(),
+        signoff());
   }
 
   /**
@@ -389,6 +398,7 @@ public record CraConfig(
         crossCheckerHistoryWeeks(),
         llmTemperature(),
         pushLookback(),
-        reviewMode());
+        reviewMode(),
+        signoff());
   }
 }

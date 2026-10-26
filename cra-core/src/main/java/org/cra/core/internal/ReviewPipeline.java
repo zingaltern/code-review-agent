@@ -3,6 +3,7 @@ package org.cra.core.internal;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -23,10 +24,12 @@ import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewStats;
 import org.cra.common.run.RunStatus;
+import org.cra.common.signoff.SignoffAdvice;
 import org.cra.context.api.ContextAssembly;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SignoffOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
 import org.cra.core.internal.pipeline.CrossCheckHistory;
@@ -37,6 +40,7 @@ import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PolicySections;
 import org.cra.core.internal.pipeline.ReviewStage;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
+import org.cra.core.internal.pipeline.SignoffAdvisor;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
 import org.cra.llm.api.LlmGateway;
@@ -83,6 +87,7 @@ public final class ReviewPipeline implements Orchestrator {
   private final FindingPromoter promoter;
   private final ReviewPublisher publisher;
   private final CitedEvidenceResolver citedResolver;
+  private final SignoffAdvisor signoffAdvisor;
   private final ExecutorService verifyPool;
 
   public ReviewPipeline(
@@ -109,7 +114,9 @@ public final class ReviewPipeline implements Orchestrator {
   }
 
   /**
-   * @param crossCheckerOptions CrossChecker 触发配置（05§5 agents.crosschecker；默认关闭不改变基线算术，04§2.2）
+   * M2 形态兼容构造（CrossChecker 关闭、签字建议关闭——不改变既有 Summary 行为）。
+   *
+   * @param crossCheckerOptions CrossChecker 触发配置（null = 关闭）
    */
   public ReviewPipeline(
       GitPlatformAdapter adapter,
@@ -122,6 +129,36 @@ public final class ReviewPipeline implements Orchestrator {
       PipelineOptions options,
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions) {
+    this(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        crossCheckerOptions,
+        SignoffOptions.disabled());
+  }
+
+  /**
+   * @param crossCheckerOptions CrossChecker 触发配置（05§5 agents.crosschecker；默认关闭不改变基线算术，04§2.2）
+   * @param signoffOptions 签字建议配置（05§5 agents.signoff；默认关闭 = 既有行为不变）
+   */
+  public ReviewPipeline(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions) {
     this.ledger = ledger;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
@@ -129,6 +166,7 @@ public final class ReviewPipeline implements Orchestrator {
     this.agentRunner = new AgentRunner(gateway);
     CrossCheckerOptions effectiveCrossChecker =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
+    this.signoffAdvisor = new SignoffAdvisor(signoffOptions);
     this.reviewStage =
         new ReviewStage(
             crew, agentRunner, ContextAssembly.createContextAssembler(), effectiveCrossChecker);
@@ -221,6 +259,9 @@ public final class ReviewPipeline implements Orchestrator {
               roundPlan.lastReviewedHead().map(ReviewBodyRenderer::shortSha).orElse("pr-base")));
 
       DiffResult diff = dataLoader.fetchDiff(request);
+      // 07§5 M4a：风险分级与签字建议（确定性规则，不依赖 LLM；绑定本次 head commit）
+      SignoffAdvice signoff = signoffAdvisor.assess(request, diff);
+      trace.emit("signoff_advice", signoffEvent(signoff, signoffAdvisor.ruleVersion()));
       List<String> earlyDegradations = new ArrayList<>();
       DiffResult reviewDiff =
           roundPlan
@@ -236,7 +277,7 @@ public final class ReviewPipeline implements Orchestrator {
       // Summary 明确建议打回重新设计；不再执行评审与验证（人的职责是踩刹车）
       if (roundPlan.breached()) {
         return ConvergenceBreachHandler.handle(
-            request, runId, trace, publisher, diff, suspectWarning, roundPlan, start);
+            request, runId, trace, publisher, diff, suspectWarning, roundPlan, start, signoff);
       }
 
       // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2；T2.7 diff-only：非首轮按增量）
@@ -302,7 +343,9 @@ public final class ReviewPipeline implements Orchestrator {
                 System.currentTimeMillis() - start,
                 List.copyOf(outcome.degradations()),
                 diff.files().size()),
-            "LLM 不可得: " + outcome.llmError());
+            "LLM 不可得: " + outcome.llmError(),
+            List.of(),
+            signoff);
       }
       List<String> degradations = new ArrayList<>(outcome.degradations());
       degradations.addAll(earlyDegradations);
@@ -422,7 +465,8 @@ public final class ReviewPipeline implements Orchestrator {
               null,
               unverifiedLabeled.stream().map(s -> s.finding().id()).collect(Collectors.toSet()),
               unverifiedCount,
-              outcome.templateVersions());
+              outcome.templateVersions(),
+              signoff);
       ReviewRunFinisher.PublishCounters counters = ReviewRunFinisher.counters(toPublish, plan);
       RunStatus status = degraded ? RunStatus.DEGRADED : RunStatus.SUCCESS;
       ReviewStats stats =
@@ -457,7 +501,8 @@ public final class ReviewPipeline implements Orchestrator {
           status,
           stats,
           summaryLine,
-          ReviewRunFinisher.suggestionsOf(toPublish));
+          ReviewRunFinisher.suggestionsOf(toPublish),
+          signoff);
     } catch (RuntimeException e) {
       // run 级不可恢复故障统一捕获：落盘 FAILED + trace，不阻塞 PR（02§4.2）
       return ReviewRunFinisher.finish(
@@ -468,5 +513,21 @@ public final class ReviewPipeline implements Orchestrator {
           ReviewRunFinisher.emptyStats(System.currentTimeMillis() - start),
           "run failed: " + e.getMessage());
     }
+  }
+
+  /** 签字建议 trace 事件（05§1.4 signoff_advice；agent_approver 恒 false——报告字段显式声明）。 */
+  private static Map<String, Object> signoffEvent(SignoffAdvice signoff, int rulesVersion) {
+    Map<String, Object> event = new LinkedHashMap<>();
+    event.put("decision", signoff.decision());
+    event.put("applicable", signoff.applicable());
+    event.put(
+        "tier", signoff.tier() == null ? "none" : signoff.tier().name().toLowerCase(Locale.ROOT));
+    event.put("recommended_signers", signoff.recommendedSigners());
+    event.put("commit", signoff.commitSha());
+    event.put("stale", signoff.stale());
+    event.put("agent_approver", signoff.agentApprover());
+    event.put("rules", signoff.rules().stream().map(hit -> hit.id()).toList());
+    event.put("rules_version", rulesVersion);
+    return event;
   }
 }

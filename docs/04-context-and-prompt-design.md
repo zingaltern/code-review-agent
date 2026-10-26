@@ -226,7 +226,7 @@ CONFIRMED 的 rationale 必须包含结论原文中未出现的代码行引用�
 ### 4.3 Judge / Summary 模板
 
 - Judge：见 03§4.4 指令；brief 中验证者判定亦以 UNTRUSTED 定界（验证输出同样不可信）；
-- Summary 固定结构：变更概述 → 按严重度排序 finding（Important / Nit / Pre-existing 分组，file:line 链接，正文转义）→ **覆盖声明**（实际评审范围、裁剪与降级、UNVERIFIED/验证不可得计数、REVIEW.md 变更警告）→ 空结果时的明确陈述。
+- Summary 固定结构：变更概述 → 按严重度排序 finding（Important / Nit / Pre-existing 分组，file:line 链接，正文转义）→ **签字建议**（M4a：风险等级/建议人数/绑定 commit/命中规则；固定声明 agent 不是 approver、approve 只对该 commit 有效、签字语义 = 核实意图/假设/设计、指挥者进签字名单）→ **覆盖声明**（实际评审范围、裁剪与降级、UNVERIFIED/验证不可得计数、REVIEW.md 变更警告）→ 空结果时的明确陈述。
 
 ## 5. Prompt 反模式清单（v1.1 增补）
 

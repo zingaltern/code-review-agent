@@ -19,6 +19,7 @@ import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
 import org.cra.common.run.ReviewMode;
 import org.cra.common.run.ReviewRequest;
+import org.cra.common.signoff.SignoffAdvice;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.store.api.ReviewLedger;
@@ -55,7 +56,8 @@ final class ReviewPublisher {
       String convergenceAdvice,
       Set<String> unverifiedIds,
       int unverifiedUnpublished,
-      Map<String, String> templateVersions) {
+      Map<String, String> templateVersions,
+      SignoffAdvice signoff) {
     ReviewMode mode = request.mode();
     boolean pullRequest = mode == ReviewMode.PULL_REQUEST;
     // 无 PR 载体（commit comment / issue）没有行级锚点：全部 finding 以详情进正文（05§2.4/§2.5），
@@ -94,7 +96,8 @@ final class ReviewPublisher {
             convergenceAdvice,
             unverifiedIds,
             unverifiedUnpublished,
-            !pullRequest);
+            !pullRequest,
+            signoff);
     if (request.dryRun()) {
       // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧
       trace.emit(
@@ -345,6 +348,10 @@ final class ReviewPublisher {
       if (body.startsWith(SUPERSEDED_PREFIX)) {
         trace.emit("summary_supersede", Map.of("comment_id", old.commentId(), "status", "skipped"));
         continue;
+      }
+      if (SignoffSections.hasSignoffSection(body) && !SignoffSections.hasStaleNotice(body)) {
+        // 07§5 M4a 规矩 2：approve 只对特定 commit 有效——旧 Summary 的签字建议随新 commit 标记 stale
+        body = SignoffSections.staleNotice(old.commitSha(), request.headSha()) + "\n\n" + body;
       }
       try {
         adapter.updateSummaryComment(

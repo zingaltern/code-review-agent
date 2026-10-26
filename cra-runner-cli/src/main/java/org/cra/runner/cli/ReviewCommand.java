@@ -47,6 +47,7 @@ final class ReviewCommand {
                 toDepth(effective.depth()),
                 effective.dryRun(),
                 effective.securityBlock(),
+                effective.signoff().context(),
                 effective.reviewMode());
         LOG.info(
             "cra review start: repo={}/{} mode={} pr={} base={} head={}",
