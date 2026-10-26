@@ -1,0 +1,94 @@
+package org.cra.server.attest;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import org.cra.common.attest.ReportSignature;
+import org.junit.jupiter.api.Test;
+
+/** 服务端报告签名（04§2.4 M4b）：签发/验签、篡改拒绝、已知 commit 策略。 */
+class AttestationServiceTest {
+
+  private static final String KEY = "server-signing-key";
+  private static final byte[] REPORT =
+      "{\"commit\":\"abc1234\",\"tier\":\"l2\"}".getBytes(StandardCharsets.UTF_8);
+
+  private static final class CapturingStore implements AttestationStore {
+    private final List<AttestationRecord> records = new ArrayList<>();
+
+    @Override
+    public void record(AttestationRecord record) {
+      records.add(record);
+    }
+  }
+
+  private static AttestationService service(boolean known, CapturingStore store) {
+    return new AttestationService(KEY, "key-v1", true, commit -> known, store);
+  }
+
+  @Test
+  void signsAndVerifiesReport() {
+    CapturingStore store = new CapturingStore();
+    AttestationService.Result result = service(true, store).attest(REPORT, "api-token");
+
+    ReportSignature.Envelope envelope = ReportSignature.parse(result.envelopeText());
+    assertThat(
+            ReportSignature.verify(
+                KEY.getBytes(StandardCharsets.UTF_8), envelope, ReportSignature.sha256(REPORT)))
+        .isTrue();
+    assertThat(envelope.commit()).isEqualTo("abc1234");
+    assertThat(envelope.tier()).isEqualTo("l2");
+    assertThat(envelope.keyId()).isEqualTo("key-v1");
+    assertThat(store.records).hasSize(1);
+    assertThat(store.records.get(0).attestationId()).isEqualTo(result.attestationId());
+  }
+
+  @Test
+  void refusesUnknownCommitWhenPolicyEnabled() {
+    assertThatThrownBy(() -> service(false, new CapturingStore()).attest(REPORT, "api-token"))
+        .isInstanceOf(AttestationRejectedException.class)
+        .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
+  }
+
+  @Test
+  void refusesMissingCommitWhenPolicyEnabled() {
+    byte[] noCommit = "{\"tier\":\"l2\"}".getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> service(true, new CapturingStore()).attest(noCommit, "api-token"))
+        .isInstanceOf(AttestationRejectedException.class)
+        .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
+  }
+
+  @Test
+  void permissivePolicySignsUnknownCommit() {
+    AttestationService permissive =
+        new AttestationService(KEY, "key-v1", false, commit -> false, new CapturingStore());
+    AttestationService.Result result = permissive.attest(REPORT, "api-token");
+    assertThat(ReportSignature.parse(result.envelopeText()).commit()).isEqualTo("abc1234");
+  }
+
+  @Test
+  void rejectsInvalidJson() {
+    assertThatThrownBy(
+            () ->
+                service(true, new CapturingStore())
+                    .attest("not-json".getBytes(StandardCharsets.UTF_8), "api-token"))
+        .isInstanceOf(AttestationRejectedException.class)
+        .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(400));
+  }
+
+  @Test
+  void tamperedReportFailsVerification() {
+    AttestationService.Result result =
+        service(true, new CapturingStore()).attest(REPORT, "api-token");
+    ReportSignature.Envelope envelope = ReportSignature.parse(result.envelopeText());
+    byte[] tampered =
+        (new String(REPORT, StandardCharsets.UTF_8) + " ").getBytes(StandardCharsets.UTF_8);
+    assertThat(
+            ReportSignature.verify(
+                KEY.getBytes(StandardCharsets.UTF_8), envelope, ReportSignature.sha256(tampered)))
+        .isFalse();
+  }
+}

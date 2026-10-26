@@ -13,9 +13,9 @@ import org.cra.common.exception.CraConfigException;
 /**
  * 报告哈希（T3.3 L2 门禁：本地跑 + CI 校验报告哈希，04§2.4）。
  *
- * <p><strong>荣誉制局限（如实声明）</strong>：哈希只能证明"CI 看到的报告文件与作者提交的哈希一致"， 不能证明报告由当前 HEAD
- * 真实生成——作者可伪造报告与哈希。彻底消除需 cra-server 托管执行并给报告签名（M4b）。 报告内 {@code commit} 字段提供弱绑定，CI 以 {@code
- * --expect-commit} 校验；不防伪造，同属荣誉制。
+ * <p><strong>荣誉制局限（如实声明）</strong>：哈希只能证明"CI 看到的报告文件与作者提交的哈希一致"， 不能证明报告由当前 HEAD 真实生成——作者可伪造报告与哈希。M4b
+ * 起可改用服务端 HMAC 签名路径（{@code verify --signature}，ADR-0008），签名防伪造但仍不等价于 服务端执行评测。报告内 {@code commit}
+ * 字段提供弱绑定，CI 以 {@code --expect-commit} 校验；不防伪造，同属荣誉制。
  */
 public final class ReportHasher {
 

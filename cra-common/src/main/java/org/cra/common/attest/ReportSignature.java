@@ -1,0 +1,237 @@
+package org.cra.common.attest;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
+import java.util.HexFormat;
+import java.util.List;
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
+
+/**
+ * 服务端报告签名信封（04§2.4 荣誉制消除、M4b）：cra-server 用 HMAC-SHA256 密钥对 L2 评测报告签名，cra-eval verify 用同一密钥验签。
+ *
+ * <p>签名对象 = 报告文件字节的 SHA-256 + commit/tier 绑定字段；信封是行式文本（key:value），不引入 JSON 解析依赖（cra-common
+ * 保持零依赖）。签名只证明"持有服务端密钥者签发了该报告摘要"，不证明报告内容由服务端生成——托管执行是更强的形态，见 ADR-0008 的局限声明。
+ *
+ * <p>信封格式（行序固定，UTF-8）：
+ *
+ * <pre>
+ * cra-report-hmac-sha256-v1
+ * key_id:&lt;服务端密钥标识&gt;
+ * report_sha256:&lt;报告文件 SHA-256 小写十六进制&gt;
+ * commit:&lt;报告绑定的代码提交，可为空&gt;
+ * tier:&lt;l1|l2|l3，可为空&gt;
+ * issued_at:&lt;ISO-8601 签发时间&gt;
+ * run_id:&lt;服务端签发标识&gt;
+ * signature:&lt;HMAC-SHA256 小写十六进制&gt;
+ * </pre>
+ *
+ * <p>HMAC 的输入是前六行（含版本行）以 {@code \n} 连接、末尾无换行；{@code signature} 行不参与。行式格式便于 shell/CI 直接 diff
+ * 与人工审阅，也避免在 cra-common 引入 Jackson。
+ */
+public final class ReportSignature {
+
+  /** 签名方案标识（格式变更必须 bump 版本并写 ADR）。 */
+  public static final String SCHEME = "cra-report-hmac-sha256-v1";
+
+  private static final String HMAC_ALGORITHM = "HmacSHA256";
+  private static final int SHA256_HEX_LENGTH = 64;
+
+  private ReportSignature() {}
+
+  /**
+   * 签名信封（字段与行式格式一一对应）。
+   *
+   * @param keyId 服务端密钥标识（轮换时区分密钥）
+   * @param reportSha256 报告文件 SHA-256（小写十六进制）
+   * @param commit 报告绑定的代码提交（可为空串）
+   * @param tier 报告门禁档位（l1|l2|l3，可为空串）
+   * @param issuedAt 签发时间（ISO-8601）
+   * @param runId 服务端签发标识
+   * @param signature HMAC-SHA256 小写十六进制
+   */
+  public record Envelope(
+      String keyId,
+      String reportSha256,
+      String commit,
+      String tier,
+      String issuedAt,
+      String runId,
+      String signature) {
+
+    public Envelope {
+      keyId = requireText(keyId, "keyId");
+      reportSha256 = requireSha256(reportSha256, "reportSha256");
+      commit = commit == null ? "" : commit.strip();
+      tier = tier == null ? "" : tier.strip();
+      issuedAt = requireText(issuedAt, "issuedAt");
+      runId = requireText(runId, "runId");
+      signature = requireSha256(signature, "signature");
+    }
+
+    /**
+     * HMAC 输入文本（版本行 + 六个字段行；不含 signature 行，末尾无换行）。
+     *
+     * @return canonical text
+     */
+    public String canonicalText() {
+      return String.join(
+          "\n",
+          SCHEME,
+          "key_id:" + keyId,
+          "report_sha256:" + reportSha256,
+          "commit:" + commit,
+          "tier:" + tier,
+          "issued_at:" + issuedAt,
+          "run_id:" + runId);
+    }
+
+    /**
+     * 完整信封文本（canonical + signature 行 + 末尾换行）。
+     *
+     * @return 可落盘/传输的信封
+     */
+    public String text() {
+      return canonicalText() + "\nsignature:" + signature + "\n";
+    }
+  }
+
+  /**
+   * 计算文件字节的 SHA-256（小写十六进制）。
+   *
+   * @param bytes 报告文件字节
+   * @return 64 位十六进制摘要
+   */
+  public static String sha256(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("JVM 不支持 SHA-256", e);
+    }
+  }
+
+  /**
+   * 签发报告签名。
+   *
+   * @param secret HMAC 密钥（服务端持有；UTF-8 原始字节）
+   * @param keyId 密钥标识
+   * @param reportSha256 报告文件 SHA-256
+   * @param commit 报告绑定的代码提交（可空）
+   * @param tier 档位（可空）
+   * @param issuedAt 签发时间
+   * @param runId 签发标识
+   * @return 含签名值的信封
+   */
+  public static Envelope sign(
+      byte[] secret,
+      String keyId,
+      String reportSha256,
+      String commit,
+      String tier,
+      String issuedAt,
+      String runId) {
+    requireSecret(secret);
+    Envelope unsigned =
+        new Envelope(keyId, reportSha256, commit, tier, issuedAt, runId, "0".repeat(64));
+    String signature = hmacHex(secret, unsigned.canonicalText());
+    return new Envelope(keyId, reportSha256, commit, tier, issuedAt, runId, signature);
+  }
+
+  /**
+   * 校验签名信封与报告摘要一致。
+   *
+   * @param secret HMAC 密钥
+   * @param envelope 待验信封
+   * @param actualReportSha256 实际报告文件 SHA-256
+   * @return true = 摘要与签名都一致
+   */
+  public static boolean verify(byte[] secret, Envelope envelope, String actualReportSha256) {
+    requireSecret(secret);
+    if (envelope == null || actualReportSha256 == null) {
+      return false;
+    }
+    String actual = actualReportSha256.strip().toLowerCase(java.util.Locale.ROOT);
+    if (!actual.matches("[0-9a-f]{64}") || !actual.equals(envelope.reportSha256())) {
+      return false;
+    }
+    byte[] expected = HexFormat.of().parseHex(hmacHex(secret, envelope.canonicalText()));
+    byte[] provided = HexFormat.of().parseHex(envelope.signature());
+    return MessageDigest.isEqual(expected, provided);
+  }
+
+  /**
+   * 解析信封文本（严格行序与字段；未知行/缺失行即拒绝）。
+   *
+   * @param text 信封文本
+   * @return 解析结果
+   * @throws IllegalArgumentException 格式非法
+   */
+  public static Envelope parse(String text) {
+    if (text == null) {
+      throw new IllegalArgumentException("签名信封为空");
+    }
+    List<String> lines =
+        Arrays.stream(text.split("\n", -1))
+            .map(String::strip)
+            .filter(line -> !line.isEmpty())
+            .toList();
+    if (lines.size() != 8) {
+      throw new IllegalArgumentException("签名信封行数非法: " + lines.size() + "（期望 8）");
+    }
+    if (!SCHEME.equals(lines.get(0))) {
+      throw new IllegalArgumentException("签名方案不支持: " + lines.get(0));
+    }
+    return new Envelope(
+        value(lines.get(1), "key_id"),
+        value(lines.get(2), "report_sha256"),
+        value(lines.get(3), "commit"),
+        value(lines.get(4), "tier"),
+        value(lines.get(5), "issued_at"),
+        value(lines.get(6), "run_id"),
+        value(lines.get(7), "signature"));
+  }
+
+  private static String value(String line, String field) {
+    String prefix = field + ":";
+    if (!line.startsWith(prefix)) {
+      throw new IllegalArgumentException("签名信封字段非法（期望 " + prefix + "）: " + line);
+    }
+    return line.substring(prefix.length()).strip();
+  }
+
+  private static String requireText(String value, String field) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(field + " 不能为空");
+    }
+    if (value.contains("\n") || value.contains("\r")) {
+      throw new IllegalArgumentException(field + " 不得包含换行");
+    }
+    return value.strip();
+  }
+
+  private static String requireSha256(String value, String field) {
+    String normalized = requireText(value, field).toLowerCase(java.util.Locale.ROOT);
+    if (normalized.length() != SHA256_HEX_LENGTH || !normalized.matches("[0-9a-f]+")) {
+      throw new IllegalArgumentException(field + " 必须为 64 位十六进制");
+    }
+    return normalized;
+  }
+
+  private static void requireSecret(byte[] secret) {
+    if (secret == null || secret.length == 0) {
+      throw new IllegalArgumentException("HMAC 密钥为空");
+    }
+  }
+
+  private static String hmacHex(byte[] secret, String message) {
+    try {
+      Mac mac = Mac.getInstance(HMAC_ALGORITHM);
+      mac.init(new SecretKeySpec(secret, HMAC_ALGORITHM));
+      return HexFormat.of().formatHex(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)));
+    } catch (NoSuchAlgorithmException | java.security.InvalidKeyException e) {
+      throw new IllegalStateException("HMAC-SHA256 不可用", e);
+    }
+  }
+}

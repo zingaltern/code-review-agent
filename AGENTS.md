@@ -21,4 +21,4 @@ main 切分支 → 小步提交 → 需要时 `merge origin/main` → 自检 →
 
 - 设计契约：docs/01–07；**开发规范包 docs/08–11（测试策略/代码规范/架构规范/扩展性契约）与设计契约并行生效**——其中【强制】项由 CI/工具自动守护（Spotless、ArchUnit、JaCoCo 白名单），【建议】项违反须在 PR 说明；工程纪律（文档即契约、测试先行、LLM 调用不进单测等）见 docs/07 §6；
 - 当前状态：docs/00–11 已冻结为 **v1 基线**（2026-10-25，五轮评审 40 项缺陷闭环，对照表见 docs/01 §8），**M0 开工**；里程碑与验收见 docs/07；**基线冻结后：只在评审红/实现撞墙时定点修订，新规则一律走 ADR（docs/adr/，10§6），每里程碑非红驱动文档改动 ≤1 个 PR**；提交前三条腿核查（07 头部）持续生效；
-- 技术栈：Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块（`cra-*`）· OpenAI 兼容协议 LLM 网关。
+- 技术栈：Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 web/JDBC，ADR-0008）· Maven 多模块（`cra-*`）· OpenAI 兼容协议 LLM 网关。

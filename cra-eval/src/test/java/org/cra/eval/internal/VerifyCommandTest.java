@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import org.cra.common.attest.ReportSignature;
 import org.cra.eval.api.EvalReport;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -62,7 +63,37 @@ class VerifyCommandTest {
   }
 
   private EvalCliArgs.VerifyArgs args(Path report, String sha, String tier, String commit) {
-    return new EvalCliArgs.VerifyArgs(report, sha, null, tier, commit);
+    return new EvalCliArgs.VerifyArgs(report, sha, null, tier, commit, null, null, null, null);
+  }
+
+  private EvalCliArgs.VerifyArgs signatureArgs(
+      Path report, Path signature, Path keyFile, String tier, String commit) {
+    return new EvalCliArgs.VerifyArgs(
+        report, null, null, tier, commit, signature, null, keyFile, null);
+  }
+
+  private Path writeKey(String value) throws Exception {
+    Path key = tmp.resolve("signing.key");
+    Files.writeString(key, value);
+    return key;
+  }
+
+  private Path writeSignature(Path report, Path keyFile, String commit, String tier)
+      throws Exception {
+    byte[] secret =
+        Files.readString(keyFile).strip().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    ReportSignature.Envelope envelope =
+        ReportSignature.sign(
+            secret,
+            "test-key-v1",
+            ReportSignature.sha256(Files.readAllBytes(report)),
+            commit,
+            tier,
+            "2026-10-26T21:00:00Z",
+            "att_test");
+    Path signature = tmp.resolve("report.json.sig");
+    Files.writeString(signature, envelope.text());
+    return signature;
   }
 
   @Test
@@ -102,7 +133,57 @@ class VerifyCommandTest {
     Path path = writeReport("l2.json", report(19, true));
     Path hashFile = tmp.resolve("l2.json.sha256");
     ReportHasher.writeSha256File(path, hashFile);
-    EvalCliArgs.VerifyArgs args = new EvalCliArgs.VerifyArgs(path, null, hashFile, "l2", "abc1234");
+    EvalCliArgs.VerifyArgs args =
+        new EvalCliArgs.VerifyArgs(path, null, hashFile, "l2", "abc1234", null, null, null, null);
     assertThat(VerifyCommand.execute(args)).isZero();
+  }
+
+  @Test
+  void serverSignatureVerifiesReport() throws Exception {
+    Path path = writeReport("l2-signed.json", report(19, true));
+    Path key = writeKey("integration-signing-key\n");
+    Path signature = writeSignature(path, key, "abc1234", "l2");
+    assertThat(VerifyCommand.execute(signatureArgs(path, signature, key, "l2", "abc1234")))
+        .isZero();
+  }
+
+  @Test
+  void tamperedReportFailsSignatureVerification() throws Exception {
+    Path path = writeReport("l2-signed.json", report(19, true));
+    Path key = writeKey("integration-signing-key");
+    Path signature = writeSignature(path, key, "abc1234", "l2");
+    Files.writeString(path, Files.readString(path).replace("abc1234", "deadbeef"));
+    assertThat(VerifyCommand.execute(signatureArgs(path, signature, key, "l2", "deadbeef")))
+        .isEqualTo(5);
+  }
+
+  @Test
+  void tamperedEnvelopeFailsSignatureVerification() throws Exception {
+    Path path = writeReport("l2-signed.json", report(19, true));
+    Path key = writeKey("integration-signing-key");
+    Path signature = writeSignature(path, key, "abc1234", "l2");
+    Files.writeString(
+        signature, Files.readString(signature).replace("commit:abc1234", "commit:deadbeef"));
+    assertThat(VerifyCommand.execute(signatureArgs(path, signature, key, "l2", "abc1234")))
+        .isEqualTo(5);
+  }
+
+  @Test
+  void wrongSigningKeyFailsSignatureVerification() throws Exception {
+    Path path = writeReport("l2-signed.json", report(19, true));
+    Path key = writeKey("integration-signing-key");
+    Path signature = writeSignature(path, key, "abc1234", "l2");
+    Path otherKey = writeKey("another-signing-key");
+    assertThat(VerifyCommand.execute(signatureArgs(path, signature, otherKey, "l2", "abc1234")))
+        .isEqualTo(5);
+  }
+
+  @Test
+  void signatureWithMismatchedTierFails() throws Exception {
+    Path path = writeReport("l2-signed.json", report(19, true));
+    Path key = writeKey("integration-signing-key");
+    Path signature = writeSignature(path, key, "abc1234", "l3");
+    assertThat(VerifyCommand.execute(signatureArgs(path, signature, key, "l2", "abc1234")))
+        .isEqualTo(5);
   }
 }

@@ -11,6 +11,25 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # M4b：PG 服务容器（08§3.3 修订）——PG 账本契约测试与 cra-server HTTP 冒烟用同一实例
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: cra_test
+          POSTGRES_USER: cra
+          POSTGRES_PASSWORD: cra
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U cra -d cra_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      CRA_TEST_PG_URL: jdbc:postgresql://localhost:5432/cra_test
+      CRA_TEST_PG_USER: cra
+      CRA_TEST_PG_PASSWORD: cra
     steps:
       - uses: actions/checkout@v4
       - name: 记录开始时间

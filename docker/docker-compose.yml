@@ -1,0 +1,88 @@
+# M4b 服务化部署（PG + cra-server）。生产必须覆盖默认密钥与 LLM/GitHub 配置。
+name: cra-server
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${CRA_POSTGRES_DB:-cra}
+      POSTGRES_USER: ${CRA_POSTGRES_USER:-cra}
+      POSTGRES_PASSWORD: ${CRA_POSTGRES_PASSWORD:-cra}
+    ports:
+      # 仅本机调试用；生产不暴露 PG
+      - "${CRA_POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - cra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CRA_POSTGRES_USER:-cra} -d ${CRA_POSTGRES_DB:-cra}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CRA_SERVER_PORT: "8080"
+      CRA_SERVER_DB_URL: jdbc:postgresql://postgres:5432/${CRA_POSTGRES_DB:-cra}
+      CRA_SERVER_DB_USER: ${CRA_POSTGRES_USER:-cra}
+      CRA_SERVER_DB_PASSWORD: ${CRA_POSTGRES_PASSWORD:-cra}
+      # --- 密钥（默认值仅供本地验收；生产必须覆盖） ---
+      CRA_SERVER_WEBHOOK_SECRET: ${CRA_SERVER_WEBHOOK_SECRET:-dev-webhook-secret-change-me}
+      CRA_SERVER_API_TOKEN: ${CRA_SERVER_API_TOKEN:-dev-api-token-change-me}
+      CRA_SERVER_SIGNING_KEY: ${CRA_SERVER_SIGNING_KEY:-dev-signing-key-change-me}
+      CRA_SERVER_SIGNING_KEY_ID: ${CRA_SERVER_SIGNING_KEY_ID:-dev-key-v1}
+      CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT: ${CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT:-true}
+      # --- 队列与停机 ---
+      CRA_SERVER_QUEUE_CAPACITY: ${CRA_SERVER_QUEUE_CAPACITY:-100}
+      CRA_SERVER_WORKERS: ${CRA_SERVER_WORKERS:-2}
+      CRA_SERVER_DRAIN_TIMEOUT_SECONDS: ${CRA_SERVER_DRAIN_TIMEOUT_SECONDS:-30}
+      CRA_SERVER_SHUTDOWN_GRACE: ${CRA_SERVER_SHUTDOWN_GRACE:-30s}
+      # --- 评审参数 ---
+      CRA_SERVER_REVIEW_DEPTH: ${CRA_SERVER_REVIEW_DEPTH:-standard}
+      CRA_SERVER_DRY_RUN: ${CRA_SERVER_DRY_RUN:-false}
+      CRA_SERVER_RUN_ROOT: /var/lib/cra/runs
+      # 服务端无 checkout：pre-existing 检测降级声明（05§2.1）
+      CRA_SERVER_WORKSPACE: /workspace
+      CRA_SERVER_RUN_TOTAL_TOKENS: ${CRA_SERVER_RUN_TOTAL_TOKENS:-500000}
+      # --- GitHub ---
+      CRA_GITHUB_API_BASE: ${CRA_GITHUB_API_BASE:-https://api.github.com}
+      CRA_GITHUB_TOKEN: ${CRA_GITHUB_TOKEN:-}
+      # --- LLM（必填；缺失则拒绝启动） ---
+      CRA_LLM_API_KEY: ${CRA_LLM_API_KEY:-}
+      CRA_LLM_BASE_URL: ${CRA_LLM_BASE_URL:-}
+      CRA_LLM_MODEL: ${CRA_LLM_MODEL:-}
+      CRA_LLM_MODEL_STRONG: ${CRA_LLM_MODEL_STRONG:-}
+      CRA_LLM_MODEL_LIGHT: ${CRA_LLM_MODEL_LIGHT:-}
+      CRA_LLM_TEMPERATURE: ${CRA_LLM_TEMPERATURE:-}
+      CRA_LLM_FALLBACK_CHAIN: ${CRA_LLM_FALLBACK_CHAIN:-standard,light}
+      CRA_LLM_RPM: ${CRA_LLM_RPM:-}
+      # --- CrossChecker（默认关闭，05§5） ---
+      CRA_CROSSCHECKER_ENABLED: ${CRA_CROSSCHECKER_ENABLED:-false}
+      CRA_CROSSCHECKER_MODES: ${CRA_CROSSCHECKER_MODES:-assumption,sniff}
+      CRA_CROSSCHECKER_HISTORY_WEEKS: ${CRA_CROSSCHECKER_HISTORY_WEEKS:-8}
+      # --- M4f-full 事件史采集骨架（默认关闭） ---
+      CRA_SERVER_EVENT_HISTORY_ENABLED: ${CRA_SERVER_EVENT_HISTORY_ENABLED:-false}
+      CRA_SERVER_EVENT_HISTORY_CRON: ${CRA_SERVER_EVENT_HISTORY_CRON:-0 0 3 * * *}
+    ports:
+      - "${CRA_SERVER_PORT:-8080}:8080"
+    volumes:
+      - cra-runs:/var/lib/cra/runs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      start_period: 30s
+      retries: 5
+    # 优雅停机：Spring Boot graceful + 队列排水（默认 30s）留余量
+    stop_grace_period: 90s
+    restart: unless-stopped
+
+volumes:
+  cra-pgdata:
+  cra-runs:

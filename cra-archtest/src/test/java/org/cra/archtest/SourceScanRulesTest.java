@@ -39,7 +39,8 @@ class SourceScanRulesTest {
           "cra-store",
           "cra-core",
           "cra-runner-cli",
-          "cra-eval");
+          "cra-eval",
+          "cra-server");
 
   private static final Path REPO_ROOT =
       Path.of(System.getProperty("user.dir")).toAbsolutePath().getParent();

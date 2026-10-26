@@ -1,22 +1,26 @@
 package org.cra.eval.internal;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import org.cra.common.attest.ReportSignature;
 import org.cra.common.exception.CraConfigException;
 import org.cra.eval.api.EvalCli;
 import org.cra.eval.api.EvalReport;
 
 /**
- * {@code cra-eval verify} 执行（T3.3 L2 门禁：CI 校验本地报告，04§2.4）。
+ * {@code cra-eval verify} 执行（T3.3 L2 门禁：CI 校验本地报告，04§2.4；M4b：服务端签名校验）。
  *
- * <p>校验三件事：① 报告文件 SHA-256 与作者提交的哈希一致；② 报告内门禁结论为绿；③ 可选字段绑定—— {@code --tier} 要求档位一致、{@code
- * --expect-commit} 要求报告 commit 等于 PR head。任一不满足 → 退出码 5。
+ * <p>校验项：① 报告文件 SHA-256 与作者提交的哈希一致（给了哈希时）；② 报告内门禁结论为绿；③ 可选字段绑定——{@code --tier} 要求档位一致、{@code
+ * --expect-commit} 要求报告 commit 等于 PR head；④ {@code --signature} 要求服务端 HMAC 签名可验、摘要一致、
+ * commit/tier/key_id 绑定一致。
  *
- * <p><strong>局限（如实声明）</strong>：这是荣誉制校验，防传输/仓库内篡改，不防伪造——作者可以伪造报告与哈希 （04§2.4、03§5）。彻底消除需 M4b
- * 服务端托管执行与签名。
+ * <p><strong>局限（如实声明）</strong>：无签名时仍是荣誉制校验，防传输/仓库内篡改，不防伪造（04§2.4）。有服务端签名时，作者无法在不知道 HMAC
+ * 密钥的情况下伪造签名；签名仍只证明"持有服务端密钥者签发了该摘要"，不证明报告由服务端执行（ADR-0008）。
  */
 public final class VerifyCommand {
 
@@ -89,7 +93,11 @@ public final class VerifyCommand {
         lines.add("commit 绑定: 一致");
       }
     }
-    lines.add("荣誉制声明: 哈希校验防篡改不防伪造——不能证明报告由当前 HEAD 真实生成（04§2.4；彻底消除待 M4b 服务端签名）");
+    if (args.signature() != null) {
+      verifySignature(args, report, gate, actualHash, lines, failures);
+    } else {
+      lines.add("服务端签名: 未提供（荣誉制校验，04§2.4；服务化形态用 --signature）");
+    }
     if (failures.isEmpty()) {
       lines.add("结论: 通过");
       ReportWriter.printLines(lines);
@@ -101,6 +109,83 @@ public final class VerifyCommand {
     lines.add("结论: 红");
     ReportWriter.printLines(lines);
     return EvalCli.GATE_RED_EXIT;
+  }
+
+  private static void verifySignature(
+      EvalCliArgs.VerifyArgs args,
+      EvalReport report,
+      EvalReport.Gate gate,
+      String actualHash,
+      List<String> lines,
+      List<String> failures) {
+    byte[] secret = readSigningKey(args);
+    ReportSignature.Envelope envelope;
+    try {
+      envelope = ReportSignature.parse(Files.readString(args.signature(), StandardCharsets.UTF_8));
+    } catch (IOException e) {
+      throw new CraConfigException("签名信封读取失败: " + args.signature() + "（" + e.getMessage() + "）");
+    } catch (IllegalArgumentException e) {
+      failures.add("签名信封格式非法: " + e.getMessage());
+      return;
+    }
+    lines.add(
+        "服务端签名: key_id="
+            + envelope.keyId()
+            + "，签发于 "
+            + envelope.issuedAt()
+            + "，run="
+            + envelope.runId());
+    if (!ReportSignature.verify(secret, envelope, actualHash)) {
+      failures.add("签名校验失败（摘要不一致或 HMAC 不匹配——报告或信封被篡改）");
+      return;
+    }
+    lines.add("签名校验: 一致（HMAC-SHA256）");
+    if (args.signingKeyId() != null
+        && !args.signingKeyId().isBlank()
+        && !args.signingKeyId().equals(envelope.keyId())) {
+      failures.add("签名 key_id 与 --signing-key-id 不一致（期望 " + args.signingKeyId() + "）");
+    }
+    String reportCommit = report.commit() == null ? "" : report.commit().strip();
+    if (reportCommit.isEmpty()) {
+      failures.add("报告缺 commit 绑定：服务端签名无法绑定代码提交（04§2.4）");
+    } else if (!reportCommit.equalsIgnoreCase(envelope.commit())) {
+      failures.add("签名信封 commit 与报告不一致（信封 " + envelope.commit() + "，报告 " + reportCommit + "）");
+    } else {
+      lines.add("签名 commit 绑定: 一致");
+    }
+    String effectiveTier = gate.tier() == null ? "" : gate.tier();
+    if (envelope.tier().isEmpty()) {
+      failures.add("签名信封缺 tier 绑定（04§2.4）");
+    } else if (!envelope.tier().equalsIgnoreCase(effectiveTier)) {
+      failures.add("签名信封 tier 与门禁档位不一致（信封 " + envelope.tier() + "，判定 " + effectiveTier + "）");
+    } else {
+      lines.add("签名 tier 绑定: 一致（" + envelope.tier() + "）");
+    }
+    lines.add("签名语义: 防伪（密钥仅服务端与 CI 持有）；托管执行能力见 ADR-0008");
+  }
+
+  private static byte[] readSigningKey(EvalCliArgs.VerifyArgs args) {
+    if (args.signingKeyFile() != null) {
+      try {
+        String key = Files.readString(args.signingKeyFile(), StandardCharsets.UTF_8).strip();
+        if (key.isEmpty()) {
+          throw new CraConfigException("签名密钥文件为空: " + args.signingKeyFile());
+        }
+        return key.getBytes(StandardCharsets.UTF_8);
+      } catch (IOException e) {
+        throw new CraConfigException(
+            "签名密钥文件读取失败: " + args.signingKeyFile() + "（" + e.getMessage() + "）");
+      }
+    }
+    String envName = args.signingKeyEnv();
+    String key = envName == null ? null : System.getenv(envName);
+    if (key == null || key.isBlank()) {
+      throw new CraConfigException(
+          "签名密钥不可得: 环境变量 "
+              + (envName == null ? VerifyArgsParser.DEFAULT_SIGNING_KEY_ENV : envName)
+              + " 为空（或用 --signing-key-file；05§6 密钥只从环境变量/文件读）");
+    }
+    return key.strip().getBytes(StandardCharsets.UTF_8);
   }
 
   private static String normalize(String hex) {

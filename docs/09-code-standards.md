@@ -128,7 +128,7 @@ public abstract class CraException extends RuntimeException { … }
 ## 7. 依赖与语言特性
 
 - **【建议】不引入 Lombok**：record + 手写已覆盖全部需求——AI agent 生成 record 零成本，少一个注解处理器就少一类构建不确定性；同理不引入其他编译期代码生成。
-- **【强制】新依赖必须在 PR 说明用途与替代方案**（"为什么不用现有依赖/JDK 标准库"）；红线由 maven-enforcer 自动管：禁 SNAPSHOT、禁重复日志实现、`requireUpperBoundDeps`。既定白名单（01§5.2）：jgit、Jackson、Spring Boot（仅 DI/配置，02§7）、SLF4J/Logback+JSON 编码器；**禁任何编排/重流程框架**（01§5.1）。
+- **【强制】新依赖必须在 PR 说明用途与替代方案**（"为什么不用现有依赖/JDK 标准库"）；红线由 maven-enforcer 自动管：禁 SNAPSHOT、禁重复日志实现、`requireUpperBoundDeps`。既定白名单（01§5.2）：jgit、Jackson、Spring Boot（DI/配置；M4b 起 web/JDBC 仅限 cra-server 组合根，02§7、ADR-0008）、SLF4J/Logback+JSON 编码器；**禁任何编排/重流程框架**（01§5.1）。M4b 新增：PostgreSQL JDBC 驱动（仅 server/host 运行时与 store 测试）与 Testcontainers（仅 `cra-store` 的 PG 契约测试，08§3.3 修订）。
 - Java 17 特性用法，各 1 例：
 
 ```java

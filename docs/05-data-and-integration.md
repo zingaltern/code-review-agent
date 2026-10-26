@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
 > **v1.2**：指纹 v2 + 解析器规则 + 发布侧转义剥离；replies 双端点；workflow draft 过滤与 cli 分发。
@@ -171,6 +172,8 @@ brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 
 CI 形态无本地库（账本=GitHub）；本地/服务形态：`review_run`、`finding`、`verdict`、`published_comment`、`prompt_template_version` 表，`ReviewLedger` SPI 统一抽象（cra-store）。已落地：M1 建 review_run/finding；M2 T2.11 建 `prompt_template_version`（repo/pr_number/run_id/template_name/template_version，随 run 落库，05§1.2 prompt_template_versions 的持久化形态）；verdict/published_comment 随验证层/处置采集数据面落地。
 
+**M4b 服务形态（2026-10-26，ADR-0008）**：`cra-store` 新增 `PostgresLedger`（`StoreAssembly.createPostgresLedger`），五表全部建表（`db/postgres/ledger.sql`，手写幂等 DDL）；读写语义与 SQLite 形态一致——完成标记只认 DONE|DEGRADED、commit 匹配大小写不敏感、同 finding_id 重登记幂等（`ON CONFLICT ... DO UPDATE`）。`verdict`/`published_comment` 当前只有表与迁移，读取方随验证层/处置采集数据面接入（不建无读取方的投机 SPI 方法）。server 自有表 `webhook_delivery`（delivery 幂等键）、`report_attestation`（签发审计）、`schema_migration` 由 `db/postgres/server.sql` 创建。
+
 ## 2. GitPlatformAdapter SPI（v1.1 修订）
 
 ### 2.1 接口定义（v1.1 修订）
@@ -335,11 +338,16 @@ cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
 cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.sha256 \
   --tier l2 --expect-commit "$REPORT_COMMIT"
 
+# M4b 服务端签名路径（04§2.4、ADR-0008）：报告摘要由 cra-server 签发 HMAC 信封
+# 密钥只从环境变量/文件读（默认 CRA_REPORT_SIGNING_KEY；--signing-key-file 用于本地演示）
+cra-eval verify --report eval/l2/report.json --signature eval/l2/report.json.sig \
+  --tier l2 --expect-commit "$REPORT_COMMIT"
+
 # 离线重判（阈值/检查项变更后用同一批观测重算门禁；不重跑 LLM）
 cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256-out PATH]
 ```
 
-`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` 或 `--sha256-file <path>`（二选一）、`--tier`、`--expect-commit`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
+`run` 参数（在 M1/M2 基础上只做加法）：`--tier auto|l1|l2|l3`、`--commit SHA`（缺省取 `GITHUB_SHA`）、`--fail-on-red`（无值开关）、`--sha256-out PATH`、`--crosschecker-enabled`（M4f context 类是否计入门禁）；`--set` 增 `l2` 别名（bad+clean）。`verify` 参数：`--report`（必填）、`--sha256 <hex>` / `--sha256-file <path>` / `--signature <path>`（至少一个）、`--tier`、`--expect-commit`；签名模式下追加 `--signing-key-env`（默认 `CRA_REPORT_SIGNING_KEY`）或 `--signing-key-file`，可选 `--signing-key-id`；门禁结论按**当前**阈值重算（不信任报告内陈旧 gate，阈值下调后旧报告不能凭旧判通过；与存量 gate 不一致时打印差异提示）。`gate` 参数：`--report`（必填）、`--tier`（缺省沿用报告档位）、`--json-out`、`--sha256-out`、`--crosschecker-enabled`。
 
 退出码：`0` 正常完成或 verify/gate 通过；`2` 自身故障（参数/数据集/被测对象启动失败）；**`5` 门禁红或 verify 校验失败**（`--fail-on-red` / `gate` 生效时；CI 的 L1/L2 job 以此判定，04§2.4）。门禁结论同时写入 JSON 报告的 `gate` 字段（`passed` + 逐项 `checks`），文本报告头部输出同一结论。`gate` 重判不修改源报告；`--json-out` 另行落盘重判结果（含新 gate 与哈希），用于阈值变更后的取证（评测重跑范围纪律：只重判、不整轮重跑）。
 
