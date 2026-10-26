@@ -41,8 +41,8 @@ git config commit.gpgsign false
 git config user.name "cra-eval-fixture"
 git config user.email "fixture@example.invalid"
 
-commit_tree() { # $1=source tree dir $2=author/committer date $3=message
-  rsync -a --delete --exclude .git "$1"/ ./
+commit_tree() { # $1=source tree dir $2=author/committer date $3=message（--checksum：size+mtime 相同也须按内容覆盖，20→50 同长陷阱）
+  rsync -a --checksum --delete --exclude .git "$1"/ ./
   git add -A
   GIT_AUTHOR_DATE="$2" GIT_COMMITTER_DATE="$2" git commit -q -m "$3"
 }
