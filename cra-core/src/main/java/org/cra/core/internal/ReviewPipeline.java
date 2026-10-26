@@ -261,7 +261,7 @@ public final class ReviewPipeline implements Orchestrator {
       DiffResult diff = dataLoader.fetchDiff(request);
       // 07§5 M4a：风险分级与签字建议（确定性规则，不依赖 LLM；绑定本次 head commit）
       SignoffAdvice signoff = signoffAdvisor.assess(request, diff);
-      trace.emit("signoff_advice", signoffEvent(signoff));
+      trace.emit("signoff_advice", signoffEvent(signoff, signoffAdvisor.ruleVersion()));
       List<String> earlyDegradations = new ArrayList<>();
       DiffResult reviewDiff =
           roundPlan
@@ -511,7 +511,7 @@ public final class ReviewPipeline implements Orchestrator {
   }
 
   /** 签字建议 trace 事件（05§1.4 signoff_advice；agent_approver 恒 false——报告字段显式声明）。 */
-  private static Map<String, Object> signoffEvent(SignoffAdvice signoff) {
+  private static Map<String, Object> signoffEvent(SignoffAdvice signoff, int rulesVersion) {
     Map<String, Object> event = new LinkedHashMap<>();
     event.put("decision", signoff.decision());
     event.put("applicable", signoff.applicable());
@@ -522,6 +522,7 @@ public final class ReviewPipeline implements Orchestrator {
     event.put("stale", signoff.stale());
     event.put("agent_approver", signoff.agentApprover());
     event.put("rules", signoff.rules().stream().map(hit -> hit.id()).toList());
+    event.put("rules_version", rulesVersion);
     return event;
   }
 }

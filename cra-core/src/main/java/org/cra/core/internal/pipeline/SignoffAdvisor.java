@@ -40,7 +40,7 @@ public final class SignoffAdvisor {
           "(?i)(?:^|[._-])(?:feature|flags?|toggle|enabled|disabled)(?:[._-]|\\s*[:=])"
               + "|^[A-Za-z0-9_.-]+\\s*:\\s*(?:true|false)$");
 
-  private static final int MINOR_RULE_VERSION = 1;
+  private static final int RULE_VERSION = 1;
 
   private final SignoffOptions options;
 
@@ -175,7 +175,7 @@ public final class SignoffAdvisor {
 
   /** 规则版本（trace/报告留痕；规则语义变更时递增）。 */
   public int ruleVersion() {
-    return MINOR_RULE_VERSION;
+    return RULE_VERSION;
   }
 
   private static List<String> effectivePaths(DiffFile file) {

@@ -127,7 +127,7 @@
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"ledger_parse","valid":11,"suspect":0,"fallback":"none|commit-gate"}
 {"ts":"…","event":"plan","effective_depth":"standard","chunks":4,"skipped":2}
-{"ts":"…","event":"signoff_advice","decision":"ADVISORY_ONLY|DISABLED","applicable":true,"tier":"low|medium|high|none","recommended_signers":2,"commit":"abc1234…","stale":false,"agent_approver":false,"rules":["high-risk-path","business-logic"]}
+{"ts":"…","event":"signoff_advice","decision":"ADVISORY_ONLY|DISABLED","applicable":true,"tier":"low|medium|high|none","recommended_signers":2,"commit":"abc1234…","stale":false,"agent_approver":false,"rules":["high-risk-path","business-logic"],"rules_version":1}
 {"ts":"…","event":"template_versions","versions":{"bug-hunter/dataflow":"dataflow@1a2b3c04","security-reviewer":"security@5e6f7a80"}}
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"blame_check","note":"…"}
