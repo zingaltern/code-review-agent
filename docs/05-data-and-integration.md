@@ -6,7 +6,7 @@
 > **v1.2.1**：run 完成标记（status=DONE）；Summary 载体改 issue comment；滑窗容错（02§4.1）。
 > **v1.3.1**：§1.1 Finding 枚举补 **`context`**（v1.3 新增 CrossChecker 的输出类别未传播到 schema，其全部输出会被 schema 校验拒收——四轮里第三次同类病）；§4 补回滚职责注（修复 01§3.4 悬空引用）；§5 补 CrossChecker 配置项。
 > **v1.3.2**（M2 T2.9–T2.11 实现撞墙定点修订，2026-10-25）：§3 本地 CLI 实参补齐（--exec/--ledger-db/三档路由参数）、退出码新增 **4**（本地实跑失败，验收 8 的可判定信号）、本地解析语义（repo/head/token/LLM 可省、pr=0）；§1.4 补 `template_versions` 事件；§1.5 登记 `prompt_template_version` 落地。
-> **v1.4**（M4c push 直推 + M4d 夜间存量定点修订，2026-10-26）：§1.3 账本键控扩展（`ReviewKey` = repo + 形态 + (pr|commit)；无 PR 载体粒度 = 载体评论级；**标记格式不变**）；§2.1 SPI 增 commit/issue 载体 default 方法与 `LocalRepoContext.firstParentChain`；§2.4/§2.5 载体语义；§2.3 端点清单补 commit comment 与 issues 列表/创建；§3 CLI 增 `--push` / `sweep`；§4 触发边界表补 push 与夜间定时的平台事实；§6 token 权限补 push 形态 `contents: write`。
+> **v1.4**（M4c push 直推 + M4d 夜间存量定点修订，2026-10-26）：§1.3 账本键控扩展（`ReviewKey` = repo + 形态 + (pr|commit)；无 PR 载体粒度 = 载体评论级；**标记格式不变**）；§1.4 trace 增 `mode`/`carrier` 字段；§2.1 SPI 增 commit/issue 载体 default 方法与 `LocalRepoContext.firstParentChain`；§2.4/§2.5 载体语义；§2.3 端点清单补 commit comment 与 issues 列表/创建；§3 CLI 增 `--push` / `sweep`；§4 触发边界表补 push 与夜间定时的平台事实；§6 token 权限补 push 形态 `contents: write`。
 
 ---
 
@@ -162,6 +162,8 @@
 ```
 
 **v1.2 补登（M2 T2.4–T2.8 实现面）**：`convergence`（轮次与 diff-only 基点，03§5）、`merge`/`merge_summary`（run 内精确去重，03§4.5）、`verify`（三值判定计数，03§4.2）、`verify_retry`（验证不可得缩上下文重试，02§4.2）、`verify_followup`（INSUFFICIENT 受控补查，03§4.2）、`anti_anchor_check`（反锚定质控信号 PASS/FAIL，不阻断晋升）、`judge_start`/`judge`（仲裁与抽查复核，03§4.4）、`promotion`（晋升决定与抽查保险丝命中，03§4.3）。
+
+**v1.4 字段扩展（M4c/M4d）**：`run_start` 增 `mode`（`pull_request|commit|issue`）；`publish` 增 `mode` 与 `carrier`（PR 形态无 `carrier`；无 PR 形态为 `commit_comment|issue`，`comments` 为该载体条数 0/1）。事件名不变，旧消费方按缺省字段兼容。
 
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 
