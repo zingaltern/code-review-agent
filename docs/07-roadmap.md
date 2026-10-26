@@ -1,5 +1,6 @@
 # 07 · 实施路线图与任务拆解
 
+> 文档版本：v1.4（2026-10-26，M4c push 直推 + M4d 夜间存量落地记录与验收证据）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ⑥及终审建议）
 > **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项。
 > **v1.3**：T1.4 新段落解析；M4a 签字规矩；M4f 拆 f-lite/f-full。
@@ -140,7 +141,7 @@
 > **官方 L3 重跑（2026-10-26，opencode-go / deepseek-v4.1-flash，temperature=0.2，reasoning_effort=none，commit `4074097`，run 40342221542）**：
 > - **召回 78/90 = 86.7%，Wilson 95% 下界 0.7813 ≥ 0.70 → 官方达标** ✅（与标注校准后的离线重判一致，离线结论被官方重跑证实）
 > - 零发布**样本级 0/30 = 0% ≤ 1/12** ✅（观测级 8/90 = 8.9% 作观察指标）；幻觉拒绝 15/15 = 100% ✅；注入不变量 0 违反 ✅；clean 误报 0.68 ≤ 1.5 ✅；186 观测全部完成 ✅
-> - **context 4/6 = 66.7%（Wilson [0.30, 0.91]）< 0.80 → 红**：CrossChecker 已可触发（B 方案生效——两 context 用例 diff 造大至 440/444 行，standard 不再降档），4/6 属 2 case × 3 run 的运行间波动；**阈值 0.80 为 M3 首设、无文档依据（06§1.2 仅要求"纳入门禁"）**，n=6 的统计功效不足以支撑该判定——待 owner 裁决（① 接受记录；② 扩充 context 用例至 ≥4 个（06§1.2 的 ≥2 是下限）；③ 按 n=6 功效调整阈值）
+> - **context 4/6 = 66.7%（Wilson [0.30, 0.91]）< 0.80 → 红**：CrossChecker 已可触发（B 方案生效——两 context 用例 diff 造大至 440/444 行，standard 不再降档），4/6 属 2 case × 3 run 的运行间波动；**阈值 0.80 是 06§1.2 的首设值（对抗 ④ 只要求"纳入门禁"，数值取对抗 ① 同档），但 n=6 的统计功效不足、未经统计校准**——待 owner 裁决（① 接受记录；② 扩充 context 用例至 ≥4 个（06§1.2 的 ≥2 是下限）；③ 按 n=6 功效调整阈值）
 > - **M3 验收 2：召回子项官方通过；context 子项未达标（质量缺口，非结构性）**
 
 > **context 4/6 归因与修复验证（2026-10-26，commit `8a5c9de`，run 40355527535）**：
@@ -171,8 +172,8 @@
 
 - **M4a 风险分级建议（v1.3 吸收三条签字规矩与分级表，01§3.4 担责）**：输出 Low/Medium/High 建议（只建议不审批——**agent 永远不算 approver**）；三条规矩入设计：① agent 赞成票不计为审批（已有原则）；② **approve 只对特定 commit 有效，新 commit 必须重审**——与账本 DONE/指纹的 commit 绑定语义同源（05§1.3），建议输出绑定 commit_sha；③ **指挥 agent 写代码的人必须在签字名单上**（PR 模板提示项）；分级参考（Anthropic 形态）：低风险（纯文档/功能开关，测试全过 + 可信作者 → 建议 0 人签）/ 中风险（常规业务逻辑、系统提示词 → 1 人）/ 高风险（核心高危路径、难恢复的关键配置 → 2 人）；签字语义 = 核实**意图/假设/设计**而非逐行读过（01§3.4）；
 - **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；承担 M4f-full 的事件史采集定时任务；
-- **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）；
-- **M4d 夜间存量评审**：产出 issue 而非 PR comment；
+- **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）。**已落地（2026-10-26）**：`cra review --push`（无 PR；载体 = 单条 commit comment，全部 finding 以详情进正文，DONE 标记在末位）；base 沿首父链查 commit comment 账本取"上一完成 commit"（`--lookback` 默认 20，首次 = 仓库初版，`--base`/`--baseline` 可显式指定，本地仓库不可得时拒绝启动）；账本键 `repo + commit`（05§1.3 v1.4 键控扩展）；workflow `review-push` job（`branches:[main]` 分支过滤 + 跳过 merge commit 与 bot 提交 + 同 ref 串行）。**执行记录（2026-10-26）**：三提交 fixture 仓库 + 本地 GitHub/LLM stub 实跑——C2 首推 base=C1、产出 1 条 commit comment（正文含 `### 发现详情`、`status=DONE`）；同 C2 重跑 `SKIPPED`、评论数仍 1；C3 推送 base 解析为**上一完成 commit C2**（不是简单的 HEAD^）、产出第 2 条 comment；同 C3 重跑 `SKIPPED`、评论数仍 2——载体与幂等均符合 05§2.4；
+- **M4d 夜间存量评审**：产出 issue 而非 PR comment。**已落地（2026-10-26）**：`cra sweep --since 30d --max-prs 10`（扫描窗口与上限可配，深度默认 quick）；窗口内每个历史 PR 复用完整流水线，产出**逐 PR issue**（Summary + 全部 finding 详情 + DONE 标记）与**扫描汇总 issue**（范围/逐 PR 结果/tokens/截断与降级声明）；幂等 = head commit 的 DONE 闸（重复夜间跑 → SKIPPED，全部跳过时不产汇总）；独立 nightly workflow（cron 18:00 UTC + workflow_dispatch，issues:write）。**执行记录（2026-10-26）**：同一 fixture 上首轮 sweep 评审 PR #7/#8 → issue #100/#101（均含详情与 DONE）+ 汇总 issue #102；第二轮对同一批 PR 均 `SKIPPED`、issue 总数仍 3（零新 issue）——幂等与"第二跑不重复"符合 05§2.5；**收口补强（2026-10-27）**：汇总声明窗口内 PR 总数/本次评审数/被 `--max-prs` 截断数，汇总发布失败以退出码 2 收尾（逐 PR issue 不回滚）；
 - **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**；
 - **M4f CrossChecker（v1.3 按 03§3.1 详设拆两阶段）**：
   - [x] **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；**已落地（2026-10-26）：`cross-checker` 角色 + 单次 LLM 调用（预算 16k/1.5k/2 轮）+ `LocalRepoContext.recentCommits` jgit 实现（窗口以 head committer time 为锚，排除本 PR 自身 commit）+ `agents.crosschecker` 配置（默认关闭，standard/deep 档 1 实例，quick/无数据优雅跳过并进覆盖声明）+ 矛盾来源引用格式权威定义（`ContextCitation`：`commit <sha> path <path>` / `REVIEW.md <段名>: <条目>`）+ verifier/judge 分型组装解析该格式；验收 fixture（真实 git 仓库 + REVIEW.md Known incidents）端到端产出 category=context 的 confirmed finding，见 `CrossCheckPipelineTest`**；

@@ -42,10 +42,12 @@ class AppConfig {
 
   @Bean
   ReviewLedger reviewLedger(GitHubComponents components) {
-    // ADR-0005：GitHub 评论账本构造器注入 CommentSource（同一实现的双端口视图）
+    // ADR-0005：GitHub 评论账本构造器注入 CommentSource（同一实现的双端口视图）；
+    // M4c/M4d：发布形态决定账本载体（PR 评论 / commit comment / issue，05§1.3）
     return StoreAssembly.createGitHubLedger(
         components.commentSource(),
-        new org.cra.common.git.RepoRef(config.repoOwner(), config.repoName()));
+        new org.cra.common.git.RepoRef(config.repoOwner(), config.repoName()),
+        config.reviewMode());
   }
 
   @Bean

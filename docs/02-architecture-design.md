@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.4（2026-10-26，M4c/M4d：§5 账本载体扩展为 PR 评论 / commit comment / issue 三形态，触发边界表补 push 与夜间定时两行，映射表更新 push 双触发状态）
 > 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③⑤；规范包 08–11 入库时 §3 登记 cra-archtest）
 > 前置阅读：`01-background-and-research.md`
@@ -152,7 +153,7 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 
 **GitHub 评论账本语义**（CI 形态的承重设计）：
 
-1. **可重建状态**：已发布 finding 及其指纹（解析 bot 历史评论中的 HTML 注释标记，解析规则见 05§1.3）、处置信号（对这些评论的 reply/reaction 事件，06§1.1 采集）、PR 级收敛历史（哪些 finding 已在早前 run 发布过）；
+1. **可重建状态**：已发布 finding 及其指纹（解析 bot 历史评论中的 HTML 注释标记，解析规则见 05§1.3）、处置信号（对这些评论的 reply/reaction 事件，06§1.1 采集）、PR 级收敛历史（哪些 finding 已在早前 run 发布过）；**M4c/M4d 起账本载体扩展**：push 形态 = bot 的 commit comment，夜间形态 = bot 的 issue，键控见 05§1.3（标记格式不变，只换载体与键）；
 2. **放弃的状态**：未发布候选、子代理中间输出、跨 run 的 trace 查询——接受随 artifact 保留期丢失；评价：这些是调试便利而非机制依赖，机制（幂等/收敛/处置）全部只依赖可重建部分；
 3. **回灌**：workflow 末尾上传 trace artifact；`cra-eval report` 从 GitHub API 拉账本聚合周报，**无需任何常驻服务**；
 4. **评论生命周期收尾（v1.2.1 修正载体）**：新 run 发布成功后，对同 PR 上一轮（旧 head_sha）的 bot Summary **issue comment**（05§2.2，可 PATCH 编辑）加前缀 `[已被 run_xxx 取代]`；上一轮的 inline 评论由 GitHub 自动标 outdated（保持可见，不删除——处置采集依赖其存在；resolve 状态为 GraphQL-only，本项目锁 REST v3，不操作 resolve）。
@@ -164,6 +165,8 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 | 冲突 PR（mergeable=conflicting） | `pull_request` workflow **不触发**（merge ref 无法创建，官方行为）——最需要反馈的 PR 会静默无评审 | 无法在触发层解决；owner 解决冲突后的 synchronize 会正常触发；限制写入 README 与部署文档 |
 | draft PR | 照常触发（浪费成本与噪声） | workflow 加 `draft == false` 条件 + `ready_for_review` 类型触发（05§4） |
 | fork PR | `GITHUB_TOKEN` secrets 不可用（pull_request_target 语义另论） | 当前个人仓库无碍；多协作者时代再引入 App token，写入限制声明 |
+| 直推（push）受保护分支（M4c） | 没有 PR 事件、没有 diff 行级锚点（commit comment 只能锚定 commit） | `push` workflow + `cra review --push`：载体 = 单条 commit comment，全部 finding 以详情进正文；base 由 CLI 沿首父链查账本解析为"上一完成 commit"（05§2.4）；merge commit / bot 提交由 workflow `if` 跳过 |
+| 夜间存量评审（M4d） | 定时任务无 PR 事件；向已合并/已关闭 PR 回帖无归属语义 | `cra sweep`：窗口内最近 N 个历史 PR 批量评审，**每条 PR 一个 issue**（另发扫描汇总 issue），幂等按 head commit 的 DONE 闸（05§2.5） |
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
@@ -180,7 +183,7 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 |---|---|
 | `OpenAiCodeReview#main`（ProcessBuilder 跑 git diff） | `cra-git-github` 的 diff 获取（compare API）；**本地 jgit 用于 blame 与本地模式**——v1.0"完全不依赖本地 git"的说法收回：CI 内 checkout 本就存在，blame 无 API 只能本地做（05§2） |
 | `openai-code-review-sdk` 打 jar 在 CI 运行 | `cra-runner-cli`（增加参数、幂等、trace、artifact 上传） |
-| push + PR 双触发 workflow | **M0–M3 仅 PR 触发**；push 直推评审（commit-comment 模式）排入 M4（05§4） |
+| push + PR 双触发 workflow | **M0–M3 仅 PR 触发**；**M4c 已落地 push 直推评审**（commit-comment 载体 + 首父链解析上一完成 commit，05§2.4）；**M4d 夜间存量**（issue 载体，05§2.5） |
 | `openai-code-review-test` 验证工程 | `cra-eval` + 自举 workflow |
 | 根 pom Java 8 / SB 2.7 | Java 17 / Spring Boot 3.x（仅 DI 与配置） |
 
