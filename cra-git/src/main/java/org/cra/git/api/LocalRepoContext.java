@@ -61,4 +61,21 @@ public interface LocalRepoContext {
   default List<CommitHistoryEntry> recentCommits(Set<String> paths, int weeks, String headSha) {
     return List.of();
   }
+
+  /**
+   * 首父链（M4c push 模式的"上一完成 commit"基线解析，05§2.4）：从 {@code headSha} 起沿第一父提交回溯，返回时间正序（head 在前）。用于在账本中逐
+   * commit 查找最近的完成标记，从而确定本次 push 的 base。
+   *
+   * <p>SPI 演进新增 default 方法（11§4 第 1 条）：默认不可得返回空列表——无本地仓库是合法形态（纯 API 模式），调用方据此 要求显式 {@code --base}
+   * 并如实失败，不假装能算出基线。
+   *
+   * <p>best effort 语义：head 不可解析 / 非仓库 / 读取失败均返回空列表，不抛异常不炸 run。
+   *
+   * @param headSha 链头 commit（完整或缩写 sha）
+   * @param limit 最多返回的 commit 数（≤0 视为不可得）
+   * @return commit sha 列表（head 在前；不可得为空列表）
+   */
+  default List<String> firstParentChain(String headSha, int limit) {
+    return List.of();
+  }
 }

@@ -1,10 +1,13 @@
 package org.cra.git.api;
 
 import java.util.List;
+import java.util.Optional;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.FileContent;
+import org.cra.common.git.PostCommitReviewCommand;
+import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.RepoRef;
@@ -85,4 +88,30 @@ public interface GitPlatformAdapter {
    * @return 处置信号数组
    */
   DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);
+
+  /**
+   * 发布 commit comment 载体（M4c push 直推形态，05§2.4；SPI 演进新增 default 方法，11§4 第 1 条）。
+   *
+   * <p>commit comment 无行级锚点，全部 finding 以详情列表进入正文，文末带 run 完成标记。默认以 {@link
+   * UnsupportedOperationException} 拒绝（"不可得"语义，11§4 第 5 条）——平台不支持 push 形态时组合根不得进入该模式， 不允许静默丢弃发布。
+   *
+   * @param cmd commit comment 发布命令
+   * @return 成功时返回 commit comment id；平台未返回 id（异常形态）为空
+   */
+  default Optional<Long> postCommitReview(PostCommitReviewCommand cmd) {
+    throw new UnsupportedOperationException("commit review carrier unsupported by this adapter");
+  }
+
+  /**
+   * 发布 issue 载体（M4d 夜间存量评审，05§2.5；SPI 演进新增 default 方法，11§4 第 1 条）。
+   *
+   * <p>每条被评审 PR 一个 issue：正文含 Summary 与全部 finding 详情，文末带 run 完成标记。默认拒绝（不可得语义， 11§4 第 5 条），理由同 {@link
+   * #postCommitReview}。
+   *
+   * @param cmd issue 发布命令
+   * @return 成功时返回 issue 编号；平台未返回编号（异常形态）为空
+   */
+  default Optional<Long> postIssueReview(PostIssueCommand cmd) {
+    throw new UnsupportedOperationException("issue review carrier unsupported by this adapter");
+  }
 }

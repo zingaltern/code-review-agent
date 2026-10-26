@@ -14,6 +14,7 @@ import java.util.Objects;
  * @param state 平台状态：open|closed（是否合并看 {@link #mergedAt()}）
  * @param updatedAt 最近更新时间（窗口过滤依据）
  * @param mergedAt 合并时间（未合并为 null）
+ * @param baseSha PR 基线 sha（M4d 夜间存量评审的 diff 数据面；旧数据源可缺省为 null）
  */
 public record PullRequestRef(
     int number,
@@ -21,7 +22,28 @@ public record PullRequestRef(
     String mergeCommitSha,
     String state,
     Instant updatedAt,
-    Instant mergedAt) {
+    Instant mergedAt,
+    String baseSha) {
+
+  /**
+   * 周报形态兼容构造（M3 数据面，无 base sha）。
+   *
+   * @param number PR 编号
+   * @param headSha PR 分支 head
+   * @param mergeCommitSha 合并提交 sha
+   * @param state 平台状态
+   * @param updatedAt 最近更新时间
+   * @param mergedAt 合并时间
+   */
+  public PullRequestRef(
+      int number,
+      String headSha,
+      String mergeCommitSha,
+      String state,
+      Instant updatedAt,
+      Instant mergedAt) {
+    this(number, headSha, mergeCommitSha, state, updatedAt, mergedAt, null);
+  }
 
   /** 平台状态 open。 */
   public static final String STATE_OPEN = "open";

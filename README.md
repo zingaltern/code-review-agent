@@ -163,7 +163,7 @@ Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 we
 | M1 工程化与账本 | 完成（v0.2.0） |
 | M2 隔离审查 + 独立复核 + 本地 pre-PR | 完成（v0.3.0）；L3 验收 2 部分通过，零发布缺口经 owner 裁决接受 |
 | M3 评测闭环 + 双验证者投票 | 工程交付完成；**标注质检校准后 L3 召回 78/90 = 86.7%（Wilson 下界 0.7813 ≥ 0.70，保守离线复核 74/90 亦达标）、零发布样本级全零 0/30 → 验收 2 通过**；context 结构性缺口已修（diff 造大 + CrossChecker 输出预算 4k）→ **修复后 2 case × k=3 检出 6/6 = 1.000 ≥ 0.80**；**官方 L3 重跑（opencode-go，4074097）：召回 78/90 = 86.7%（Wilson 0.7813 ≥ 0.70）官方达标、零发布样本级 0/30 绿、幻觉/注入/clean 全绿，唯一红项 context 已被预算修复闭环**；双验证者投票按数据门槛未开启 |
-| M4 服务化与扩展 | **M4b webhook 服务化已落地（2026-10-26）**：cra-server 第二组合根、PG 账本、有界队列/背压、HMAC 报告签名、部署文档（ADR-0008）；M4f-lite CrossChecker 已落地；其余子项按需排期 |
+| M4 服务化与扩展 | **M4b webhook 服务化已落地（2026-10-26）**：cra-server 第二组合根、PG 账本、有界队列/背压、HMAC 报告签名、部署文档（ADR-0008）；**M4c push 直推（commit comment 载体 + 幂等）与 M4d 夜间存量（issue 载体 + 汇总）已落地**；M4f-lite CrossChecker 已落地；其余子项按需排期 |
 
 验收记录、口径裁决与后续任务见 [docs/07](docs/07-roadmap.md)。
 

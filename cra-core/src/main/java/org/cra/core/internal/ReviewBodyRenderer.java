@@ -80,15 +80,47 @@ final class ReviewBodyRenderer {
       String convergenceAdvice,
       Set<String> unverifiedIds,
       int unverifiedUnpublished) {
+    return summaryBody(
+        request,
+        runId,
+        ordered,
+        fallbacks,
+        skippedDuplicate,
+        suppressedByTruncation,
+        degradations,
+        degraded,
+        suspectWarning,
+        coverageLines,
+        convergenceAdvice,
+        unverifiedIds,
+        unverifiedUnpublished,
+        false);
+  }
+
+  /**
+   * Summary 正文渲染。
+   *
+   * @param detailed 载体无行级锚时为 true（M4c/M4d）：全部 finding 以详情块列出（描述/失败模式/证据/建议）， 不依赖 inline 评论承载正文；PR
+   *     形态为 false（既有分级列表 + 位置非法段）
+   */
+  static String summaryBody(
+      ReviewRequest request,
+      String runId,
+      List<FindingAggregator.Scored> ordered,
+      List<FindingAggregator.Scored> fallbacks,
+      int skippedDuplicate,
+      int suppressedByTruncation,
+      List<String> degradations,
+      boolean degraded,
+      String suspectWarning,
+      List<String> coverageLines,
+      String convergenceAdvice,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished,
+      boolean detailed) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
-    body.append("变更：PR #")
-        .append(request.prNumber())
-        .append(" ")
-        .append(shortSha(request.baseSha()))
-        .append("..")
-        .append(shortSha(request.headSha()))
-        .append("\n\n");
+    appendChangeHeader(body, request);
     if (!suspectWarning.isEmpty()) {
       // 05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试
       body.append("> ⚠️ ").append(suspectWarning).append("\n\n");
@@ -101,7 +133,12 @@ final class ReviewBodyRenderer {
         ordered.stream()
             .filter(s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
             .toList();
-    if (important.isEmpty() && nits.isEmpty() && fallbacks.isEmpty() && preExisting.isEmpty()) {
+    if (detailed) {
+      appendDetailedFindings(body, ordered, unverifiedIds, skippedDuplicate, unverifiedUnpublished);
+    } else if (important.isEmpty()
+        && nits.isEmpty()
+        && fallbacks.isEmpty()
+        && preExisting.isEmpty()) {
       if (ordered.isEmpty() && skippedDuplicate == 0) {
         // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
         body.append(
@@ -157,11 +194,15 @@ final class ReviewBodyRenderer {
     for (String line : coverageLines) {
       body.append("- ").append(line).append("\n");
     }
-    body.append("- 指纹去重抑制 ")
-        .append(skippedDuplicate)
-        .append(" 条；位置非法降级 ")
-        .append(fallbacks.size())
-        .append(" 条\n");
+    if (detailed) {
+      body.append("- 载体无行级锚：全部 finding 以详情列出（commit comment / issue 不支持行级评论）\n");
+    } else {
+      body.append("- 指纹去重抑制 ")
+          .append(skippedDuplicate)
+          .append(" 条；位置非法降级 ")
+          .append(fallbacks.size())
+          .append(" 条\n");
+    }
     body.append("- 复核与晋升：确认 ")
         .append(ordered.size() - unverifiedIds.size())
         .append(" 条")
@@ -192,6 +233,75 @@ final class ReviewBodyRenderer {
         .append(suppressedByTruncation)
         .append(" -->");
     return body.toString();
+  }
+
+  private static void appendChangeHeader(StringBuilder body, ReviewRequest request) {
+    switch (request.mode()) {
+      case COMMIT ->
+          body.append("变更：push 直推 ")
+              .append(shortSha(request.baseSha()))
+              .append("..")
+              .append(shortSha(request.headSha()))
+              .append("（commit comment 载体，无行级锚）\n\n");
+      case ISSUE ->
+          body.append("变更：PR #")
+              .append(request.prNumber())
+              .append(" ")
+              .append(shortSha(request.baseSha()))
+              .append("..")
+              .append(shortSha(request.headSha()))
+              .append("（夜间存量评审，issue 载体，无行级锚）\n\n");
+      case PULL_REQUEST ->
+          body.append("变更：PR #")
+              .append(request.prNumber())
+              .append(" ")
+              .append(shortSha(request.baseSha()))
+              .append("..")
+              .append(shortSha(request.headSha()))
+              .append("\n\n");
+    }
+  }
+
+  private static void appendDetailedFindings(
+      StringBuilder body,
+      List<FindingAggregator.Scored> ordered,
+      Set<String> unverifiedIds,
+      int skippedDuplicate,
+      int unverifiedUnpublished) {
+    if (ordered.isEmpty()) {
+      // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
+      body.append(
+          unverifiedUnpublished > 0
+              ? "本次无已确认发现；" + unverifiedUnpublished + " 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n"
+              : skippedDuplicate > 0
+                  ? "本次无新发现（候选均被指纹去重抑制 " + skippedDuplicate + " 条）。\n\n"
+                  : "本次未发现问题（评审返回空结果）。\n\n");
+      return;
+    }
+    body.append("### 发现详情\n\n");
+    for (FindingAggregator.Scored s : ordered) {
+      CandidateFinding f = s.finding();
+      boolean unverified = unverifiedIds.contains(f.id());
+      body.append("#### ")
+          .append(unverified ? "[UNVERIFIED][" : "[")
+          .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
+          .append("] ")
+          .append(escape(f.title()))
+          .append(" — `")
+          .append(f.file())
+          .append(":")
+          .append(f.line())
+          .append("`\n\n");
+      if (unverified) {
+        body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
+      }
+      body.append(escape(f.description())).append("\n\n");
+      body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
+      body.append("**证据**：\n```\n").append(f.evidence()).append("\n```\n\n");
+      if (f.suggestion() != null && !f.suggestion().isBlank()) {
+        body.append("**建议**：\n```\n").append(f.suggestion()).append("\n```\n\n");
+      }
+    }
   }
 
   private static String listLine(FindingAggregator.Scored s) {

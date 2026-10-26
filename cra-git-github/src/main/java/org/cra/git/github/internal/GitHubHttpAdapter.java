@@ -26,6 +26,8 @@ import org.cra.common.git.InlineComment;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
+import org.cra.common.git.PostCommitReviewCommand;
+import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
@@ -280,6 +282,36 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private record PostedReview(String reviewId, List<Long> commentIds) {}
 
+  // ---------- 写：commit comment（M4c）/ issue（M4d）载体 ----------
+
+  @Override
+  public Optional<Long> postCommitReview(PostCommitReviewCommand cmd) {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("body", cmd.body());
+    JsonNode response =
+        transport.postJson(
+            cmd.repoOwner(),
+            cmd.repoName(),
+            "/commits/" + GitHubPayloadSupport.urlEncode(cmd.commitSha()) + "/comments",
+            payload);
+    long id = response.path("id").asLong(0);
+    return id > 0 ? Optional.of(id) : Optional.empty();
+  }
+
+  @Override
+  public Optional<Long> postIssueReview(PostIssueCommand cmd) {
+    ObjectNode payload = MAPPER.createObjectNode();
+    payload.put("title", cmd.title());
+    payload.put("body", cmd.body());
+    if (!cmd.labels().isEmpty()) {
+      ArrayNode labels = payload.putArray("labels");
+      cmd.labels().forEach(labels::add);
+    }
+    JsonNode response = transport.postJson(cmd.repoOwner(), cmd.repoName(), "/issues", payload);
+    long number = response.path("number").asLong(0);
+    return number > 0 ? Optional.of(number) : Optional.empty();
+  }
+
   // ---------- 账本：bot 评论 + 标记解析（05§1.3） ----------
 
   @Override
@@ -350,6 +382,145 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   }
 
   @Override
+  public CommentLedger fetchCommitBotComments(RepoRef repo, String commitSha) {
+    String login = botLogin(repo);
+    List<LedgerComment> comments = new ArrayList<>();
+    List<LedgerFindingMarker> findings = new ArrayList<>();
+    List<LedgerRunMarker> runs = new ArrayList<>();
+    int[] suspectCount = {0};
+    collectPaged(
+        repo,
+        "/commits/" + GitHubPayloadSupport.urlEncode(commitSha) + "/comments",
+        login,
+        LedgerComment.KIND_COMMIT,
+        comments);
+    for (LedgerComment c : comments) {
+      ParseOutcome outcome = markerParser.parse(c.body());
+      suspectCount[0] += outcome.suspects().size();
+      if (outcome.marker().isPresent()) {
+        MarkerParseResult parsed = outcome.marker().get();
+        if (parsed instanceof MarkerParseResult.FindingMark f) {
+          findings.add(
+              new LedgerFindingMarker(
+                  f.fingerprint(),
+                  f.file(),
+                  f.line(),
+                  f.category(),
+                  f.findingId(),
+                  f.runId(),
+                  f.commitSha(),
+                  c.id()));
+        } else if (parsed instanceof MarkerParseResult.RunMark r) {
+          runs.add(
+              new LedgerRunMarker(
+                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
+        }
+      }
+    }
+    return new CommentLedger(comments, findings, runs, suspectCount[0]);
+  }
+
+  /**
+   * issue 载体账本（M4d，05§2.5）：列出 bot 的 issue，只保留 run 完成标记内 commit 与 {@code commitSha} 一致者——issue
+   * 载体本身不带 PR 号，head sha 即键（05§1.3）。
+   */
+  @Override
+  public CommentLedger fetchIssueBotComments(RepoRef repo, String commitSha) {
+    List<LedgerComment> matched = new ArrayList<>();
+    List<LedgerFindingMarker> findings = new ArrayList<>();
+    List<LedgerRunMarker> runs = new ArrayList<>();
+    int suspectCount = 0;
+    for (LedgerComment c : listBotIssues(repo, null)) {
+      ParseOutcome outcome = markerParser.parse(c.body());
+      if (!marksCommit(outcome, commitSha)) {
+        continue; // 其它 PR / 其它 commit 的夜间 issue 不属于本键作用域
+      }
+      suspectCount += outcome.suspects().size();
+      matched.add(c);
+      MarkerParseResult parsed = outcome.marker().orElseThrow();
+      if (parsed instanceof MarkerParseResult.FindingMark f) {
+        findings.add(
+            new LedgerFindingMarker(
+                f.fingerprint(),
+                f.file(),
+                f.line(),
+                f.category(),
+                f.findingId(),
+                f.runId(),
+                f.commitSha(),
+                c.id()));
+      } else if (parsed instanceof MarkerParseResult.RunMark r) {
+        runs.add(
+            new LedgerRunMarker(
+                r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
+      }
+    }
+    return new CommentLedger(matched, findings, runs, suspectCount);
+  }
+
+  @Override
+  public List<LedgerComment> listBotIssues(RepoRef repo, Instant since) {
+    String login = botLogin(repo);
+    List<LedgerComment> out = new ArrayList<>();
+    String sinceQuery =
+        since == null ? "" : "&since=" + GitHubPayloadSupport.urlEncode(since.toString());
+    for (int page = 1; page <= MAX_PAGES; page++) {
+      JsonNode root =
+          transport.getJson(
+              repo,
+              "/issues?state=all&sort=updated&direction=desc&per_page="
+                  + PAGE_SIZE
+                  + "&page="
+                  + page
+                  + sinceQuery);
+      if (!root.isArray() || root.isEmpty()) {
+        break;
+      }
+      boolean reachedOlder = false;
+      for (JsonNode issue : root) {
+        if (!issue.path("pull_request").isMissingNode()) {
+          continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
+        }
+        Instant updated = GitHubDispositionSupport.instantOrNull(issue.path("updated_at"));
+        if (since != null && updated != null && updated.isBefore(since)) {
+          reachedOlder = true;
+          continue;
+        }
+        if (!login.equals(issue.path("user").path("login").asText())) {
+          continue; // 只认 bot 发布的 issue
+        }
+        long number = issue.path("number").asLong(0);
+        if (number <= 0) {
+          continue;
+        }
+        out.add(
+            new LedgerComment(
+                number,
+                LedgerComment.KIND_ISSUE,
+                login,
+                issue.path("body").asText(""),
+                GitHubDispositionSupport.instantOrEpoch(issue.path("created_at")),
+                null));
+      }
+      if (root.size() < PAGE_SIZE || reachedOlder) {
+        break;
+      }
+    }
+    return out;
+  }
+
+  private static boolean marksCommit(ParseOutcome outcome, String commitSha) {
+    if (outcome.marker().isEmpty()) {
+      return false;
+    }
+    MarkerParseResult parsed = outcome.marker().get();
+    if (parsed instanceof MarkerParseResult.RunMark r) {
+      return r.commitSha().equalsIgnoreCase(commitSha);
+    }
+    return ((MarkerParseResult.FindingMark) parsed).commitSha().equalsIgnoreCase(commitSha);
+  }
+
+  @Override
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
     List<PullRequestRef> out = new ArrayList<>();
     for (int page = 1; page <= MAX_PAGES; page++) {
@@ -378,7 +549,8 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
                 pr.path("state").asText(PullRequestRef.STATE_CLOSED),
                 updated,
-                GitHubDispositionSupport.instantOrNull(pr.path("merged_at"))));
+                GitHubDispositionSupport.instantOrNull(pr.path("merged_at")),
+                pr.path("base").path("sha").asText(null)));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
         break;
