@@ -30,6 +30,7 @@ class VerifyCommandTest {
             24,
             0,
             metric(detected, 24),
+            null, // bug-only 观察指标
             null,
             null,
             null,

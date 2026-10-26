@@ -141,6 +141,8 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 - **代码类**（bug/security/test/convention/performance）：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段；
 - **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
 
+- **test 类（v1.3.2 新增分型）**：finding 全文 + 变更文件上下文 + **仓库测试文件清单**（head 侧 `listFiles("**/test/**/*.java")`，≤80 行，超出注明总数）。理由（M3 取证）：test 类 finding 的核心主张「某行为无测试覆盖」是**负向/全局主张**——验证上下文只有 main 文件时无法证否 → 必然 INSUFFICIENT → Judge 按证据不足拒（L3 实测 judge 的 53 条 REJECTED 中 48 条为此类）。注入清单后验证者能核对「是否已有覆盖」，未列出的行为走 followup_file 受控补查。清单不可得（listFiles 失败）→ 降级为空并记 trace `test_index`（available=false），验证按原形态进行、结论如实标注。
+
 **指令核心（平衡式复核）**：
 
 ```
@@ -229,7 +231,7 @@ for (var e : byFile.entrySet()) {
 |---|---|---|---|---|---|---|
 | BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤2k | 3 |
 | SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤24k/chunk | ≤2k | 3 |
-| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤1k | 2 |
+| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤2k | 2 |  
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
 | VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |

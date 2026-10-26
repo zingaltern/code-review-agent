@@ -248,12 +248,27 @@ final class ReviewAgentDispatcher {
               runId,
               trace);
       List<CandidateFinding> findings = run.output() == null ? List.of() : run.output();
+      // findings_brief：逐条候选摘要（category file:L行 title）——未发布候选的可观测性
+      // （M3 零发布归因曾因只看"findings 计数"而无法判断候选内容与拒因）
+      List<String> findingsBrief =
+          findings.stream()
+              .map(
+                  f ->
+                      f.category()
+                          + " "
+                          + f.file()
+                          + ":L"
+                          + f.line()
+                          + " "
+                          + (f.title().length() > 60 ? f.title().substring(0, 60) : f.title()))
+              .toList();
       trace.emit(
           "agent_output",
           Map.of(
               "agent", agent.role().id(),
               "chunk", scope.key(),
               "findings", findings.size(),
+              "findings_brief", findingsBrief,
               "termination", run.termination().name().toLowerCase(java.util.Locale.ROOT),
               "tokens", Map.of("in", run.tokensIn(), "out", run.tokensOut()),
               "latency_ms", run.latencyMs()));

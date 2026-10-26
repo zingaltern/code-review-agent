@@ -175,6 +175,23 @@ class VerificationPromotionTest {
   }
 
   @Test
+  void testCategoryFindingBriefCarriesTestFileIndex() throws Exception {
+    // v1.3.2 test 类分型：test 类候选的验证 brief 注入仓库测试文件清单（供核对是否已有覆盖）
+    Mockito.when(adapter.listFiles(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
+        .thenReturn(List.of("src/test/java/FooTest.java", "src/test/java/BarTest.java"));
+    scripted.review(
+        "{\"findings\":[{\"category\":\"test\",\"title\":\"缺测试\",\"description\":\"d\","
+            + "\"failure_mode\":\"f\",\"file\":\"src/Foo.java\",\"line\":4,\"side\":\"RIGHT\","
+            + "\"evidence\":\"L4: x\",\"severity_proposed\":\"important\","
+            + "\"pre_existing_suspect\":false}]}");
+    pipeline.run(request());
+    org.assertj.core.api.Assertions.assertThat(scripted.verifierCalls).hasSize(1);
+    org.assertj.core.api.Assertions.assertThat(scripted.verifierCalls.get(0).userPrompt())
+        .contains("仓库测试文件清单")
+        .contains("FooTest.java");
+  }
+
+  @Test
   void verifierUnavailableRetriesOnceThenUnverifiedNotPublished() throws Exception {
     // 02§4.2 验证不可得：缩上下文重试 1 次 → 仍失败 → UNVERIFIED 默认不发布，Summary 计数声明
     scripted.review(oneFinding("bug", "important")).verifierUnavailable();

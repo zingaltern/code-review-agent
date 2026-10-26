@@ -18,7 +18,9 @@ public final class SpecialistReviewers {
   public static final class TestReviewer implements SubAgent<ReviewAgentInput> {
 
     /** 预算（03§6 TestReviewer 行）。 */
-    private static final AgentBudget BUDGET = new AgentBudget(12_000, 1_000, 2, 120_000);
+    // v1.3.2：输出 1k→2k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
+    // M3 实测 90 观测中 11 次输出预算击穿（12%）导致该角色零产出
+    private static final AgentBudget BUDGET = new AgentBudget(12_000, 2_000, 2, 120_000);
 
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("test-reviewer", "测试缺口评审");

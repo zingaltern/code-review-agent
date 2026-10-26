@@ -77,6 +77,37 @@ final class PipelineDataLoader {
   }
 
   /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */
+  /**
+   * 测试文件清单采集（v1.3.2 test 类分型）：head 侧一次 listFiles。
+   *
+   * <p>背景（M3 取证）：test 类 finding 主张「某行为无测试覆盖」——负向/全局主张，验证上下文 不含测试目录时无法证否 → 必然 INSUFFICIENT → Judge
+   * 按证据不足拒（L3 实测 judge 53 拒中 48 条为此）。清单供验证者核对「是否已有覆盖」，未列出的行为可 followup 补查。
+   *
+   * @param request 评审请求（head sha 为清单锚点）
+   * @param trace trace 写入器（test_index 事件如实记录可得性）
+   * @return 测试文件清单（失败降级为空列表 + 事件声明）
+   */
+  List<String> testFileIndex(ReviewRequest request, TraceWriter trace) {
+    try {
+      List<String> files =
+          adapter.listFiles(
+              new RepoRef(request.repoOwner(), request.repoName()),
+              request.headSha(),
+              "**/test/**/*.java");
+      trace.emit("test_index", Map.of("available", true, "files", files.size()));
+      return files;
+    } catch (RuntimeException e) {
+      trace.emit(
+          "test_index",
+          Map.of(
+              "available",
+              false,
+              "reason",
+              e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+      return List.of();
+    }
+  }
+
   ReviewPolicy loadPolicy(TraceWriter trace, DiffResult diff, ReviewRequest request) {
     String markdown;
     try {

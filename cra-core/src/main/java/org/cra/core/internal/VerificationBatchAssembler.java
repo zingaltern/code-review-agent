@@ -69,9 +69,32 @@ final class VerificationBatchAssembler {
       DiffResult diff,
       AgentBudget budget,
       CitedEvidenceResolver citedResolver) {
+    return buildBatch(file, batch, policy, headFiles, diff, budget, citedResolver, List.of());
+  }
+
+  /**
+   * 组装验证批次输入（v1.3.2 test 类分型：注入仓库测试文件清单）。
+   *
+   * <p>背景（M3 取证）：test 类 finding 的核心主张是"某行为无测试覆盖"——负向/全局主张， 而验证上下文只有 main 文件时无法证否 → 必然 INSUFFICIENT
+   * → Judge 按证据不足拒 （L3 实测 judge 53 拒中 48 条为此）。注入测试文件清单后，验证者可据清单判断"是否 已有覆盖"，未列出的测试行为可用 followup_file
+   * 补查（03§4.2 受控补查）。
+   *
+   * @param testFileIndex 仓库测试文件清单（head 侧；空 = 不可得或未采集，按原形态验证）
+   */
+  static VerificationBatchInput buildBatch(
+      String file,
+      List<FindingAggregator.Scored> batch,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult diff,
+      AgentBudget budget,
+      CitedEvidenceResolver citedResolver,
+      List<String> testFileIndex) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
     String findingsText = renderFindingsText(batch);
-    long reserved = TokenMath.estimateTokens(findingsText) + 1_200;
+    String testIndex = renderTestFileIndex(batch, testFileIndex);
+    long reserved =
+        TokenMath.estimateTokens(findingsText) + 1_200 + TokenMath.estimateTokens(testIndex);
     long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
     return new VerificationBatchInput(
         file,
@@ -79,7 +102,38 @@ final class VerificationBatchAssembler {
         renderCodeContext(file, batch, headFiles, diff, contextBudget),
         renderCitedEvidence(batch, citedResolver),
         renderPolicySections(policy, batch),
-        "");
+        testIndex);
+  }
+
+  /**
+   * 测试文件清单渲染（仅当批内含 test 类 finding；≤80 行，超出注明截断计数）。
+   *
+   * @param batch 本批候选（含类别）
+   * @param testFileIndex 仓库测试文件清单（可空）
+   * @return 渲染段；不适用时为空串
+   */
+  private static String renderTestFileIndex(
+      List<FindingAggregator.Scored> batch, List<String> testFileIndex) {
+    boolean hasTestFinding =
+        batch.stream()
+            .anyMatch(s -> s.finding().category() == org.cra.common.finding.FindingCategory.TEST);
+    if (!hasTestFinding || testFileIndex == null || testFileIndex.isEmpty()) {
+      return "";
+    }
+    StringBuilder sb = new StringBuilder();
+    sb.append("## 仓库测试文件清单（供核对'是否已有测试覆盖'——未列出的测试行为可用 followup_file 补查）\n");
+    int shown = Math.min(testFileIndex.size(), 80);
+    for (int i = 0; i < shown; i++) {
+      sb.append("- ").append(testFileIndex.get(i)).append('\n');
+    }
+    if (testFileIndex.size() > shown) {
+      sb.append("…（共 ")
+          .append(testFileIndex.size())
+          .append(" 个测试文件，仅列前 ")
+          .append(shown)
+          .append(" 个；可按需 followup_file 补查）\n");
+    }
+    return sb.toString();
   }
 
   /**

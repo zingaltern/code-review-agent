@@ -181,6 +181,12 @@ public final class AggregateEngine {
             obs.inlineFindings().stream().map(ObservedFinding::text).toList(), "", summaryOf(obs));
     int matched = matches.size();
     boolean detected = matched >= 1;
+    // v1.3.2（D6 观察指标）：bug-only 检出——只计入 category=bug 的 expected 命中；
+    // test OR 条目的贡献不计入，避免"仅报缺测试"被误读为发现 bug 面（不进任何门禁判定）
+    boolean bugOnlyDetected =
+        matches.stream()
+            .anyMatch(
+                m -> "bug".equalsIgnoreCase(exp.expected().get(m.expectedIndex()).category()));
     int falsePositives =
         FixtureMeta.SET_CLEAN.equals(meta.set())
             ? obs.findings().size()
@@ -212,6 +218,7 @@ public final class AggregateEngine {
         obs.runStatus(),
         obs.completed(),
         detected,
+        bugOnlyDetected,
         matched,
         exp.expected().size(),
         obs.findings().size(),
@@ -250,6 +257,9 @@ public final class AggregateEngine {
     boolean clean = FixtureMeta.SET_CLEAN.equals(set);
     boolean bad = FixtureMeta.SET_BAD.equals(set);
     EvalReport.ProportionMetric detection = clean ? null : proportion(detected, observations);
+    long bugOnlyDetected = rows.stream().filter(EvalReport.CaseRow::bugOnlyDetected).count();
+    EvalReport.ProportionMetric bugOnlyDetection =
+        clean ? null : proportion(bugOnlyDetected, observations);
     EvalReport.ProportionMetric rejection = hallucination ? proportion(rejected, completed) : null;
     Double meanFp = null;
     if (clean && completed > 0) {
@@ -300,6 +310,7 @@ public final class AggregateEngine {
         completed,
         failed,
         detection,
+        bugOnlyDetection,
         rejection,
         meanFp,
         invariantViolations,

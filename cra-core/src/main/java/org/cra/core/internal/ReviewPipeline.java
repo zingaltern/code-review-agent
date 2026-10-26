@@ -348,8 +348,15 @@ public final class ReviewPipeline implements Orchestrator {
               verifyPool,
               path -> dataLoader.contentOf(path, request.headSha(), request, contentCache),
               citedResolver);
+      // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）
+      List<String> testFileIndex =
+          candidates.stream()
+                  .anyMatch(
+                      s -> s.finding().category() == org.cra.common.finding.FindingCategory.TEST)
+              ? dataLoader.testFileIndex(request, trace)
+              : List.of();
       VerificationWave.WaveResult waveResult =
-          wave.verify(candidates, policy, headFiles, reviewDiff, runId);
+          wave.verify(candidates, policy, headFiles, reviewDiff, runId, testFileIndex);
       degradations.addAll(waveResult.degradations());
       budget.record(waveResult.tokensIn(), waveResult.tokensOut());
       long tokensIn = outcome.tokensIn() + waveResult.tokensIn();

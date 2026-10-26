@@ -133,7 +133,7 @@
 {"ts":"…","run_id":"…","event":"run_start","repo":"…","pr":42,"depth":"standard","dry_run":false}
 {"ts":"…","run_id":"…","event":"gate_check","gate":"commit","hit":false}
 {"ts":"…","run_id":"…","event":"agent_start","agent":"bug-hunter/boundary","brief_path":"…"}
-{"ts":"…","event":"agent_output","agent":"…","findings":3,"termination":"completed","tokens":{…},"latency_ms":8200}
+{"ts":"…","event":"agent_output","agent":"…","findings":3,"findings_brief":["bug src/Foo.java:L4 …"],"termination":"completed","tokens":{…},"latency_ms":8200}
 {"ts":"…","event":"tool_call","agent":"…","tool":"read_file","turn":2,"allowed":true}
 {"ts":"…","event":"tool_result","agent":"…","tool":"read_file","chars":1200}
 {"ts":"…","event":"agent_budget_exceeded","agent":"…","limit":"turns|time|input-tokens|output-tokens"}
@@ -149,6 +149,7 @@
 {"ts":"…","event":"blame_check","note":"…"}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{"confirmed":3,"refuted":1,"insufficient":0,"unavailable":0}}
 {"ts":"…","event":"verification","finding_id":"f_…","verdict":"CONFIRMED|REFUTED|INSUFFICIENT_EVIDENCE","rationale":"…（≤400 字）","followup":false}
+{"ts":"…","event":"test_index","available":true,"files":42}
 {"ts":"…","event":"verify_retry","file_batch":"Foo.java","reason":"…"}
 {"ts":"…","event":"verify_followup","finding_id":"f_…","file":"src/…","status":"provided|unreadable"}
 {"ts":"…","event":"anti_anchor_check","finding_id":"f_…","status":"PASS|FAIL","overlap":0.0,"refs":2}

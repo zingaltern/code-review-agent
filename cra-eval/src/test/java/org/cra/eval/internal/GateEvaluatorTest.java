@@ -38,6 +38,7 @@ class GateEvaluatorTest {
         completed,
         observations - completed,
         detection,
+        null, // bug-only 观察指标（测试不关心）
         rejection,
         meanFp,
         violations,
