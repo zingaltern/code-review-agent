@@ -1,5 +1,6 @@
 # 04 · 上下文工程与提示词设计
 
+> 文档版本：v1.3.2（2026-10-26，M4b 服务端报告签名：`cra-eval verify --signature` 的契约与局限，ADR-0008）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ②③⑥）
 > **v1.1**：L1 窗口默认 + 条件全文；验证按文件批处理；REVIEW.md base 读取与注入防御。
 > **v1.2**：算术补 Security/Perf/Judge；评测门禁成本与三级分级。
@@ -66,14 +67,14 @@
 
 **L2 零发布护栏（v1.2.1 改聚合口径）**：v1.2 的"任一 bad 样本 k 次全零即败"在 12 样本 × k=2 下是联合判定（通过率 ≈0.76，逐样本口径以更小 k 回归）。改为：**聚合零发布率** = 全部 样本×运行 观测中"该观测零 confirmed"的占比 ≤ 1/12（即 ≥92% 的观测至少命中 1 条）。
 
-**荣誉制局限（如实承认）**："本地跑 L2 + CI 校验报告哈希"只能防传输篡改，不能证明报告由当前 HEAD 真实生成——当前接受该局限（个人项目），彻底消除需 cra-server 托管执行（M4b），届时报告带服务端签名。
+**荣誉制局限（如实承认）与 M4b 缓解**："本地跑 L2 + CI 校验报告哈希"只能防传输篡改，不能证明报告由当前 HEAD 真实生成。**M4b（2026-10-26，ADR-0008）**新增服务端签名路径：`POST /api/v1/reports/attest` 对报告摘要签发 HMAC-SHA256 信封（密钥仅服务端与 CI secret 持有），默认只对服务端已完成评审（`review_run` DONE|DEGRADED）的 commit 签发；`cra-eval verify --signature <envelope> --signing-key-env CRA_REPORT_SIGNING_KEY` 验签并绑定 commit/tier。**残留边界**：签名证明"持有服务端密钥者签发了该报告摘要"并绑定服务端已知 commit，不证明报告内容由服务端执行生成——托管执行评测是更强的后续形态，仍在 M4b 范围外。
 
 **T3.3 落地注记（2026-10-25，M3；三级门禁的实际接线）**：
 
 - **L1 快检（`ci.yml` 的 `eval-l1` job）**：`cra-eval run --set adversarial --case adv-inj-01,adv-inj-02,adv-inj-03,adv-hal-01,adv-hal-02 --k 1 --depth quick --tier l1 --fail-on-red`。判定项 = 注入负向不变量零容忍 + 幻觉聚合拒绝率 ≥80% + 固定子集完整性（注入 ≥3、幻觉 ≥2 观测）；**不判定 bad 检出**（L1 无 bad 样本面，该检查项 `skipped`）。job 级 `continue-on-error: true`：红只体现为 `needs.eval-l1.result=failure`，**不直接阻断 PR**；无 `CRA_LLM_API_KEY`（fork PR）时整段跳过并警告，不伪装绿。
 - **注入判定口径**：只认负向不变量断言（`gate.injection_invariant`，任一目标行为出现即红），**不做输出快照全等**；当前 LLM gateway 未接 `seed` 参数，"固定种子"是 best-effort（与 v1.3.1 一致）。快照一致率作为辅助抖动监控本轮未建基线（k=1 无可比历史），留待 provider 抖动数据积累后再加。
 - **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 12 + clean 8，24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红或 prompt/模型/编排路径改动** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <报告 commit>` 校验哈希、按当前阈值重算的门禁结论与 commit 绑定；同时要求报告 commit 是 PR head 的祖先，且其后仅允许 `eval/l2/` 变更（报告文件自身提交不得夹带代码改动）。缺失、过期或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
-- **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论；报告与哈希同时提交属荣誉制，见上）。
+- **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论）；服务化形态可改用 `eval/l2/report.json.sig`（服务端信封），CI 以 `cra-eval verify --signature` 验签（M4b，ADR-0008）。报告与哈希同时提交属荣誉制；签名路径把防伪造提升到"持有服务端密钥"。
 - **L3 全量（`eval.yml`）**：workflow_dispatch 输入 `set/k/depth/tier`，里程碑口径 `set=all, k=3, depth=standard, tier=l3`；`--fail-on-red` 让红结论体现为 job 失败，报告 artifact 仍 `if: always()` 上传。`--commit "$GITHUB_SHA"` 记录代码提交。
 - **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。
 

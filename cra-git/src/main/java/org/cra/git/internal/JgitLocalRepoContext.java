@@ -166,6 +166,34 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
     }
   }
 
+  @Override
+  public List<String> firstParentChain(String headSha, int limit) {
+    if (localRepoRoot().isEmpty() || headSha == null || headSha.isBlank() || limit <= 0) {
+      return List.of();
+    }
+    try (Repository repository = new FileRepositoryBuilder().setWorkTree(root.toFile()).build()) {
+      var headId = repository.resolve(headSha);
+      if (headId == null) {
+        return List.of();
+      }
+      List<String> out = new ArrayList<>();
+      try (RevWalk walk = new RevWalk(repository)) {
+        RevCommit commit = walk.parseCommit(headId);
+        while (commit != null && out.size() < limit) {
+          out.add(commit.getName());
+          if (commit.getParentCount() == 0) {
+            break;
+          }
+          commit = walk.parseCommit(commit.getParent(0));
+        }
+      }
+      return List.copyOf(out);
+    } catch (java.io.IOException | RuntimeException e) {
+      // best effort（同 recentCommits 降级语义）：不可得返回空列表，调用方要求显式基线
+      return List.of();
+    }
+  }
+
   private static String shortSha(String sha) {
     return Texts.shortSha(sha, 7, "");
   }

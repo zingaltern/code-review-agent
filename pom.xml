@@ -22,6 +22,7 @@
     <module>cra-core</module>
     <module>cra-runner-cli</module>
     <module>cra-eval</module>
+    <module>cra-server</module>
     <module>cra-archtest</module>
   </modules>
 
@@ -64,6 +65,7 @@
       <dependency><groupId>org.cra</groupId><artifactId>cra-core</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>org.cra</groupId><artifactId>cra-runner-cli</artifactId><version>${project.version}</version></dependency>
       <dependency><groupId>org.cra</groupId><artifactId>cra-eval</artifactId><version>${project.version}</version></dependency>
+      <dependency><groupId>org.cra</groupId><artifactId>cra-server</artifactId><version>${project.version}</version></dependency>
     </dependencies>
   </dependencyManagement>
 

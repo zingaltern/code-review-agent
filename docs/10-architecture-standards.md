@@ -1,5 +1,6 @@
 # 10 · 架构规范
 
+> 文档版本：v1.1（2026-10-26，M4b：cra-server 行生效 + R1/R3/R6 扩展 + 包结构表，ADR-0008）
 > 文档版本：v1.0.3（2026-10-26，本轮治理：cra-common 子包列表同步 + 生产侧 god class 行数基线更新）
 > 文档版本：v1.0.2（2026-10-25，M0 实现撞墙定点修订：R1 片段 Infra 行补 Eval——10§2 矩阵与 ADR-0005 放开的 cra-eval→git(+git-gh) ✅ 会被旧片段层规则误判红，矩阵是单一事实源）
 > 文档版本：v1.0.1（2026-10-25，并入 v1 基线：第五轮缺陷①③⑤——eval 矩阵行放开取数、源码扫描并入 cra-archtest、R1-R8 自 M0 required；附录增 ADR-0005）
@@ -17,7 +18,7 @@
 
 ## 2. 模块依赖矩阵【强制】
 
-行 = 依赖方，列 = 被依赖方；✅ = 允许（Maven compile 依赖），❌ = 禁止，`-` = 自身。依据与扩写自 02§3 依赖方向。`cra-common` 不设行：它不依赖任何模块（矩阵列全 ❌，被所有人依赖的底座）。`cra-server` 为 M4 模块，其行自 M4 起生效。
+行 = 依赖方，列 = 被依赖方；✅ = 允许（Maven compile 依赖），❌ = 禁止，`-` = 自身。依据与扩写自 02§3 依赖方向。`cra-common` 不设行：它不依赖任何模块（矩阵列全 ❌，被所有人依赖的底座）。`cra-server` 行自 M4b 生效（2026-10-26，ADR-0008）。
 
 | 依 \ 被 | common | llm | git | git-gh | context | agents | store | core | cli | eval | server |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -30,7 +31,7 @@
 | **cra-core** | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | - | ❌ | ❌ | ❌ |
 | **cra-runner-cli** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | - | ❌ | ❌ |
 | **cra-eval** | ✅ | ❌ | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | - | ❌ |
-| **cra-server**（M4） | ✅ | ❌ | ❌ | ✅ | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ | - |
+| **cra-server**（M4b） | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | - |
 
 每行一句 ❌ 理由（✅ 的依据已在 02§3）：
 
@@ -43,9 +44,9 @@
 - **cra-core**：不依赖 git-github——编排与平台实现解耦，换平台/换形态不改 core（02§5"core 全部逻辑与形态无关"）；不依赖 cli/eval/server——上游不知道壳和评测；
 - **cra-runner-cli**：组合根例外（见下），但 ❌ eval/server 两条仍是铁律——入口不依赖评测框架，两个壳互不知道彼此；
 - **cra-eval**：评测运行经命令行黑盒驱动被测对象（05§3）；`report` 周报与处置采集需要平台数据直连——经 `CommentSource` 端口（ADR-0005，05§2.1）取数，故 eval→git(+git-gh) ✅（仅 api 类型；eval 是开发侧模块，不进运行时依赖图）；若确需进程内驱动 core，先修订 02§3 与本表并写 ADR（§6）；
-- **cra-server**（M4）：第二组合根，同 cli 约束（02§5：CLI 与 server 只是两种壳）。
+- **cra-server**（M4b）：第二组合根，依赖集与 cli 同构（❌ eval/server/cli 三条铁律不变）——装配 orchestrator 需要 llm/git/context/agents/store/core 的 api 类型；不依赖 eval（评测是开发侧，服务不复用评测框架），也不依赖 cli（两个壳互不知道彼此）。
 
-**组合根例外【强制】**：cra-runner-cli 是唯一允许依赖图上一切的位置（除 eval/server），且**仅限各模块的 api 包类型**（§3/R3 守护）——装配需要触达各模块 api 包的装配工厂，这是"所有模块 → 按需向下"的唯一豁免点。M4 起 cra-server 成为第二组合根，届时先修订 §5 R6 与本注并写 ADR。
+**组合根例外【强制】**：`cra-runner-cli` 与 `cra-server` 是仅有的两处允许依赖图上一切的位置（除 eval/server/cli 的互相依赖），且**仅限各模块的 api 包类型**（§3/R3 守护）——装配需要触达各模块 api 包的装配工厂，这是"所有模块 → 按需向下"的唯一豁免点。M4b 已完成 cra-server 的接入（§5 R6 允许集合扩展 + ADR-0008）。
 
 ## 3. 包结构模板
 
@@ -68,18 +69,18 @@ org.cra.<module>/
 | cra-git-github | 包名 `org.cra.git.github`（09§3）；api = 装配工厂 | `http`、账本标记解析（05§1.3）、锚定校验（05§2.2） |
 | cra-context | `ContextAssembler` | `diff` / `window` / `slice` / `budget`（04§1） |
 | cra-agents | `SubAgent`、`AgentRole`、`ToolWhitelist`、`Budget` 定义（03§1） | 角色绑定与模板装载；prompt 资源在 `resources/prompts/`（04§4、11§2） |
-| cra-store | `ReviewLedger`（02§5、05§1.5） | `sqlite` / GitHub 评论账本 / PG（M4） |
+| cra-store | `ReviewLedger`（02§5、05§1.5） | `sqlite` / GitHub 评论账本 / `postgres`（M4b） |
 | cra-core | Orchestrator 入口（输入 `ReviewRequest`、输出 `ReviewResult`，02§5） | `planner` / `fanout` / `verify` / `aggregate` / `publish` / `convergence`（02§1 ①–⑦） |
 | cra-runner-cli | 免二分：依赖图终点，无人依赖它 | `Main` + `config`（05§5 绑定）+ `assembly`（装配）+ `command`（参数与退出码，05§3） |
 | cra-eval | 数据集格式与报告类型（06§3） | runner 与负向不变量判定器（08§5 场景 6） |
-| cra-server（M4） | 建时按同模板 | 动工前先修订本表 |
+| cra-server（M4b） | 免二分：第二组合根/依赖图终点，无人依赖它 | `ServerMain` + `config`（env 绑定/Spring beans）+ `webhook`（验签/解析/入站）+ `queue`（有界/背压）+ `pipeline`（core 执行器/任务处理器）+ `delivery`（PG 幂等）+ `attest`（报告签发）+ `store`（DDL 迁移）+ `web`（健康/过滤器）+ `history`（M4f-full 骨架） |
 
-**组合根唯一【强制】**：M0–M3 全部对象图在 `cra-runner-cli` 的 Main 装配——Spring `@Configuration`/`@Bean` 只允许出现在该模块；其余模块是纯 Java 库。M4 的 cra-server 加入时按 §2 组合根例外扩展。
+**组合根约束【强制】**：M0–M3 全部对象图在 `cra-runner-cli` 的 Main 装配；M4b 起 `cra-server` 是第二组合根——Spring `@Configuration`/`@Bean` 只允许出现在这两个壳模块，其余模块是纯 Java 库。组合根只调各模块 api 装配工厂，从不 import `internal`。
 
 ## 4. DI 与装配约定
 
 - **构造器注入唯一【强制】**：所有依赖经构造器进入；禁字段注入与 setter 注入（含 `@Autowired` 字段形式）。Spring 对单构造器免注解自动注入，因此 `@Autowired` 注解全项目预期**零出现**（R7 守护）——注解一出现就意味着有人想注入第二个构造器或字段；
-- **Spring 仅 DI/配置【强制】**（01§5.1、02§7）：`org.springframework..` 类型不得出现在 cra-runner-cli 之外的主代码（R6 守护）；05§5 部署级配置绑定类归 `cra-runner-cli` 的 config 包——配置属壳的职责（02§5）；
+- **Spring 仅 DI/配置/壳【强制】**（01§5.1、02§7）：`org.springframework..` 类型不得出现在 `cra-runner-cli` 与 `cra-server` 之外的主代码（R6 守护；server 是第二组合根，M4b 起允许 web/JDBC，ADR-0008）；05§5 部署级配置绑定类归壳的 config 包——配置属壳的职责（02§5）；
 - **模块之间只允许依赖 api 包类型【强制】**（R3 守护）：internal 类型的构造只能被本模块代码与自己的装配工厂触达；
 - **装配工厂模式【强制】**：每个模块 api 包提供一个纯 Java 工厂（`<Module>Assembly`），组合根只调工厂、把产物作为构造参数注入 core——Main 从不 import 任何 `internal`；
 - 共享可变状态、线程池归属等代码级约束以 09§6 为准（私有字段 + 构造器注入），本文不重复。
@@ -101,20 +102,22 @@ layeredArchitecture().consideringAllDependencies()
     .layer("Core").definedBy("org.cra.core..")
     .layer("Shell").definedBy("org.cra.runner.cli..")
     .layer("Eval").definedBy("org.cra.eval..")
-    .whereLayer("Shell").mayNotBeAccessedByAnyLayer()   // cra-core 不得依赖 cra-runner-cli 由此覆盖
+    .layer("Server").definedBy("org.cra.server..")        // M4b：第二组合根
+    .whereLayer("Shell").mayNotBeAccessedByAnyLayer()      // cra-core 不得依赖 cra-runner-cli 由此覆盖
     .whereLayer("Eval").mayNotBeAccessedByAnyLayer()
-    .whereLayer("Core").mayOnlyBeAccessedByLayers("Shell")
-    .whereLayer("Agents").mayOnlyBeAccessedByLayers("Core", "Shell")
-    .whereLayer("Store").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval")
-    .whereLayer("Infra").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval")   // v1.0.2：补 Eval（ADR-0005 eval→git(+git-gh) 仅 api 取数；eval→llm/context 仍被矩阵逐对规则封死）;
+    .whereLayer("Server").mayNotBeAccessedByAnyLayer()     // 其余模块不得依赖 server
+    .whereLayer("Core").mayOnlyBeAccessedByLayers("Shell", "Server")
+    .whereLayer("Agents").mayOnlyBeAccessedByLayers("Core", "Shell", "Server")
+    .whereLayer("Store").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval", "Server")
+    .whereLayer("Infra").mayOnlyBeAccessedByLayers("Core", "Shell", "Eval", "Server")   // v1.0.2 Eval（ADR-0005）；v1.1 Server（ADR-0008）
 ```
 
    矩阵中未被层规则覆盖的 ❌ 单元（如 eval→llm、git-gh→store）由表驱动逐对生成补齐：一条 ❌ = 一条 `noClasses("org.cra.<a>..").should().dependOnClassesThat().resideInAPackage("org.cra.<b>..")`——矩阵是单一事实源，规则循环生成（约 30 行），不做第二份手写清单；
 2. **R2 循环依赖**：`slices().matching("org.cra.(*)..").should().beFreeOfCycles()`——模块切片无环；Maven 侧由 maven-enforcer 与根 pom reactor 顺序双保险（09§7 已有 enforcer）；
-3. **R3 api/internal 边界**：对每个含 internal 的模块 M：`noClasses().that().resideOutsideOfPackage("org.cra.<m>..").should().dependOnClassesThat().resideInAPackage("org.cra.<m>.internal..")`——§4"模块间只依赖 api"的机械形态；
+3. **R3 api/internal 边界**：对每个含 internal 的模块 M：`noClasses().that().resideOutsideOfPackage("org.cra.<m>..").should().dependOnClassesThat().resideInAPackage("org.cra.<m>.internal..")`——§4"模块间只依赖 api"的机械形态；cra-runner-cli 与 cra-server 是依赖图终点/免二分，不适用；
 4. **R4 SPI 与实现隔离**：`org.cra.git..` 不得依赖 `org.cra.git.github..`（SPI 模块不知实现）；`org.cra.common..` 不得依赖任何其他 `org.cra.<module>..`（底座纯度）；新增平台/账本实现模块时按 11§4 第 4 条同步补"实现互不依赖"规则；
 5. **R5 子代理独立性**：`noClasses().that().resideInAPackage("org.cra.agents..").should().dependOnClassesThat().resideInAPackage("org.cra.core..")`——子代理定义独立于编排器（03§1：编排器经自包含 AgentBrief 注入，子代理不感知编排器与其他子代理的存在）；违例即隔离机制（03§2）从类型系统层面失守；
-6. **R6 Spring 收敛**：`noClasses().that().resideOutsideOfPackage("org.cra.runner.cli..").should().dependOnClassesThat().resideInAPackage("org.springframework..")`——Spring 仅 DI/配置且仅在组合根（01§5.1、02§7）；jgit/Jackson 等无 Spring 类型的依赖不受影响；cra-server（M4）加入时扩展本规则的允许集合并写 ADR；
+6. **R6 Spring 收敛**：`noClasses().that().resideOutsideOfPackages("org.cra.runner.cli..", "org.cra.server..").should().dependOnClassesThat().resideInAPackage("org.springframework..")`——Spring 仅 DI/配置/壳且仅在两处组合根（01§5.1、02§7、ADR-0008）；jgit/Jackson 等无 Spring 类型的依赖不受影响；
 7. **R7 注入注解零出现**：`noClasses().should().dependOnClassesThat().belongToAnyOf(Autowired.class)`——字段/setter/多构造器注入都必然引入该注解依赖，一网打尽（§4 构造器注入唯一）；
 8. **R8 反射禁令**：`org.cra..` 的类不得依赖 `java.lang.reflect..`——跨层反射是绕过 api/internal 可见性的万能钥匙；确需（如 cra-eval 反射装载）走 §7 豁免。
 

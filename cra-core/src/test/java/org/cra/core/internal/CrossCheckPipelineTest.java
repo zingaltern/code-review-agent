@@ -135,6 +135,7 @@ class CrossCheckPipelineTest {
         .thenReturn(Optional.empty());
     Mockito.when(ledger.publishedFindings(Mockito.anyInt())).thenReturn(List.of());
     Mockito.when(ledger.completedRuns(Mockito.anyInt())).thenReturn(List.of());
+    bridgeKeyedLedgerToIntStubs();
     Mockito.when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
     Mockito.when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenReturn(FileContent.ofText("REVIEW.md", REVIEW_MD));
@@ -493,5 +494,81 @@ class CrossCheckPipelineTest {
     Process p = new ProcessBuilder(cmd).directory(workspace.toFile()).start();
     p.waitFor();
     return new String(p.getInputStream().readAllBytes());
+  }
+
+  /**
+   * 键控扩展（05§1.3）兼容桩：pipeline 走 ReviewKey 方法，测试的既有 int 键 stub 通过委托继续生效 （Mockito 不调用 default
+   * 方法，必须显式桥接）。
+   */
+  private void bridgeKeyedLedgerToIntStubs() {
+    org.mockito.Mockito.when(
+            ledger.findCompletion(
+                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+        .thenAnswer(
+            inv -> {
+              org.cra.common.git.ReviewKey k = inv.getArgument(0);
+              return ledger.findCompletion(k.prNumber(), k.commitSha());
+            });
+    org.mockito.Mockito.when(
+            ledger.publishedFindings(
+                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+        .thenAnswer(
+            inv ->
+                ledger.publishedFindings(
+                    ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
+    org.mockito.Mockito.when(
+            ledger.completedRuns(
+                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+        .thenAnswer(
+            inv ->
+                ledger.completedRuns(
+                    ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
+    org.mockito.Mockito.when(
+            ledger.suspectMarkerCount(
+                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+        .thenAnswer(
+            inv ->
+                ledger.suspectMarkerCount(
+                    ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
+    org.mockito.Mockito.when(
+            ledger.comment(
+                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
+                org.mockito.ArgumentMatchers.anyLong()))
+        .thenAnswer(
+            inv ->
+                ledger.comment(
+                    ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber(),
+                    inv.getArgument(1)));
+    org.mockito.Mockito.doAnswer(
+            inv -> {
+              org.cra.common.git.ReviewKey k = inv.getArgument(0);
+              ledger.recordRunCompletion(k.prNumber(), inv.getArgument(1));
+              return null;
+            })
+        .when(ledger)
+        .recordRunCompletion(
+            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
+            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerRunMarker.class));
+    org.mockito.Mockito.doAnswer(
+            inv -> {
+              org.cra.common.git.ReviewKey k = inv.getArgument(0);
+              ledger.recordPublishedFinding(k.prNumber(), inv.getArgument(1));
+              return null;
+            })
+        .when(ledger)
+        .recordPublishedFinding(
+            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
+            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerFindingMarker.class));
+    org.mockito.Mockito.doAnswer(
+            inv -> {
+              org.cra.common.git.ReviewKey k = inv.getArgument(0);
+              ledger.recordTemplateVersions(k.prNumber(), inv.getArgument(1), inv.getArgument(2));
+              return null;
+            })
+        .when(ledger)
+        .recordTemplateVersions(
+            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.anyMap());
   }
 }

@@ -27,6 +27,8 @@ import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
+import org.cra.common.git.PostCommitReviewCommand;
+import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.PublishStatus;
@@ -349,9 +351,11 @@ class GitHubHttpAdapterWireMockTest {
             .willReturn(
                 okJson(
                     "[{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},"
                         + "\"merge_commit_sha\":\"m1\",\"updated_at\":\"2026-10-24T00:00:00Z\","
                         + "\"merged_at\":\"2026-10-24T00:00:00Z\"},"
                         + "{\"number\":6,\"state\":\"closed\",\"head\":{\"sha\":\"h0\"},"
+                        + "\"base\":{\"sha\":\"b0\"},"
                         + "\"merge_commit_sha\":null,\"updated_at\":\"2026-10-01T00:00:00Z\","
                         + "\"merged_at\":null}]")));
     List<PullRequestRef> pulls =
@@ -359,6 +363,7 @@ class GitHubHttpAdapterWireMockTest {
     assertThat(pulls).hasSize(1);
     assertThat(pulls.get(0).number()).isEqualTo(7);
     assertThat(pulls.get(0).headSha()).isEqualTo("h1");
+    assertThat(pulls.get(0).baseSha()).isEqualTo("b1");
     assertThat(pulls.get(0).mergeCommitSha()).isEqualTo("m1");
     assertThat(pulls.get(0).merged()).isTrue();
   }
@@ -413,6 +418,118 @@ class GitHubHttpAdapterWireMockTest {
             .orElseThrow();
     assertThat(reaction.commentId()).isEqualTo(200);
     assertThat(reaction.detail()).isEqualTo(DispositionSignal.REACTION_UP);
+  }
+
+  // ---------- M4c/M4d 载体端点（05§2.4/§2.5） ----------
+
+  @Test
+  void postCommitReviewPostsToCommitCommentsEndpoint() {
+    // push 直推载体：POST /repos/{o}/{r}/commits/{sha}/comments，正文含 run 完成标记
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/commits/abc1234/comments"))
+            .withRequestBody(matchingJsonPath("$.body", containing("status=DONE")))
+            .willReturn(okJson("{\"id\":7777}")));
+    java.util.Optional<Long> id =
+        adapter.postCommitReview(
+            new PostCommitReviewCommand(
+                "o",
+                "r",
+                "abc1234",
+                "## cra 评审 Summary\n\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE "
+                    + "| findings=0 | suppressed=0 -->"));
+    assertThat(id).contains(7777L);
+  }
+
+  @Test
+  void postIssueReviewCreatesIssueCarrier() {
+    // 夜间存量载体：POST /repos/{o}/{r}/issues，标题带 [cra-nightly] 前缀，返回 issue 编号
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/issues"))
+            .withRequestBody(matchingJsonPath("$.title", containing("[cra-nightly] PR #7")))
+            .withRequestBody(matchingJsonPath("$.body", containing("status=DONE")))
+            .withRequestBody(matchingJsonPath("$[?(@.labels[0] == 'cra-nightly')]"))
+            .willReturn(okJson("{\"number\":15,\"id\":15888}")));
+    java.util.Optional<Long> number =
+        adapter.postIssueReview(
+            new PostIssueCommand(
+                "o",
+                "r",
+                "[cra-nightly] PR #7 abc1234 存量评审",
+                "## cra 评审 Summary\n\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE "
+                    + "| findings=0 | suppressed=0 -->",
+                List.of("cra-nightly")));
+    assertThat(number).contains(15L);
+  }
+
+  @Test
+  void fetchCommitBotCommentsParsesCommitScopedLedger() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/commits/abc1234/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":31,\"user\":{\"login\":\"cra-bot\"},"
+                        + "\"body\":\"Summary\\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 "
+                        + "| status=DONE | findings=2 | suppressed=0 -->\","
+                        + "\"created_at\":\"2026-10-26T00:00:00Z\",\"commit_id\":\"abc1234\"},"
+                        + "{\"id\":32,\"user\":{\"login\":\"human\"},\"body\":\"hi\"}]")));
+    CommentLedger ledger = adapter.fetchCommitBotComments(REPO, "abc1234");
+    assertThat(ledger.runMarkers()).hasSize(1);
+    assertThat(ledger.runMarkers().get(0).commentId()).isEqualTo(31L);
+    assertThat(ledger.comments()).hasSize(1);
+    assertThat(ledger.comments().get(0).kind())
+        .isEqualTo(org.cra.common.git.LedgerComment.KIND_COMMIT);
+  }
+
+  @Test
+  void fetchIssueBotCommentsFiltersByCommitAndSkipsPullRequests() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"github-actions[bot]\"}")));
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/issues?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":15,\"user\":{\"login\":\"github-actions[bot]\"},"
+                        + "\"body\":\"## 夜间存量评审\\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 "
+                        + "| status=DONE | findings=1 | suppressed=0 -->\","
+                        + "\"created_at\":\"2026-10-26T00:00:00Z\"},"
+                        + "{\"number\":16,\"user\":{\"login\":\"github-actions[bot]\"},"
+                        + "\"body\":\"## 夜间存量评审\\n<!-- cra:v=2.1 | run=run_2 | commit=def5678 "
+                        + "| status=DONE | findings=0 | suppressed=0 -->\","
+                        + "\"created_at\":\"2026-10-26T01:00:00Z\"},"
+                        + "{\"number\":7,\"user\":{\"login\":\"github-actions[bot]\"},"
+                        + "\"pull_request\":{\"url\":\"x\"},"
+                        + "\"body\":\"PR 条目不是 issue 载体\\n<!-- cra:v=2.1 | run=run_3 "
+                        + "| commit=abc1234 | status=DONE | findings=0 | suppressed=0 -->\","
+                        + "\"created_at\":\"2026-10-26T02:00:00Z\"},"
+                        + "{\"number\":17,\"user\":{\"login\":\"human\"},"
+                        + "\"body\":\"human issue\",\"created_at\":\"2026-10-26T03:00:00Z\"}]")));
+    CommentLedger ledger = adapter.fetchIssueBotComments(REPO, "abc1234");
+    assertThat(ledger.runMarkers()).hasSize(1);
+    assertThat(ledger.runMarkers().get(0).runId()).isEqualTo("run_1");
+    assertThat(ledger.comments()).hasSize(1);
+    assertThat(ledger.comments().get(0).id()).isEqualTo(15L);
+  }
+
+  @Test
+  void listBotIssuesExcludesPullRequestsAndHumans() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/issues?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":15,\"user\":{\"login\":\"cra-bot\"},\"body\":\"issue-bot\","
+                        + "\"created_at\":\"2026-10-26T00:00:00Z\"},"
+                        + "{\"number\":7,\"user\":{\"login\":\"cra-bot\"},"
+                        + "\"pull_request\":{\"url\":\"x\"},\"body\":\"pr-as-issue\","
+                        + "\"created_at\":\"2026-10-26T01:00:00Z\"},"
+                        + "{\"number\":17,\"user\":{\"login\":\"human\"},\"body\":\"human\","
+                        + "\"created_at\":\"2026-10-26T02:00:00Z\"}]")));
+    List<org.cra.common.git.LedgerComment> issues = adapter.listBotIssues(REPO, null);
+    assertThat(issues).hasSize(1);
+    assertThat(issues.get(0).id()).isEqualTo(15L);
+    assertThat(issues.get(0).body()).isEqualTo("issue-bot");
   }
 
   private static PostReviewCommand command(int count) {

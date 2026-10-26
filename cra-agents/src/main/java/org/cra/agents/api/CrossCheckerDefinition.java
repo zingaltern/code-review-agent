@@ -20,7 +20,10 @@ import java.util.Objects;
 public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> {
 
   /** 预算（03§6 CrossChecker 行）。 */
-  private static final AgentBudget BUDGET = new AgentBudget(16_000, 1_500, 2, 240_000);
+  private static final AgentBudget BUDGET =
+      // v1.3.2：输出 1.5k→4k——context finding 的 JSON（含矛盾来源引用）每条 ≈700-1k token，
+      // M3 官方 L3 实测 cross-checker 输出 2122/2255 被 1.5k 截断（budget_exceeded，0 产出）
+      new AgentBudget(16_000, 4_000, 2, 240_000);
 
   /** 角色（kebab-case，05§1.1）。 */
   public static final AgentRole ROLE = new AgentRole("cross-checker", "上下文对齐评审");

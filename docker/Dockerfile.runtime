@@ -1,0 +1,19 @@
+# 仅运行时镜像（M4b 本地验收用）：复用宿主机已构建的 exec jar，避免在容器内重复 Maven 构建。
+# 生产/CI 镜像用 Dockerfile 的多阶段构建。
+FROM eclipse-temurin:17-jre
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --create-home cra \
+    && mkdir -p /var/lib/cra/runs /workspace \
+    && chown -R cra:cra /var/lib/cra /workspace
+
+WORKDIR /app
+COPY cra-server/target/cra-server-0.1.0-exec.jar /app/cra-server.jar
+
+USER cra
+EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8080/readyz || exit 1
+
+ENTRYPOINT ["java", "-jar", "/app/cra-server.jar"]

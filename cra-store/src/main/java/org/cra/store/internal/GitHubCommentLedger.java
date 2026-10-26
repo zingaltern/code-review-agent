@@ -8,6 +8,8 @@ import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.RepoRef;
+import org.cra.common.git.ReviewKey;
+import org.cra.common.run.ReviewMode;
 import org.cra.store.api.ReviewLedger;
 
 /**
@@ -61,5 +63,40 @@ public class GitHubCommentLedger implements ReviewLedger {
     return source.fetchBotComments(repo, prNumber).comments().stream()
         .filter(c -> c.id() == commentId)
         .findFirst();
+  }
+
+  // ---------- 键控扩展（M4c/M4d，05§1.3）：PR 形态只接受 PULL_REQUEST 键 ----------
+
+  @Override
+  public Optional<LedgerRunMarker> findCompletion(ReviewKey key) {
+    return findCompletion(requirePullRequest(key), key.commitSha());
+  }
+
+  @Override
+  public List<LedgerFindingMarker> publishedFindings(ReviewKey key) {
+    return publishedFindings(requirePullRequest(key));
+  }
+
+  @Override
+  public List<LedgerRunMarker> completedRuns(ReviewKey key) {
+    return completedRuns(requirePullRequest(key));
+  }
+
+  @Override
+  public int suspectMarkerCount(ReviewKey key) {
+    return suspectMarkerCount(requirePullRequest(key));
+  }
+
+  @Override
+  public Optional<LedgerComment> comment(ReviewKey key, long commentId) {
+    return comment(requirePullRequest(key), commentId);
+  }
+
+  private static int requirePullRequest(ReviewKey key) {
+    if (key.mode() != ReviewMode.PULL_REQUEST) {
+      throw new IllegalArgumentException(
+          "PR 评论账本只接受 PULL_REQUEST 键: " + key.mode() + "（无 PR 形态用 GitHubCarrierLedger）");
+    }
+    return key.prNumber();
   }
 }

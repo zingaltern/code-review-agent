@@ -1,5 +1,7 @@
 package org.cra.runner.cli;
 
+import org.cra.common.run.ReviewMode;
+
 /**
  * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量，密钥只从环境变量读， 05§6）。组装期校验：缺项/非法值即 CraConfigException →
  * 退出码 2（05§3）。
@@ -42,7 +44,9 @@ package org.cra.runner.cli;
  * @param crossCheckerModes 模式开关（--crosschecker-modes / CRA_CROSSCHECKER_MODES，默认 assumption,sniff）
  * @param crossCheckerHistoryWeeks 上下游变更史回溯周数（--crosschecker-history-weeks /
  *     CRA_CROSSCHECKER_HISTORY_WEEKS，默认 8）
- * @param signoff 签字建议配置（05§5 agents.signoff；M4a）
+ * @param reviewMode 发布形态（M4c --push = COMMIT；M4d sweep = ISSUE；默认 PULL_REQUEST，05§2.2）
+ * @param pushLookback push 模式沿首父链回溯查找"上一完成 commit"的最大步数（--lookback，默认 20，05§2.4）
+ * @param signoff 签字建议配置（05§5 agents.signoff；M4a；默认开启、作者/测试状态未知）
  */
 public record CraConfig(
     String repoOwner,
@@ -79,6 +83,8 @@ public record CraConfig(
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
     String llmTemperature,
+    int pushLookback,
+    ReviewMode reviewMode,
     SignoffConfig signoff) {
 
   public CraConfig {
@@ -86,7 +92,7 @@ public record CraConfig(
   }
 
   /**
-   * M4f-lite 形态兼容构造（签字建议取默认：enabled=true、作者/测试状态未知）。
+   * M4c 前形态兼容构造（发布形态 = PR）。
    *
    * @param repoOwner 仓库属主
    * @param repoName 仓库名
@@ -118,8 +124,8 @@ public record CraConfig(
    * @param llmModelLight light 档模型
    * @param fallbackChain 降级链
    * @param rpm per-model RPM
-   * @param crossCheckerEnabled CrossChecker 开关
-   * @param crossCheckerModes CrossChecker 模式
+   * @param crossCheckerEnabled CrossChecker 总开关
+   * @param crossCheckerModes 模式开关
    * @param crossCheckerHistoryWeeks 变更史回溯周数
    * @param llmTemperature 采样温度
    */
@@ -193,8 +199,13 @@ public record CraConfig(
         crossCheckerModes,
         crossCheckerHistoryWeeks,
         llmTemperature,
+        DEFAULT_PUSH_LOOKBACK,
+        ReviewMode.PULL_REQUEST,
         SignoffConfig.defaults());
   }
+
+  /** push 基线解析默认回溯步数（05§2.4）。 */
+  public static final int DEFAULT_PUSH_LOOKBACK = 20;
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
@@ -296,6 +307,8 @@ public record CraConfig(
         "assumption,sniff",
         8,
         null,
+        DEFAULT_PUSH_LOOKBACK,
+        ReviewMode.PULL_REQUEST,
         SignoffConfig.defaults());
   }
 
@@ -337,6 +350,55 @@ public record CraConfig(
         crossCheckerModes(),
         crossCheckerHistoryWeeks(),
         llmTemperature(),
+        pushLookback(),
+        reviewMode(),
+        signoff());
+  }
+
+  /**
+   * push 直推 base 解析回填（M4c：上一完成 commit / 可配置基线，05§2.4）。
+   *
+   * @param resolvedBase 解析出的基线 sha
+   * @return 回填后的配置
+   */
+  public CraConfig withResolvedPushBase(String resolvedBase) {
+    return new CraConfig(
+        repoOwner(),
+        repoName(),
+        prNumber(),
+        resolvedBase,
+        headSha(),
+        depth(),
+        dryRun(),
+        securityBlock(),
+        githubToken(),
+        githubApi(),
+        llmApiKey(),
+        llmBaseUrl(),
+        llmModel(),
+        runRoot(),
+        workspace(),
+        largeDiffLines(),
+        hardCapLines(),
+        nitBudget(),
+        runTotalTokens(),
+        degradeAtFirst(),
+        degradeAtSecond(),
+        publishUnverified(),
+        spotCheckPercent(),
+        local(),
+        execCommand(),
+        ledgerDb(),
+        llmModelStrong(),
+        llmModelLight(),
+        fallbackChain(),
+        rpm(),
+        crossCheckerEnabled(),
+        crossCheckerModes(),
+        crossCheckerHistoryWeeks(),
+        llmTemperature(),
+        pushLookback(),
+        reviewMode(),
         signoff());
   }
 }

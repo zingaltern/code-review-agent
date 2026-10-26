@@ -200,6 +200,7 @@ public final class ReviewPipeline implements Orchestrator {
           "run_start",
           Map.of(
               "repo", request.repoOwner() + "/" + request.repoName(),
+              "mode", request.mode().name().toLowerCase(Locale.ROOT),
               "pr", request.prNumber(),
               "base", request.baseSha(),
               "head", request.headSha(),
@@ -208,8 +209,7 @@ public final class ReviewPipeline implements Orchestrator {
 
       // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
       // 保持历史原样，避免 CI 重跑反复 PATCH 旧评论；更新语义如有需要随流水线线统一加）
-      Optional<LedgerRunMarker> completion =
-          ledger.findCompletion(request.prNumber(), request.headSha());
+      Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
       trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
       if (completion.isPresent()) {
         return ReviewRunFinisher.finish(
@@ -226,9 +226,9 @@ public final class ReviewPipeline implements Orchestrator {
       }
 
       // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）+ 账本解析分层（05§1.3 规则 5）
-      List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.prNumber());
-      List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.prNumber());
-      int suspectCount = ledger.suspectMarkerCount(request.prNumber());
+      List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.key());
+      List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.key());
+      int suspectCount = ledger.suspectMarkerCount(request.key());
       boolean anyValidMarker = !publishedMarkers.isEmpty() || !completedRuns.isEmpty();
       trace.emit(
           "ledger_parse",
@@ -303,7 +303,12 @@ public final class ReviewPipeline implements Orchestrator {
           diff.commits().stream()
               .map(c -> c.sha() + " " + c.message())
               .collect(Collectors.joining("\n"));
-      String prTitle = "PR #" + request.prNumber();
+      String prTitle =
+          switch (request.mode()) {
+            case PULL_REQUEST -> "PR #" + request.prNumber();
+            case COMMIT -> "push 直推 commit " + ReviewBodyRenderer.shortSha(request.headSha());
+            case ISSUE -> "PR #" + request.prNumber() + "（夜间存量评审）";
+          };
       String policySection =
           PolicySections.render(policy, PipelineDataLoader.hasReviewMdChange(diff));
       // M4f-lite：CrossChecker 变更史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查本地仓库

@@ -36,6 +36,7 @@ final class CliArgs {
     boolean dryRunArgSeen = false;
     boolean securityBlock = false;
     boolean local = false;
+    boolean push = false;
     boolean crossChecker = false;
     boolean crossCheckerSeen = false;
     boolean signoff = false;
@@ -53,6 +54,7 @@ final class CliArgs {
         }
         case "--security-block" -> securityBlock = true;
         case "--local" -> local = true;
+        case "--push" -> push = true;
         case "--crosschecker" -> {
           crossChecker = true;
           crossCheckerSeen = true;
@@ -80,6 +82,8 @@ final class CliArgs {
         case "--repo",
             "--pr",
             "--base",
+            "--baseline",
+            "--lookback",
             "--head",
             "--depth",
             "--token",
@@ -126,14 +130,30 @@ final class CliArgs {
         throw new CraConfigException("--repo 形如 owner/name: " + repo);
       }
     }
-    int pr =
-        local
-            ? parseIntOrDefault(named.get("--pr"), 0)
-            : parsePr(required(named, "--pr", env.get("PR_NUMBER")));
-    String base =
-        named.containsKey("--base") || !local
-            ? required(named, "--base", env.get("BASE_SHA"))
-            : "main";
+    int pr;
+    String base;
+    if (push) {
+      if (local) {
+        throw new CraConfigException("--push 与 --local 互斥（push 形态走平台 commit comment，05§2.4）");
+      }
+      if (named.containsKey("--pr")) {
+        throw new CraConfigException("--push 模式无 PR 编号（账本键 = repo + commit，05§1.3）");
+      }
+      pr = 0;
+      // push 基线：--base / --baseline 显式给出即用；缺省由命令执行期沿首父链查账本解析
+      // （上一完成 commit；首次 = 仓库初版，05§2.4）
+      String explicitBase = blankToNull(named.get("--base"));
+      base = explicitBase != null ? explicitBase : blankToNull(named.get("--baseline"));
+    } else {
+      pr =
+          local
+              ? parseIntOrDefault(named.get("--pr"), 0)
+              : parsePr(required(named, "--pr", env.get("PR_NUMBER")));
+      base =
+          named.containsKey("--base") || !local
+              ? required(named, "--base", env.get("BASE_SHA"))
+              : "main";
+    }
     // 本地模式 head 可省（= HEAD）；CI 必填
     String head = named.get("--head");
     if (head == null || head.isBlank()) {
@@ -195,6 +215,13 @@ final class CliArgs {
                 ? named.get("--crosschecker-history-weeks")
                 : env.get("CRA_CROSSCHECKER_HISTORY_WEEKS"),
             8);
+    int pushLookback =
+        parseIntOption(
+            "--lookback",
+            named.containsKey("--lookback")
+                ? named.get("--lookback")
+                : env.get("CRA_PUSH_LOOKBACK"),
+            CraConfig.DEFAULT_PUSH_LOOKBACK);
     // 05§5 agents.signoff（M4a）：默认开启；作者/测试状态未知时低风险 0 人签条件不满足
     boolean signoffEnabled =
         signoffSeen
@@ -257,10 +284,12 @@ final class CliArgs {
         crossCheckerModes,
         crossCheckerHistoryWeeks,
         blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))),
+        pushLookback,
+        push ? org.cra.common.run.ReviewMode.COMMIT : org.cra.common.run.ReviewMode.PULL_REQUEST,
         signoffConfig);
   }
 
-  /** 逗号分隔列表（空/空白项丢弃；用于 trusted-authors 与模式串）。 */
+  /** 逗号分隔列表（空/空白项丢弃；用于 trusted-authors）。 */
   private static List<String> parseCsv(String raw) {
     if (raw == null || raw.isBlank()) {
       return List.of();
