@@ -22,6 +22,23 @@ public interface LlmTransport {
       throws java.io.IOException, InterruptedException;
 
   /**
+   * POST 一次 chat/completions（附加请求头，v1.3.2：opencode-go 等需要 x-opencode-session）。
+   *
+   * <p>default 降级为忽略附加头——fake/cassette 实现无需改动（旧行为保持）。
+   *
+   * @param extraHeaders 附加请求头（空 map = 无）
+   */
+  default TransportResponse post(
+      String url,
+      String apiKey,
+      String jsonBody,
+      Duration timeout,
+      java.util.Map<String, String> extraHeaders)
+      throws java.io.IOException, InterruptedException {
+    return post(url, apiKey, jsonBody, timeout);
+  }
+
+  /**
    * 传输结果。
    *
    * @param statusCode HTTP 状态码

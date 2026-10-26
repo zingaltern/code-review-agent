@@ -86,7 +86,8 @@ class DefaultLlmGatewayTest {
         500,
         10,
         40,
-        null);
+        null,
+        java.util.Map.of());
   }
 
   /** 三档独立模型名 + 降级链 standard → light。 */
@@ -103,7 +104,8 @@ class DefaultLlmGatewayTest {
         500,
         10,
         40,
-        null);
+        null,
+        java.util.Map.of());
   }
 
   private static LlmRequest request() {

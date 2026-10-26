@@ -334,6 +334,8 @@ cra:
     # 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
     # 评审/验证/仲裁为分类判断任务：建议 0.2 降低运行间方差（M3 全部角色共享该值）
     temperature: null
+    # opencode-go 适配（v1.3.2）：base-url 指向 opencode.ai 时自动附加 x-opencode-session 头
+    # （opencode-go 的路由要求；无需显式配置，网关构建时生成 UUID 会话）
     max-concurrency: 8              # v1.1：LLM 并发信号量
     per-model-rpm: { standard: 60, strong: 30, light: 60 }
   agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）

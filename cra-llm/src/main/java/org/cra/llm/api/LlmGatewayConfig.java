@@ -20,6 +20,8 @@ import java.util.Objects;
  * @param backoffMaxMs 退避封顶
  * @param temperature 采样温度（null = 不传，沿用 provider 默认；评审/验证/仲裁为分类判断任务， 推荐 0.2 降低运行间方差——M3
  *     方差的直接技术根源，05§5 CRA_LLM_TEMPERATURE）
+ * @param extraHeaders 附加请求头（v1.3.2：base-url 指向 opencode 时自动附加 x-opencode-session——
+ *     opencode-go 的路由要求；其他端点为空 map）
  */
 public record LlmGatewayConfig(
     Map<ModelTier, ModelEndpoint> models,
@@ -31,7 +33,8 @@ public record LlmGatewayConfig(
     long requestTimeoutMs,
     long backoffBaseMs,
     long backoffMaxMs,
-    Double temperature) {
+    Double temperature,
+    Map<String, String> extraHeaders) {
 
   /** 并发上限默认值（02§4.5）。 */
   public static final int DEFAULT_MAX_CONCURRENCY = 8;
@@ -114,7 +117,8 @@ public record LlmGatewayConfig(
         120_000,
         1_000,
         8_000,
-        null);
+        null,
+        Map.of());
   }
 
   /**
