@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/pagination/PageRequest.java",
+      "category": "context",
+      "keywords": [
+        "分页",
+        "默认"
+      ],
+      "note": "diff 本身无缺陷（合法常量调整），但与对外契约矛盾：默认 page size 固定 20、前端控件按 20 分页渲染（INC-2145/矛盾 commit 757de6a，其 diff 内含 DEFAULT_PAGE_SIZE=20 与绑定注释）——期望 CrossChecker 检出 category=context；关键词取中文行为词（分页/默认，M2 教训：英文词对中文正文系统性漏配）",
+      "line": 7
+    }
+  ],
+  "negative_baits": []
+}

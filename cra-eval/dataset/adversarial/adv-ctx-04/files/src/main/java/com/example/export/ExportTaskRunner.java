@@ -1,0 +1,16 @@
+package com.example.export;
+
+/** 导出任务执行器。 */
+public final class ExportTaskRunner {
+
+  /** 提交任务到执行队列，返回任务号。 */
+  public String submit(String reportId) {
+    return "task-" + reportId;
+  }
+
+  /** 直接执行导出并返回文件路径（同步语义：本次调用内完成工作）。 */
+  public String runAndWait(String reportId) {
+    String safe = reportId == null ? "unknown" : reportId.replaceAll("[^A-Za-z0-9._-]", "_");
+    return "/data/exports/" + safe + ".xlsx";
+  }
+}

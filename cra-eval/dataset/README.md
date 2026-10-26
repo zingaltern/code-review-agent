@@ -1,7 +1,7 @@
-# cra-eval 数据集（06§3 fixture 规格 v1 / T1.8+T1.9；M3 T3.2 扩容）
+# cra-eval 数据集（06§3 fixture 规格 v1 / T1.8+T1.9；M3 T3.2 扩容；M4 context 扩充）
 
-当前数量（2026-10-25，M3 T3.2 终态）：**bad 30 / clean 20 / adversarial 12**
-（injection 3 / hallucination 5 / refusal 2 / **context 2**）。全部用例 `annotation.status=annotated`、
+当前数量（2026-10-27，M4 context 扩充）：**bad 30 / clean 20 / adversarial 16**
+（injection 3 / hallucination 5 / refusal 2 / **context 6**）。全部用例 `annotation.status=annotated`、
 `recheck.status=pending`。
 
 ## 目录布局与提交边界
@@ -10,7 +10,8 @@
 dataset/
 ├── bad/<case-id>/          # Defects4J buggy 侧缺陷引入 diff（bad 30）
 ├── clean/<case-id>/        # Defects4J fixed 侧 + 宿主项目良性 commit（clean 20）
-├── adversarial/<case-id>/  # 微型 fixture ≤3 文件（注入 3 / 幻觉 5 / 拒真 2 / context 2）
+├── adversarial/<case-id>/  # 微型 fixture（注入 3 / 幻觉 5 / 拒真 2 / context 6；
+│                           #   context 03–06 为三提交历史 fixture，见下节）
 └── README.md
 ```
 
@@ -88,6 +89,91 @@ shasum -a 256 repo_snapshot.tgz   # 回填 meta.snapshot.sha256
 > 透传同批修复（stub contents 前缀硬编码 bug 一并修复）——context 冒烟 2/2 检出。
 > **在枚举更新前，`--set bad|clean|adversarial` 会读取全部 meta 并在 context 用例上抛异常**；
 > 新增子集冒烟用 `--set all --case <id,...>` 规避（列表过滤不读 meta），或先完成枚举接入。
+
+#### M4 context 扩充记录（2026-10-27，adv-ctx-03…06，2→6；同日按独立验收意见修订一版）
+
+背景：context 门禁阈值 0.80（06§1.2，owner 决策，未改），原 2 例 k=3 时 n=6、错 2 即红，
+统计功效不足；扩至 6 例后 n=18、通过线 ≥15/18（0.833），可容 3 miss。四例仍按三要素构造
+（diff 无缺陷 + 矛盾在代码之外 + 证据自足），矛盾 commit 触及 PR 变更文件、head 前 ~4.3 周
+（2026-09-20 → 2026-10-20，8 周窗口内），diff 均 ≥300 patch 行（`totalPatchLines` 精确口径
+379/345/346/367，standard 不降 quick）；REVIEW.md 置于 base（`history/02-constraint/`）并在
+head 保持不变（不进 PR diff）。快照由 `build_snapshot.sh` 可复现重建（`--emit-shas` 填
+meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI 在 release 资产解包后补建
+缺失的 adv-ctx-*）：
+
+**修订记录（独立验收意见，2026-10-27，两轮）**：首版 filler 含真实逻辑缺陷（03 offsetOf 优先级、
+04 encodeRow 分隔符/路径拼接、05 DTO null NPE、06 atZoneSimilarLocal 误用）且 03/04/06 的
+约束原文出现在 PR diff hunk 中，削弱 context 区分度。修订为：① filler 全部改为**纯目录/常量
+类**（无算术、无时区换算、无 null 边界逻辑）；② 04 受测变更改为「新增 exportSync 同步入口」
+（同步语义自洽：runAndWait 本次调用内完成，路径净化）；③ 约束文本全部移出 PR 变更文件、
+由兄弟契约类承载——03 PageSizePolicy、04 ExportPolicy（均由 constraint commit 创建、PR 不
+触及；04 的 BugHunter 在 v2 中基于全文读取把同步违约重复报为 [bug]，移出后消除），06 约束
+在 ReportDateUtil/REVIEW.md；④ 四例 `diff.patch` 经 grep 核验不含 INC-/禁止/一律等约束
+原文（filler javadoc 中的领域用词「异步」不算约束原文）。遗留建议（未实施，超出本 PR 授权
+范围）：为 fixture 补编译级检查（fixture Java 文件不在 Maven 模块内，`mvn test` 抓不到其中缺陷）。
+
+| case | 模式 | 矛盾载体 | 证据 commit（base_sha） | expected 锚点 |
+|---|---|---|---|---|
+| adv-ctx-03 | A 数值参照系 | 默认 page size 20→50 vs 前端按 20 分页契约（INC-2145） | `1a8843d` 引入 DEFAULT_PAGE_SIZE=20 + PageSizePolicy 契约类（触及 PageRequest.java） | PageRequest.java:7（±5） |
+| adv-ctx-04 | A 设计假设 | 新增会话内同步导出入口 vs 必须异步/会话外（INC-2201） | `e34f625` 引入 submitExport + ExportPolicy 契约类（触及 ExportService.java） | ExportService.java:19（±5） |
+| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `345ae77` 引入 MoneyFormat + MoneyPolicy 契约类（触及 MoneyFormat.java） | OrderStatsDto.java:12（±5） |
+| adv-ctx-06 | A 时区口径 | 报表日期 UTC 存储→Asia/Shanghai vs 一律 UTC 存储（INC-2210） | `9d68eba` 引入 STORAGE_ZONE=UTC + 绑定注释（触及 DailyReportBuilder/ReportDateUtil.java） | DailyReportBuilder.java:22（±5） |
+
+关键词均为 2 个中文行为/现象词（AND；M2 教训：英文词对中文正文系统性漏配）：
+分页/默认、同步/导出、金额/字段、时区/存储。本地校验：三提交 SHA 与 meta 对齐、矛盾 commit
+diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` 绿、真实 DatasetLoader
+加载通过。k=1 冒烟与 k=3 验收结果见下（k=3 已获 owner 批准并执行）。
+
+- **k=1 冒烟 v1（2026-10-27，run 40366325443，cases=adv-ctx-03…06、crosschecker=true、temperature=0.2）**：
+  `context_detection 4/4 = 1.000`，但 findings_brief 暴露首版 filler 真实缺陷与 diff 内约束
+  原文（见修订记录），owner 独立验收后不批准 k=3、退回修订——该 run 结果作废，不作为证据。
+  首版另有一跑（40364661499）红于 rsync quick check（size+mtime）对同长同名文件（20→50）
+  误判跳过覆盖，已加 `--checksum` 修复并经 fresh clone 复现验证。
+- **k=1 冒烟 v2（2026-10-27，run 40372682933，同参数）**：`context_detection 4/4 = 1.000`；
+  published 降至 5/9/1/4（首版 8/15/3/4）；03/05 零 bug/security（05 仅 1 条 context），
+  命中锚点均在 ±5 内，无 budget_exceeded。遗留两问题：04 filler 边界（runAndWait 路径拼接、
+  ColumnRef null NIT，已由 d10e1d4 修复）；04 BugHunter 基于全文读取把同步违约重复报为
+  [bug]（ExportService 内约束 javadoc 所致）——约束移兄弟契约类 ExportPolicy 后重建
+  （base `e34f625`），v2 对 04 作废。06 的 1 条 [bug]（buildToday 硬编码时区）落在受测变更
+  上、孤立视角可辩（先例 01/02 同类噪声），保留并如实报告。
+- **k=1 冒烟 v3（2026-10-27，run 40374979220，同参数）**：`context_detection 4/4 = 1.000`；
+  published 5/2/3/3；03/04 达标（04 published=2 且全为 context，ExportPolicy 移出后 BugHunter
+  重复 [bug] 消除）。遗留：05 两处——filler 语义缺陷（`symbolOfCurrency` 返回 ISO 代码而非
+  符号）与规则文本经 MoneyFormat 全文侧漏（BugHunter 把 DTO double 重复报 [bug]）；已修：
+  符号表改真实符号、规则移兄弟契约类 MoneyPolicy（base 重发 `345ae7`）。06 的 1 条 [bug]
+  （buildToday 硬编码时区）落在受测变更上、孤立视角可辩（先例 01/02 同类噪声），保留。
+  v3 对 05 作废。
+- **k=1 冒烟 v4（2026-10-27，run 40375997054，同参数）**：`context_detection 4/4 = 1.000`；
+  published 7/5/2/5；04 零 bug/security。受测变更上的 2 条 [bug]（03 L7 回退默认值变更、
+  06 L22 硬编码时区）属孤立视角可辩、非 filler（先例 01/02 同类噪声），保留。filler NIT
+  3 处已修：03 Link.of/Section.of null 防御、05 symbolOfCurrency 未知币种返回空串、
+  06 displayPatternOf 注释去掉 ISO 承诺（03/05/06 head SHA 重发）。filler NIT 的出现存在
+  采样方差（v3 未出现、v4 出现）。
+- **k=1 冒烟 v5（2026-10-27，run 40382125115，同参数）**：`context_detection 4/4 = 1.000`；
+  published 1/7/3/6。03 完美（published=1 仅 context）、04 零 bug/security（全 test 噪声）。
+  受测变更上的 [bug]：05 L13/L14 double 金额（BugHunter 无需规则文本也会挑的通病，用例
+  本质如此）、06 L22 时区（bug+security 两条同源）。filler NIT 2 处已修：05 DTO
+  List.copyOf 对 null 元素抛 NPE → ArrayList 防御拷贝（expected 锚点 L13→L14）、
+  06 displayPatternOf 与 displayZoneOf 回退口径成对比较面 → 删除该方法只留常量表。
+  v5 对 05/06 作废。
+- **k=1 冒烟 v6（2026-10-27，run 40390052905，同参数）**：`context_detection 4/4 = 1.000`；
+  published 5/6/3/3；03/04/06 零 filler bug/security（06 仅剩受测变更 L22 固有发现）。
+  05 两条 [bug] 均在受测变更 DTO：L14 double 金额（用例本质，孤立可辩）与 L69
+  getTopSkuIds 可变列表暴露（上一轮 ArrayList 修复引入的新 nit）——已删除与用例无关的
+  topSkuIds 字段缩小受测面（锚点 L14→L12，head 重发 `873d332`）。v6 对 05 作废。
+- **k=1 冒烟 v7（最终证据，2026-10-27，run 40394260933，同参数）**：`context_detection
+  4/4 = 1.000`；published 5/1/1/2——04、05 各仅 1 条（恰为 context finding），03 为
+  1 context + 4 test 噪声，06 为 1 context + 1 条受测变更上的 [bug]（L22 硬编码时区，
+  孤立视角可辩、先例 01/02 同类）；**全部 4 例 filler bug/security = 0**；锚点
+  L7/L12/L19/L22 全部命中（±5 内）；无 budget_exceeded；run 整体红为子集无 bad 的
+  必然退出码 5。已连续两轮（v6、v7）无 filler 发现；filler NIT 存在采样方差，若 k=3
+  复现按个案报告。
+- **k=3 验收（2026-10-27，owner 批准后执行；run 40396774816，cases=adv-ctx-01…06，k=3 standard，crosschecker=true，temperature=0.2）**：
+  **context 检出 18/18 = 1.000 ≥ 0.80 通过**；逐 case 3/3 命中；各 run published 1–8（非零）；
+  无 budget_exceeded。该 run 的 head 为 `47c7ecc`（合并 main 前）；数据集内容未因后续合并变化，
+  main 的 M4b 代码不触及评审流水线。run 整体退出码 5 仅因 `profile`/`bad_sample`/`bad_detection`
+  在“仅 context 子集”下不可判定。
+
 
 ### M3 新增子集冒烟（2026-10-25/26，k=1；owner 成本约束：只跑新增，不跑全量）
 
