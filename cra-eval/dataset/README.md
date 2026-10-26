@@ -122,7 +122,7 @@ meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI �
 关键词均为 2 个中文行为/现象词（AND；M2 教训：英文词对中文正文系统性漏配）：
 分页/默认、同步/导出、金额/字段、时区/存储。本地校验：三提交 SHA 与 meta 对齐、矛盾 commit
 diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` 绿、真实 DatasetLoader
-加载通过。k=1 冒烟与 k=3 验收结果见下（k=3 需 owner 批准后执行）。
+加载通过。k=1 冒烟与 k=3 验收结果见下（k=3 已获 owner 批准并执行）。
 
 - **k=1 冒烟 v1（2026-10-27，run 40366325443，cases=adv-ctx-03…06、crosschecker=true、temperature=0.2）**：
   `context_detection 4/4 = 1.000`，但 findings_brief 暴露首版 filler 真实缺陷与 diff 内约束
@@ -168,7 +168,11 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   L7/L12/L19/L22 全部命中（±5 内）；无 budget_exceeded；run 整体红为子集无 bad 的
   必然退出码 5。已连续两轮（v6、v7）无 filler 发现；filler NIT 存在采样方差，若 k=3
   复现按个案报告。
-- **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
+- **k=3 验收（2026-10-27，owner 批准后执行；run 40396774816，cases=adv-ctx-01…06，k=3 standard，crosschecker=true，temperature=0.2）**：
+  **context 检出 18/18 = 1.000 ≥ 0.80 通过**；逐 case 3/3 命中；各 run published 1–8（非零）；
+  无 budget_exceeded。该 run 的 head 为 `47c7ecc`（合并 main 前）；数据集内容未因后续合并变化，
+  main 的 M4b 代码不触及评审流水线。run 整体退出码 5 仅因 `profile`/`bad_sample`/`bad_detection`
+  在“仅 context 子集”下不可判定。
 
 
 ### M3 新增子集冒烟（2026-10-25/26，k=1；owner 成本约束：只跑新增，不跑全量）
