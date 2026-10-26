@@ -86,6 +86,8 @@ class DefaultLlmGatewayTest {
         500,
         10,
         40,
+        null,
+        java.util.Map.of(),
         null);
   }
 
@@ -103,6 +105,8 @@ class DefaultLlmGatewayTest {
         500,
         10,
         40,
+        null,
+        java.util.Map.of(),
         null);
   }
 

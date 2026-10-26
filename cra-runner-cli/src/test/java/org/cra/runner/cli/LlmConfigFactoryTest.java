@@ -68,6 +68,24 @@ class LlmConfigFactoryTest {
   }
 
   @Test
+  void opencodeBaseUrlGetsAutomaticSessionHeader() {
+    // v1.3.2 opencode-go 适配：base-url 指向 opencode 时自动附加 x-opencode-session
+    // （opencode-go 的路由要求；缺失时返回 MissingSessionID）
+    var gateway =
+        new LlmConfigFactoryTestSupport().createWithBaseUrl("https://opencode.ai/zen/go/v1");
+    org.assertj.core.api.Assertions.assertThat(gateway.extraHeaders())
+        .containsKey("x-opencode-session");
+    org.assertj.core.api.Assertions.assertThat(gateway.extraHeaders().get("x-opencode-session"))
+        .isNotBlank();
+
+    var plain = new LlmConfigFactoryTestSupport().createWithBaseUrl("https://api.deepseek.com");
+    org.assertj.core.api.Assertions.assertThat(plain.extraHeaders()).isEmpty();
+    // opencode 端点自动关闭 thinking（reasoning token 计入 max_tokens）
+    org.assertj.core.api.Assertions.assertThat(gateway.reasoningEffort()).isEqualTo("none");
+    org.assertj.core.api.Assertions.assertThat(plain.reasoningEffort()).isNull();
+  }
+
+  @Test
   void parsesFallbackChainAndRpm() {
     assertThat(LlmConfigFactory.parseFallbackChain("standard,strong,light"))
         .containsExactly(ModelTier.STANDARD, ModelTier.STRONG, ModelTier.LIGHT);
@@ -89,5 +107,49 @@ class LlmConfigFactoryTest {
         .isInstanceOf(CraConfigException.class);
     assertThatThrownBy(() -> LlmConfigFactory.parseRpm("standard"))
         .isInstanceOf(CraConfigException.class);
+  }
+
+  /** 测试辅助：用指定 baseUrl 构造网关（其余沿用既有 config 默认）。 */
+  static final class LlmConfigFactoryTestSupport {
+    org.cra.llm.api.LlmGatewayConfig createWithBaseUrl(String baseUrl) {
+      CraConfig base = config("standard,light", null, null, null);
+      CraConfig withUrl =
+          new CraConfig(
+              base.repoOwner(),
+              base.repoName(),
+              base.prNumber(),
+              base.baseSha(),
+              base.headSha(),
+              base.depth(),
+              base.dryRun(),
+              base.securityBlock(),
+              base.githubToken(),
+              base.githubApi(),
+              base.llmApiKey(),
+              baseUrl,
+              base.llmModel(),
+              base.runRoot(),
+              base.workspace(),
+              base.largeDiffLines(),
+              base.hardCapLines(),
+              base.nitBudget(),
+              base.runTotalTokens(),
+              base.degradeAtFirst(),
+              base.degradeAtSecond(),
+              base.publishUnverified(),
+              base.spotCheckPercent(),
+              base.local(),
+              base.execCommand(),
+              base.ledgerDb(),
+              base.llmModelStrong(),
+              base.llmModelLight(),
+              base.fallbackChain(),
+              base.rpm(),
+              base.crossCheckerEnabled(),
+              base.crossCheckerModes(),
+              base.crossCheckerHistoryWeeks(),
+              base.llmTemperature());
+      return LlmConfigFactory.create(withUrl);
+    }
   }
 }

@@ -47,7 +47,9 @@ final class LlmConfigFactory {
         120_000,
         1_000,
         8_000,
-        parseTemperature(config.llmTemperature()));
+        parseTemperature(config.llmTemperature()),
+        extraHeadersFor(config.llmBaseUrl()),
+        reasoningEffortFor(config.llmBaseUrl()));
   }
 
   /** 档位模型名缺省继承 standard；空白串等同未配置（ModelEndpoint 拒绝 blank）。 */
@@ -125,5 +127,25 @@ final class LlmConfigFactory {
     } catch (NumberFormatException e) {
       throw new CraConfigException("CRA_LLM_TEMPERATURE 非法: " + value);
     }
+  }
+
+  /**
+   * 附加请求头（v1.3.2 opencode-go 适配）：base-url 指向 opencode 时自动附加 {@code x-opencode-session}（opencode-go
+   * 的路由要求——缺失时返回 MissingSessionID）。 每个网关实例一个 UUID 会话（同一 run 的请求共享会话，符合其"会话"语义）。
+   *
+   * @param baseUrl LLM 端点根地址
+   * @return 附加头（非 opencode 端点为空 map）
+   */
+  private static String reasoningEffortFor(String baseUrl) {
+    // opencode 端点关闭 thinking：reasoning token 计入 max_tokens，评审任务 1–2k 输出预算
+    // 会被推理吃光（M3 冒烟实测 bug-hunter/test-reviewer budget_exceeded）
+    return baseUrl != null && baseUrl.contains("opencode.ai") ? "none" : null;
+  }
+
+  private static java.util.Map<String, String> extraHeadersFor(String baseUrl) {
+    if (baseUrl != null && baseUrl.contains("opencode.ai")) {
+      return java.util.Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());
+    }
+    return java.util.Map.of();
   }
 }

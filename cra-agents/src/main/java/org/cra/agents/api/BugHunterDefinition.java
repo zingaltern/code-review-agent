@@ -43,7 +43,9 @@ public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
   }
 
   /** 预算（03§6 BugHunter 行）。 */
-  private static final AgentBudget BUDGET = new AgentBudget(24_000, 2_000, 3, 240_000);
+  // v1.3.2：输出 2k→4k——M3 实测 dataflow 单次输出 4379 token 击穿 2k（budget_exceeded）；
+  // 每条 finding ≈600-900 token，4k 容纳 4-5 条
+  private static final AgentBudget BUDGET = new AgentBudget(24_000, 4_000, 3, 240_000);
 
   private final Perspective perspective;
   private final TemplateSupport templates;

@@ -135,7 +135,9 @@ public final class DefaultLlmGateway implements LlmGateway {
       List<String> attemptFailures)
       throws InterruptedException {
     String url = endpoint.baseUrl().replaceAll("/+$", "") + "/chat/completions";
-    String body = OpenAiCodec.encodeRequest(endpoint.model(), request, config.temperature());
+    String body =
+        OpenAiCodec.encodeRequest(
+            endpoint.model(), request, config.temperature(), config.reasoningEffort());
     for (int attempt = 0; attempt <= config.maxRetries(); attempt++) {
       if (attempt > 0) {
         sleeper.accept(backoff.delayForAttempt(attempt));
@@ -146,7 +148,8 @@ public final class DefaultLlmGateway implements LlmGateway {
                 url,
                 endpoint.apiKey(),
                 body,
-                java.time.Duration.ofMillis(config.requestTimeoutMs()));
+                java.time.Duration.ofMillis(config.requestTimeoutMs()),
+                config.extraHeaders());
         if (response.statusCode() == 200) {
           return parseOk(response.body(), start);
         }

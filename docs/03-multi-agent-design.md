@@ -229,14 +229,14 @@ for (var e : byFile.entrySet()) {
 
 | 子代理 | 数量/运行 | 模型档位 | 工具 | 输入预算 | 输出预算 | 轮次 |
 |---|---|---|---|---|---|---|
-| BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤2k | 3 |
+| BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤4k（v1.3.2：2k→4k） | 3 |
 | SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤24k/chunk | ≤2k | 3 |
-| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤2k | 2 |  
+| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤4k（v1.3.2：1k→2k→4k） | 2 |  
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
 | VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |
 | JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier） | ≤1k | 2 |
-| **CrossChecker**（v1.3.1 补行） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k） | ≤1.5k | 2 |
+| **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。
 
