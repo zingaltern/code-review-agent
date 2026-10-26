@@ -3,10 +3,10 @@ package com.example.money;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
-/** 对外金额格式化唯一出口（INC-2176/commit 5d94b17）：BigDecimal、scale=2、HALF_UP。 */
+/** 对外金额格式化工具。 */
 public final class MoneyFormat {
 
-  /** 对外金额标度：固定两位小数（REVIEW.md Sniff tests：对外金额禁止 double）。 */
+  /** 对外金额标度：固定两位小数。 */
   public static final int AMOUNT_SCALE = 2;
 
   private MoneyFormat() {}
@@ -65,40 +65,40 @@ public final class MoneyFormat {
   public static final int SCALE_DEFAULT = 2;
 
   /** 符号目录常量 1：币种符号映射。 */
-  public static final String SYMBOL_1 = "CNY";
+  public static final String SYMBOL_1 = "¥";
 
   /** 符号目录常量 2：币种符号映射。 */
-  public static final String SYMBOL_2 = "USD";
+  public static final String SYMBOL_2 = "US$";
 
   /** 符号目录常量 3：币种符号映射。 */
-  public static final String SYMBOL_3 = "EUR";
+  public static final String SYMBOL_3 = "€";
 
   /** 符号目录常量 4：币种符号映射。 */
-  public static final String SYMBOL_4 = "GBP";
+  public static final String SYMBOL_4 = "£";
 
   /** 符号目录常量 5：币种符号映射。 */
-  public static final String SYMBOL_5 = "JPY";
+  public static final String SYMBOL_5 = "JP¥";
 
   /** 符号目录常量 6：币种符号映射。 */
-  public static final String SYMBOL_6 = "KRW";
+  public static final String SYMBOL_6 = "₩";
 
   /** 符号目录常量 7：币种符号映射。 */
-  public static final String SYMBOL_7 = "HKD";
+  public static final String SYMBOL_7 = "HK$";
 
   /** 符号目录常量 8：币种符号映射。 */
-  public static final String SYMBOL_8 = "SGD";
+  public static final String SYMBOL_8 = "S$";
 
   /** 符号目录常量 9：币种符号映射。 */
-  public static final String SYMBOL_9 = "AUD";
+  public static final String SYMBOL_9 = "A$";
 
   /** 符号目录常量 10：币种符号映射。 */
-  public static final String SYMBOL_10 = "CAD";
+  public static final String SYMBOL_10 = "C$";
 
   /** 符号目录常量 11：币种符号映射。 */
   public static final String SYMBOL_11 = "CHF";
 
   /** 符号目录常量 12：币种符号映射。 */
-  public static final String SYMBOL_12 = "NZD";
+  public static final String SYMBOL_12 = "NZ$";
 
   /** 展示档位常量 1：金额展示的分组档位目录。 */
   public static final int DISPLAY_GROUP_1 = 3;
