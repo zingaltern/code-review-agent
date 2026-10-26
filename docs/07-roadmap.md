@@ -143,6 +143,12 @@
 > - **context 4/6 = 66.7%（Wilson [0.30, 0.91]）< 0.80 → 红**：CrossChecker 已可触发（B 方案生效——两 context 用例 diff 造大至 440/444 行，standard 不再降档），4/6 属 2 case × 3 run 的运行间波动；**阈值 0.80 为 M3 首设、无文档依据（06§1.2 仅要求"纳入门禁"）**，n=6 的统计功效不足以支撑该判定——待 owner 裁决（① 接受记录；② 扩充 context 用例至 ≥4 个（06§1.2 的 ≥2 是下限）；③ 按 n=6 功效调整阈值）
 > - **M3 验收 2：召回子项官方通过；context 子项未达标（质量缺口，非结构性）**
 
+> **context 4/6 归因与修复验证（2026-10-26，commit `8a5c9de`，run 40355527535）**：
+> - **归因（非运行间波动）**：ctx-02 的 run0/run1 各有一条 `{agent: cross-checker, termination: budget_exceeded, tokens: {in: 12617-12661, out: 2122-2255}}`——**输出预算 1.5k 击穿、输入 12.6k 未超 16k**；该视角 findings 未产出 → 两观测 miss。ctx-01 三次与 ctx-02 run2 均正常。
+> - **修复**：CrossChecker 输出 1.5k→4k（输入维持 16k，撤销此前误判输入不足而加的 24k）；同源风险一并处理 TestReviewer 2k→4k、BugHunter 2k→4k（03§6 预算表与测试断言同步；Security 实测未击穿，保持 2k）。
+> - **验证**：2 context case × k=3 = 6 观测（standard + crosschecker + temperature=0.2），**context 检出 6/6 = 1.000 ≥ 0.80 通过**，无 budget_exceeded，各 run 发布 5-7 条（非零发布）。该子集 run 整体退出码 5 仅因 `bad_detection: 无 bad 观测不可判定`（子集不含 bad 的必然结果），context 门禁本身绿。
+> - **结论**：官方 L3（40342221542）唯一红项（context 4/6）闭环。**n=6 的统计功效局限仍在**——06§1.2 的 context ≥2 是下限，建议 M4 数据扩充时补到 ≥4 个用例后重判阈值（待 owner 决定是否排期）。
+
 > **证据口径与官方门禁（如实声明，2026-10-26）**：官方 L3 报告（CI 40218288324，commit `fa3d9e5`）仍为 **53/90**——这是唯一带报告哈希的门禁证据。78/90 是对同一批 186 观测的**离线重判**（标注校准不改变评审行为，等价于用新断言重算同一批证据），可用 `cra-eval gate` 复现，但**不能替代官方门禁证据**；若要以 78/90 更新官方结论，须重跑一轮 L3（约 39 分钟，待 owner 批准）。另：78/90 中一部分观测由新增的 `test` OR 条目命中（"仅报缺测试"）；**bug-only 检出**（只计 category=bug 的 expected）作为观察指标随报告输出（`bug_only_detection`），不计入任何门禁。
 >
 > **四项待 owner 裁决（数据已齐备）**：
