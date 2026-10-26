@@ -298,9 +298,9 @@ public final class PageResponseBuilder {
       this.href = href;
     }
 
-    /** 装配链接。 */
+    /** 装配链接（null 归一为空串）。 */
     public static Link of(String rel, String href) {
-      return new Link(rel, href);
+      return new Link(rel == null ? "" : rel, href == null ? "" : href);
     }
 
     public String rel() {
@@ -324,9 +324,9 @@ public final class PageResponseBuilder {
       this.template = template;
     }
 
-    /** 装配区块描述。 */
+    /** 装配区块描述（null 归一为空串）。 */
     public static Section of(String name, String template) {
-      return new Section(name, template);
+      return new Section(name == null ? "" : name, template == null ? "" : template);
     }
 
     public String name() {

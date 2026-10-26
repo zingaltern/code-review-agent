@@ -1,5 +1,5 @@
 diff --git a/src/main/java/com/example/money/MoneyFormat.java b/src/main/java/com/example/money/MoneyFormat.java
-index fade067..7198341 100644
+index fade067..18962cf 100644
 --- a/src/main/java/com/example/money/MoneyFormat.java
 +++ b/src/main/java/com/example/money/MoneyFormat.java
 @@ -16,4 +16,270 @@ public final class MoneyFormat {
@@ -234,7 +234,7 @@ index fade067..7198341 100644
 +    }
 +  }
 +
-+  /** 按币种查符号目录项（纯查表：未知币种回退 ISO 代码本身）。 */
++  /** 按币种查符号（纯查表：未知币种返回空串）。 */
 +  public static String symbolOfCurrency(String currency) {
 +    switch (currency == null ? "" : currency.trim().toUpperCase(java.util.Locale.ROOT)) {
 +      case "CNY":
@@ -262,7 +262,7 @@ index fade067..7198341 100644
 +      case "NZD":
 +        return SYMBOL_12;
 +      default:
-+        return currency == null ? "" : currency.trim().toUpperCase(java.util.Locale.ROOT);
++        return "";
 +    }
 +  }
 +

@@ -335,7 +335,7 @@ public final class ReportDateUtil {
     }
   }
 
-  /** 按地区档位查展示格式（纯查表：未登记回退 ISO）。 */
+  /** 按地区档位查展示格式（纯查表：未登记地区回退默认格式）。 */
   public static String displayPatternOf(String region) {
     switch (region == null ? "" : region.trim().toUpperCase(java.util.Locale.ROOT)) {
       case "US-EAST":

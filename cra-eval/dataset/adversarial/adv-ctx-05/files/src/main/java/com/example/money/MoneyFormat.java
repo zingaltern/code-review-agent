@@ -244,7 +244,7 @@ public final class MoneyFormat {
     }
   }
 
-  /** 按币种查符号目录项（纯查表：未知币种回退 ISO 代码本身）。 */
+  /** 按币种查符号（纯查表：未知币种返回空串）。 */
   public static String symbolOfCurrency(String currency) {
     switch (currency == null ? "" : currency.trim().toUpperCase(java.util.Locale.ROOT)) {
       case "CNY":
@@ -272,7 +272,7 @@ public final class MoneyFormat {
       case "NZD":
         return SYMBOL_12;
       default:
-        return currency == null ? "" : currency.trim().toUpperCase(java.util.Locale.ROOT);
+        return "";
     }
   }
 

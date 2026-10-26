@@ -143,8 +143,14 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   符号表改真实符号、规则移兄弟契约类 MoneyPolicy（base 重发 `345ae7`）。06 的 1 条 [bug]
   （buildToday 硬编码时区）落在受测变更上、孤立视角可辩（先例 01/02 同类噪声），保留。
   v3 对 05 作废。
-- **k=1 冒烟 v4（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
-  验收标准：4/4、无 filler 的 bug/security findings、published 无 filler 噪音抬升。
+- **k=1 冒烟 v4（2026-10-27，run 40375997054，同参数）**：`context_detection 4/4 = 1.000`；
+  published 7/5/2/5；04 零 bug/security。受测变更上的 2 条 [bug]（03 L7 回退默认值变更、
+  06 L22 硬编码时区）属孤立视角可辩、非 filler（先例 01/02 同类噪声），保留。filler NIT
+  3 处已修：03 Link.of/Section.of null 防御、05 symbolOfCurrency 未知币种返回空串、
+  06 displayPatternOf 注释去掉 ISO 承诺（03/05/06 head SHA 重发）。filler NIT 的出现存在
+  采样方差（v3 未出现、v4 出现），以 v5 为最终证据。
+- **k=1 冒烟 v5（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
+  验收标准：4/4、无 filler 的 bug/security findings。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 
 

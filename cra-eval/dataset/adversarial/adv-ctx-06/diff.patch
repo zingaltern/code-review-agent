@@ -19,7 +19,7 @@ index 3f36bb4..3d1585e 100644
    }
  }
 diff --git a/src/main/java/com/example/report/ReportDateUtil.java b/src/main/java/com/example/report/ReportDateUtil.java
-index 06b97e6..612dd2c 100644
+index 06b97e6..5fdefd0 100644
 --- a/src/main/java/com/example/report/ReportDateUtil.java
 +++ b/src/main/java/com/example/report/ReportDateUtil.java
 @@ -24,4 +24,347 @@ public final class ReportDateUtil {
@@ -337,7 +337,7 @@ index 06b97e6..612dd2c 100644
 +    }
 +  }
 +
-+  /** 按地区档位查展示格式（纯查表：未登记回退 ISO）。 */
++  /** 按地区档位查展示格式（纯查表：未登记地区回退默认格式）。 */
 +  public static String displayPatternOf(String region) {
 +    switch (region == null ? "" : region.trim().toUpperCase(java.util.Locale.ROOT)) {
 +      case "US-EAST":
