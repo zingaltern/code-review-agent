@@ -204,14 +204,19 @@ final class CliArgs {
         local,
         named.getOrDefault("--exec", DEFAULT_EXEC),
         expandUserHome(named.getOrDefault("--ledger-db", "~/.cra/ledger.db")),
-        named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG")),
-        named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT")),
+        blankToNull(named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))),
+        blankToNull(named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
         named.getOrDefault(
             "--fallback-chain", env.getOrDefault("CRA_LLM_FALLBACK_CHAIN", "standard,light")),
         named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")),
         crossCheckerEnabled,
         crossCheckerModes,
         crossCheckerHistoryWeeks);
+  }
+
+  /** 空白值归一为 null：GitHub Actions 的空 env 是 ""，语义等同未设置（档位缺省继承 standard）。 */
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 
   /** 模式串校验（assumption|sniff，逗号分隔，至少一个；03§3.1）。 */

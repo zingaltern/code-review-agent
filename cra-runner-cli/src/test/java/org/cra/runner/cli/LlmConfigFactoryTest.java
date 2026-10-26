@@ -60,6 +60,14 @@ class LlmConfigFactoryTest {
   }
 
   @Test
+  void blankModelsInheritStandard() {
+    // 直接构造 CraConfig 的调用方（非 CLI 解析）也必须享受"空白 = 继承"语义
+    var gateway = LlmConfigFactory.create(config("standard,light", null, "", "  "));
+    assertThat(gateway.models().get(ModelTier.STRONG).model()).isEqualTo("glm-std");
+    assertThat(gateway.models().get(ModelTier.LIGHT).model()).isEqualTo("glm-std");
+  }
+
+  @Test
   void parsesFallbackChainAndRpm() {
     assertThat(LlmConfigFactory.parseFallbackChain("standard,strong,light"))
         .containsExactly(ModelTier.STANDARD, ModelTier.STRONG, ModelTier.LIGHT);

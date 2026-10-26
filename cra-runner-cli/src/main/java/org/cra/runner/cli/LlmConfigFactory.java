@@ -29,12 +29,12 @@ final class LlmConfigFactory {
         new ModelEndpoint(config.llmModel(), config.llmBaseUrl(), config.llmApiKey());
     ModelEndpoint strong =
         new ModelEndpoint(
-            config.llmModelStrong() == null ? config.llmModel() : config.llmModelStrong(),
+            modelOrInherit(config.llmModelStrong(), config.llmModel()),
             config.llmBaseUrl(),
             config.llmApiKey());
     ModelEndpoint light =
         new ModelEndpoint(
-            config.llmModelLight() == null ? config.llmModel() : config.llmModelLight(),
+            modelOrInherit(config.llmModelLight(), config.llmModel()),
             config.llmBaseUrl(),
             config.llmApiKey());
     return new LlmGatewayConfig(
@@ -47,6 +47,11 @@ final class LlmConfigFactory {
         120_000,
         1_000,
         8_000);
+  }
+
+  /** 档位模型名缺省继承 standard；空白串等同未配置（ModelEndpoint 拒绝 blank）。 */
+  private static String modelOrInherit(String model, String standard) {
+    return model == null || model.isBlank() ? standard : model;
   }
 
   /** 降级链解析（05§5 fallback-chain；逗号分隔档位名，空 = 无兜底）。 */

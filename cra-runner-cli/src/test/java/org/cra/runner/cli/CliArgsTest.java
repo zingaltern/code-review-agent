@@ -230,6 +230,24 @@ class CliArgsTest {
   }
 
   @Test
+  void blankModelEnvInheritsStandard() {
+    // GitHub Actions 空 input 会以 "" 注入 env：语义必须等同未设置（缺省继承 standard），
+    // 否则 ModelEndpoint 拒绝 blank → 启动期 CraConfigException（eval workflow 默认档曾全崩）。
+    CraConfig config =
+        CliArgs.parse(
+            baseArgs(),
+            Map.of(
+                "GITHUB_TOKEN", "gh-env-token",
+                "CRA_LLM_API_KEY", "sk-env",
+                "CRA_LLM_BASE_URL", "https://llm.example/v1",
+                "CRA_LLM_MODEL", "glm-x",
+                "CRA_LLM_MODEL_STRONG", "",
+                "CRA_LLM_MODEL_LIGHT", "  "));
+    assertThat(config.llmModelStrong()).isNull();
+    assertThat(config.llmModelLight()).isNull();
+  }
+
+  @Test
   void crossCheckerRejectsInvalidModesAndWeeks() {
     assertThatThrownBy(
             () ->
