@@ -161,9 +161,13 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   05 两条 [bug] 均在受测变更 DTO：L14 double 金额（用例本质，孤立可辩）与 L69
   getTopSkuIds 可变列表暴露（上一轮 ArrayList 修复引入的新 nit）——已删除与用例无关的
   topSkuIds 字段缩小受测面（锚点 L14→L12，head 重发 `873d332`）。v6 对 05 作废。
-- **k=1 冒烟 v7（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
-  验收标准：4/4、无 filler 的 bug/security findings；受测变更上的固有发现（05 double 金额、
-  06 硬编码时区）按先例保留并如实报告。
+- **k=1 冒烟 v7（最终证据，2026-10-27，run 40394260933，同参数）**：`context_detection
+  4/4 = 1.000`；published 5/1/1/2——04、05 各仅 1 条（恰为 context finding），03 为
+  1 context + 4 test 噪声，06 为 1 context + 1 条受测变更上的 [bug]（L22 硬编码时区，
+  孤立视角可辩、先例 01/02 同类）；**全部 4 例 filler bug/security = 0**；锚点
+  L7/L12/L19/L22 全部命中（±5 内）；无 budget_exceeded；run 整体红为子集无 bad 的
+  必然退出码 5。已连续两轮（v6、v7）无 filler 发现；filler NIT 存在采样方差，若 k=3
+  复现按个案报告。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 
 
