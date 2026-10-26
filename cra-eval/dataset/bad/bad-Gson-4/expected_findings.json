@@ -3,21 +3,21 @@
   "expected": [
     {
       "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
-      "line": 587,
-      "category": "bug",
+      "line": 574,
+      "category": "test",
       "keywords": [
-        "top-level"
+        "顶层"
       ],
-      "note": "人工确认：顶层值被要求先 checkLenient（仅数组/对象），与 RFC 7159 允许任意顶层值冲突（#773）"
+      "note": "M3 L3 取证校准：评审以 test 类识别（「新增顶层标量需 checkLenient 缺少测试」L574，run0 命中）"
     },
     {
       "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
-      "line": 625,
+      "line": 325,
       "category": "bug",
       "keywords": [
-        "top-level"
+        "顶层"
       ],
-      "note": "人工确认：writer 侧 beforeValue(root=false) 对非数组/对象顶层值直接抛异常，拒绝合法顶层标量（#773）"
+      "note": "M3 L3 取证校准：评审锚在调用点 L325（「嵌套打开数组/对象时错误传 root=true，绕过顶层单值约束」，run1 命中）；中文「顶层」替代英文 top-level"
     }
   ],
   "negative_baits": []

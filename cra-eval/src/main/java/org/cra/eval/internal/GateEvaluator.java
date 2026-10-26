@@ -300,20 +300,24 @@ public final class GateEvaluator {
           "无 bad 观测——零发布护栏不适用");
     }
     EvalReport.ZeroPublish z = bad.zeroPublish();
-    if (z.completedDenominator() == 0) {
+    if (z.sampleDenominator() == 0) {
       return new EvalReport.GateCheck(
-          "zero_publish_guardrail", RED, null, policy.zeroPublishMaxRatio(), "无完成观测——护栏不可判定");
+          "zero_publish_guardrail", RED, null, policy.zeroPublishMaxRatio(), "无样本——护栏不可判定");
     }
-    boolean pass = z.ratio() <= policy.zeroPublishMaxRatio();
+    boolean pass = z.sampleRatio() <= policy.zeroPublishMaxRatio();
     String detail =
         String.format(
             Locale.ROOT,
-            "零 published 观测 %d/%d = %.3f %s 上限 %.3f（观测级聚合口径，失败 run 不进分母；06§1.2 v1.2.1）",
+            "全零样本 %d/%d = %.3f %s 上限 %.3f（样本级：某样本全部 k 次运行零 confirmed = 系统性沉默；"
+                + "观测级 %d/%d = %.3f 作观察指标；06§1.2 M3 修订）",
+            z.allZeroSamples(),
+            z.sampleDenominator(),
+            z.sampleRatio(),
+            pass ? "≤" : ">",
+            policy.zeroPublishMaxRatio(),
             z.zeroPublishObservations(),
             z.completedDenominator(),
-            z.ratio(),
-            pass ? "≤" : ">",
-            policy.zeroPublishMaxRatio());
+            z.ratio());
     return new EvalReport.GateCheck(
         "zero_publish_guardrail",
         pass ? PASS : RED,

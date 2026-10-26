@@ -33,7 +33,7 @@ class VerifyCommandTest {
             null,
             null,
             null,
-            new EvalReport.ZeroPublish(1, 24, 1.0 / 24, 1.0 / 12, false),
+            new EvalReport.ZeroPublish(1, 24, 1.0 / 24, 0, 12, 0.0, 1.0 / 12, false),
             true,
             List.of(),
             new EvalReport.RunMetrics(0, 0, 0, 0, 0, 0, 0));
@@ -83,7 +83,7 @@ class VerifyCommandTest {
 
   @Test
   void redGateFailsVerificationEvenWithValidHash() throws Exception {
-    Path path = writeReport("l2-red.json", report(14, false));
+    Path path = writeReport("l2-red.json", report(12, false)); // 12/24 → 下界 0.34 < 重冻结基线 0.35
     String hash = ReportHasher.sha256(path);
     assertThat(VerifyCommand.execute(args(path, hash, "l2", "abc1234"))).isEqualTo(5);
   }

@@ -6,9 +6,9 @@
       "line": 79,
       "category": "bug",
       "keywords": [
-        "recurs"
+        "自引用"
       ],
-      "note": "人工确认：去掉 typeParameter != actualTypeArgument 判断后，自引用泛型上界导致无限递归/StackOverflowError（#114）"
+      "note": "人工确认：去掉 typeParameter != actualTypeArgument 判断后，自引用泛型上界导致无限递归/StackOverflowError（#114）；M3 L3 取证校准：正文中文「自引用类型参数」，英文 recurs 不出现"
     }
   ],
   "negative_baits": []

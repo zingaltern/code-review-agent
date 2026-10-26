@@ -18,6 +18,15 @@
         "构造器"
       ],
       "note": "人工确认（M3 冒烟校准）：finding「FunctionType this 类型协变逻辑对构造器放宽导致子类型判断错误」锚 isConstructor() 豁免行；关键词取行为词\"构造器\""
+    },
+    {
+      "file": "src/com/google/javascript/rhino/jstype/FunctionType.java",
+      "line": 1019,
+      "category": "test",
+      "keywords": [
+        "测试"
+      ],
+      "note": "M3 L3 取证校准：评审以 test 类识别（L1022 与 L1019 ±5 内，run1 命中）；原 bug 类条目保留"
     }
   ],
   "negative_baits": []

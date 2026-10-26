@@ -266,13 +266,30 @@ public final class AggregateEngine {
     if (bad) {
       long zero = rows.stream().filter(r -> r.completed() && r.publishedFindings() == 0).count();
       double ratio = completed == 0 ? 0 : (double) zero / completed;
+      // 样本级口径（06§1.2 M3 修订）：某样本全部运行零 confirmed = 系统性沉默样本；
+      // 观测级在 LLM 运行间波动下必然假红（M2 4/36、L2 12/60、L3 11/90 均无样本级全零）
+      java.util.Map<String, java.util.List<EvalReport.CaseRow>> byCase =
+          rows.stream().collect(java.util.stream.Collectors.groupingBy(EvalReport.CaseRow::caseId));
+      long sampleDenominator = byCase.size();
+      long allZeroSamples =
+          byCase.values().stream()
+              .filter(
+                  list ->
+                      !list.isEmpty()
+                          && list.stream()
+                              .allMatch(r -> r.completed() && r.publishedFindings() == 0))
+              .count();
+      double sampleRatio = sampleDenominator == 0 ? 0 : (double) allZeroSamples / sampleDenominator;
       zeroPublish =
           new EvalReport.ZeroPublish(
               zero,
               completed,
               ratio,
+              allZeroSamples,
+              sampleDenominator,
+              sampleRatio,
               ZERO_PUBLISH_LIMIT,
-              completed > 0 && ratio > ZERO_PUBLISH_LIMIT);
+              sampleDenominator > 0 && sampleRatio > ZERO_PUBLISH_LIMIT);
     }
     boolean sufficient = observations >= MIN_OBSERVATIONS_FOR_CONCLUSION && failed < observations;
     return new EvalReport.SetStat(

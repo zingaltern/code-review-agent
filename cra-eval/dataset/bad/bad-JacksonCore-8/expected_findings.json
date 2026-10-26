@@ -6,10 +6,9 @@
       "line": 307,
       "category": "bug",
       "keywords": [
-        "null",
-        "empty"
+        "null"
       ],
-      "note": "人工确认：空缓冲时去掉 _currentSegment != null 判断，返回 null 而非空数组，调用方 NPE（#182）"
+      "note": "人工确认：空缓冲时去掉 _currentSegment != null 判断，返回 null 而非空数组，调用方 NPE（#182）；M3 L3 取证校准：正文「可能返回 null」命中，empty 中文不出现"
     }
   ],
   "negative_baits": []

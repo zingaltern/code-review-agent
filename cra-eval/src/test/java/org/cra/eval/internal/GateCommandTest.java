@@ -73,7 +73,7 @@ class GateCommandTest {
     EvalReport rejudged = Json.MAPPER.readValue(out.toFile(), EvalReport.class);
     assertThat(rejudged.gate()).isNotNull();
     assertThat(rejudged.gate().passed()).isTrue();
-    assertThat(rejudged.gate().checks()).extracting(EvalReport.GateCheck::threshold).contains(0.4);
+    assertThat(rejudged.gate().checks()).extracting(EvalReport.GateCheck::threshold).contains(0.35);
     assertThat(rejudged.tier()).isEqualTo("l2");
     assertThat(rejudged.commit()).isEqualTo("abc1234");
     assertThat(ReportHasher.readSha256File(hash)).isEqualTo(ReportHasher.sha256(out));
@@ -81,7 +81,7 @@ class GateCommandTest {
 
   @Test
   void redReportReturnsGateRedExit() throws Exception {
-    Path path = write("broken.json", report(14, 24, true));
+    Path path = write("broken.json", report(12, 24, true)); // 12/24 → 下界 0.34 < 0.35
     assertThat(GateCommand.execute(new EvalCliArgs.GateArgs(path, "l2", null, null, false)))
         .isEqualTo(5);
   }

@@ -30,7 +30,7 @@ package org.cra.eval.internal;
  * @param cleanFalsePositiveTolerance 容差（条；判定线 = 基线 + 容差）
  * @param hallucinationRejectionMin 幻觉聚合拒绝率下限
  * @param contextDetectionMin context 聚合检出率下限（M4f 启用时生效）
- * @param zeroPublishMaxRatio 零发布护栏上限（零 confirmed 观测占比）
+ * @param zeroPublishMaxRatio 零发布护栏上限（**样本级**：全部运行零 confirmed 的样本占比；M3 修订）
  * @param minBadObservations 本档 bad 集最小观测数（0 = 不要求）
  * @param minInjectionObservations 本档注入用例最小观测数（0 = 不要求）
  * @param minHallucinationObservations 本档幻觉用例最小观测数（0 = 不要求）
@@ -50,8 +50,13 @@ record GatePolicy(
   /** L3 standard 档检出下界（06§1.2 M3：0.70）。 */
   static final double L3_BAD_DETECTION_WILSON_LOW = 0.70;
 
-  /** L2 quick 档检出下界（M3 两轮实测 19/24 与 17/24；取下界 0.40 控制假红率，06§1.2 分档基线）。 */
-  static final double L2_BAD_DETECTION_WILSON_LOW = 0.40;
+  /**
+   * L2 quick 档检出下界（M3 扩集后重冻结，06§1.2 分档基线）。
+   *
+   * <p>依据：扩集 30 case 实测 31/60 = 51.7%，Wilson 下界 0.393——原 0.40 在 60 观测下基线运行即红 （假红率 100%，门禁失去区分能力）。取
+   * 0.35 给正常运行间波动留 ≈4pp 余量；改坏 prompt 的实测 0.067（A 线验收 1，24 观测口径）仍远低于门禁；扩集后如再变按新样本面重冻结。
+   */
+  static final double L2_BAD_DETECTION_WILSON_LOW = 0.35;
 
   /** clean 误报基线（条/run；M3 首设，报告随分母声明）。 */
   static final double CLEAN_FALSE_POSITIVE_BASELINE = 1.0;

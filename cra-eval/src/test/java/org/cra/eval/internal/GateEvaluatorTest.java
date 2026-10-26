@@ -60,18 +60,28 @@ class GateEvaluatorTest {
         null);
   }
 
-  private static EvalReport.SetStat badWithZeroPublish(long zero, long completed) {
+  private static EvalReport.SetStat badWithZeroPublish(
+      long zeroObs, long completedObs, long allZeroSamples, long samples) {
+    double obsRatio = completedObs == 0 ? 0 : (double) zeroObs / completedObs;
+    double sampleRatio = samples == 0 ? 0 : (double) allZeroSamples / samples;
     return set(
         "bad",
         null,
-        completed,
-        completed,
-        metric(completed, completed),
+        completedObs,
+        completedObs,
+        metric(completedObs, completedObs),
         null,
         null,
         null,
         new EvalReport.ZeroPublish(
-            zero, completed, (double) zero / completed, 1.0 / 12, zero * 12 > completed));
+            zeroObs,
+            completedObs,
+            obsRatio,
+            allZeroSamples,
+            samples,
+            sampleRatio,
+            1.0 / 12,
+            samples > 0 && sampleRatio > 1.0 / 12));
   }
 
   private static EvalReport report(String tier, int k, String depth, EvalReport.SetStat... sets) {
@@ -128,29 +138,30 @@ class GateEvaluatorTest {
   }
 
   @Test
-  void zeroPublishM2ObservedRedIsPreserved() {
-    // M2 实测 4/36 = 11.1% > 1/12 → 红；不放宽口径（06§1.2 定点修订需 owner 决策）
+  void zeroPublishGuardrailIsSampleLevel() {
+    // M3 修订（owner 裁决）：样本级判定——M2 的观测级 4/36（样本级 0/12）不再判红，
+    // 观测级保留为观察指标（detail 同时给出两个数）
     EvalReport.Gate m2 =
-        evaluate(report("l3", 3, "standard", badWithZeroPublish(4, 36)), GateTier.L3, false);
+        evaluate(report("l3", 3, "standard", badWithZeroPublish(4, 36, 0, 12)), GateTier.L3, false);
     EvalReport.GateCheck guard = check(m2, "zero_publish_guardrail");
-    assertThat(guard.status()).isEqualTo(GateEvaluator.RED);
-    assertThat(guard.observed()).isCloseTo(4.0 / 36, org.assertj.core.api.Assertions.within(1e-9));
-    assertThat(guard.detail()).contains("4/36");
-    assertThat(m2.passed()).isFalse();
+    assertThat(guard.status()).isEqualTo(GateEvaluator.PASS);
+    assertThat(guard.detail()).contains("0/12").contains("4/36");
 
-    EvalReport.Gate one =
-        evaluate(report("l3", 3, "standard", badWithZeroPublish(1, 36)), GateTier.L3, false);
-    assertThat(check(one, "zero_publish_guardrail").status()).isEqualTo(GateEvaluator.PASS);
+    // 样本级 2/12 = 16.7% > 1/12 → 红（系统性沉默样本存在）
+    EvalReport.Gate red =
+        evaluate(report("l3", 3, "standard", badWithZeroPublish(6, 36, 2, 12)), GateTier.L3, false);
+    assertThat(check(red, "zero_publish_guardrail").status()).isEqualTo(GateEvaluator.RED);
+    assertThat(red.passed()).isFalse();
   }
 
   // ---------- L2 quick 档 ----------
 
   @Test
   void l2UsesIndependentQuickBaselineNotStandard() {
-    // 19/24 = 79.2%，Wilson 下界 ≈0.595 ≥ 0.40 → L2 绿
+    // 19/24 = 79.2%，Wilson 下界 ≈0.595 ≥ 0.35 → L2 绿（M3 重冻结基线）
     EvalReport.Gate l2 = evaluate(report("l2", 2, "quick", bad(19, 24)), GateTier.L2, false);
     assertThat(check(l2, "bad_detection").status()).isEqualTo(GateEvaluator.PASS);
-    assertThat(check(l2, "bad_detection").threshold()).isEqualTo(0.40);
+    assertThat(check(l2, "bad_detection").threshold()).isEqualTo(0.35);
     // 同一份数据按 L3 0.70 判 → 红（quick 档数据不得跨档使用，06§1.2）
     EvalReport.Gate asL3 = evaluate(report("l3", 3, "standard", bad(19, 24)), GateTier.L3, false);
     assertThat(check(asL3, "bad_detection").status()).isEqualTo(GateEvaluator.RED);
@@ -158,11 +169,14 @@ class GateEvaluatorTest {
 
   @Test
   void l2ToleratesObservedQuickVarianceButRedBelowFloor() {
-    // 17/24（M3 第二轮实测）Wilson 下界 0.508——正常运行间抖动不得判红（0.40 基线）
+    // 17/24（M3 第二轮实测）Wilson 下界 0.508——正常运行间抖动不得判红（0.35 基线）
     EvalReport.Gate variance = evaluate(report("l2", 2, "quick", bad(17, 24)), GateTier.L2, false);
     assertThat(check(variance, "bad_detection").status()).isEqualTo(GateEvaluator.PASS);
-    // 14/24 → 下界 0.388 < 0.40 → 红
-    EvalReport.Gate red = evaluate(report("l2", 2, "quick", bad(14, 24)), GateTier.L2, false);
+    // 扩集后实测 31/60 下界 0.393 ≥ 0.35 → 绿（原 0.40 基线即红——重冻结依据）
+    EvalReport.Gate expanded = evaluate(report("l2", 2, "quick", bad(31, 60)), GateTier.L2, false);
+    assertThat(check(expanded, "bad_detection").status()).isEqualTo(GateEvaluator.PASS);
+    // 12/24 → 下界 0.34 < 0.35 → 红
+    EvalReport.Gate red = evaluate(report("l2", 2, "quick", bad(12, 24)), GateTier.L2, false);
     assertThat(check(red, "bad_detection").status()).isEqualTo(GateEvaluator.RED);
     assertThat(red.passed()).isFalse();
 

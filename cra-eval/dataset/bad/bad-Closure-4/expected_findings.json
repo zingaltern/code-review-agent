@@ -7,9 +7,9 @@
       "category": "bug",
       "keywords": [
         "接口",
-        "循环"
+        "环"
       ],
-      "note": "人工确认（M3 冒烟校准）：finding 以中文描述\"删除继承环检测……循环接口声明不再报环\"——关键词取行为词\"接口\"+\"循环\"（原 cycle/interface 为英文，未出现在中文正文）"
+      "note": "人工确认（M3 冒烟校准）：finding 以中文描述\"删除继承环检测……循环接口声明不再报环\"——关键词取行为词\"接口\"+\"循环\"（原 cycle/interface 为英文，未出现在中文正文）；M3 L3 取证校准：正文用「继承环/接口自环」而非「循环」"
     },
     {
       "file": "src/com/google/javascript/rhino/jstype/NamedType.java",
@@ -17,9 +17,9 @@
       "category": "bug",
       "keywords": [
         "接口",
-        "循环"
+        "环"
       ],
-      "note": "人工确认（M3 冒烟校准）：finding 以中文描述\"删除继承环检测……循环接口声明不再报环\"——关键词取行为词\"接口\"+\"循环\"（原 cycle/interface 为英文，未出现在中文正文）"
+      "note": "人工确认（M3 冒烟校准）：finding 以中文描述\"删除继承环检测……循环接口声明不再报环\"——关键词取行为词\"接口\"+\"循环\"（原 cycle/interface 为英文，未出现在中文正文）；M3 L3 取证校准：正文用「继承环/接口自环」而非「循环」"
     },
     {
       "file": "src/com/google/javascript/rhino/jstype/ObjectType.java",
@@ -27,9 +27,9 @@
       "category": "bug",
       "keywords": [
         "接口",
-        "循环"
+        "环"
       ],
-      "note": "人工确认（M3 冒烟校准）：缺陷的删除点（detectInheritanceCycle 被删，仅剩 detectImplicitPrototypeCycle）；finding 可能锚此而非 NamedType 调用点"
+      "note": "人工确认（M3 冒烟校准）：缺陷的删除点（detectInheritanceCycle 被删，仅剩 detectImplicitPrototypeCycle）；finding 可能锚此而非 NamedType 调用点；M3 L3 取证校准：正文用「继承环/接口自环」而非「循环」"
     }
   ],
   "negative_baits": []

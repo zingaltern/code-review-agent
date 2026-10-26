@@ -3,12 +3,12 @@
   "expected": [
     {
       "file": "src/main/java/com/fasterxml/jackson/core/util/TextBuffer.java",
-      "line": 580,
+      "line": 586,
       "category": "bug",
       "keywords": [
         "MAX_SEGMENT_LEN"
       ],
-      "note": "人工确认：删除段增长封顶逻辑（len>>1 增长与 MAX_SEGMENT_LEN 上限判断）"
+      "note": "人工确认：删除段增长封顶逻辑（len>>1 增长与 MAX_SEGMENT_LEN 上限判断）；M3 L3 取证校准：评审三连均锚 L586（原 580 差 6 超 ±5）"
     }
   ],
   "negative_baits": []

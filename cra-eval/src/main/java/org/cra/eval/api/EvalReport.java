@@ -195,6 +195,9 @@ public record EvalReport(
       @JsonProperty("zero_publish_observations") long zeroPublishObservations,
       @JsonProperty("completed_denominator") long completedDenominator,
       @JsonProperty("ratio") double ratio,
+      @JsonProperty("all_zero_samples") long allZeroSamples,
+      @JsonProperty("sample_denominator") long sampleDenominator,
+      @JsonProperty("sample_ratio") double sampleRatio,
       @JsonProperty("limit") double limit,
       @JsonProperty("red") boolean red) {}
 
