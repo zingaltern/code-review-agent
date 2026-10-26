@@ -116,7 +116,7 @@ meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI �
 |---|---|---|---|---|
 | adv-ctx-03 | A 数值参照系 | 默认 page size 20→50 vs 前端按 20 分页契约（INC-2145） | `1a8843d` 引入 DEFAULT_PAGE_SIZE=20 + PageSizePolicy 契约类（触及 PageRequest.java） | PageRequest.java:7（±5） |
 | adv-ctx-04 | A 设计假设 | 新增会话内同步导出入口 vs 必须异步/会话外（INC-2201） | `e34f625` 引入 submitExport + ExportPolicy 契约类（触及 ExportService.java） | ExportService.java:19（±5） |
-| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `345ae77` 引入 MoneyFormat + MoneyPolicy 契约类（触及 MoneyFormat.java） | OrderStatsDto.java:14（±5） |
+| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `345ae77` 引入 MoneyFormat + MoneyPolicy 契约类（触及 MoneyFormat.java） | OrderStatsDto.java:12（±5） |
 | adv-ctx-06 | A 时区口径 | 报表日期 UTC 存储→Asia/Shanghai vs 一律 UTC 存储（INC-2210） | `9d68eba` 引入 STORAGE_ZONE=UTC + 绑定注释（触及 DailyReportBuilder/ReportDateUtil.java） | DailyReportBuilder.java:22（±5） |
 
 关键词均为 2 个中文行为/现象词（AND；M2 教训：英文词对中文正文系统性漏配）：
@@ -156,8 +156,14 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   List.copyOf 对 null 元素抛 NPE → ArrayList 防御拷贝（expected 锚点 L13→L14）、
   06 displayPatternOf 与 displayZoneOf 回退口径成对比较面 → 删除该方法只留常量表。
   v5 对 05/06 作废。
-- **k=1 冒烟 v6（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
-  验收标准：4/4、无 filler 的 bug/security findings。
+- **k=1 冒烟 v6（2026-10-27，run 40390052905，同参数）**：`context_detection 4/4 = 1.000`；
+  published 5/6/3/3；03/04/06 零 filler bug/security（06 仅剩受测变更 L22 固有发现）。
+  05 两条 [bug] 均在受测变更 DTO：L14 double 金额（用例本质，孤立可辩）与 L69
+  getTopSkuIds 可变列表暴露（上一轮 ArrayList 修复引入的新 nit）——已删除与用例无关的
+  topSkuIds 字段缩小受测面（锚点 L14→L12，head 重发 `873d332`）。v6 对 05 作废。
+- **k=1 冒烟 v7（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
+  验收标准：4/4、无 filler 的 bug/security findings；受测变更上的固有发现（05 double 金额、
+  06 硬编码时区）按先例保留并如实报告。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 
 

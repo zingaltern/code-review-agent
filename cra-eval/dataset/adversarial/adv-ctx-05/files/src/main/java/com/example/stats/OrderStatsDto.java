@@ -1,8 +1,6 @@
 package com.example.stats;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
-import java.util.List;
 
 /** 订单统计 DTO（对外 JSON 输出）。 */
 public final class OrderStatsDto {
@@ -17,21 +15,17 @@ public final class OrderStatsDto {
 
   private final double avgOrderAmount;
 
-  private final List<String> topSkuIds;
-
   private OrderStatsDto(
       LocalDate statDate,
       long orderCount,
       double totalAmount,
       double refundAmount,
-      double avgOrderAmount,
-      List<String> topSkuIds) {
+      double avgOrderAmount) {
     this.statDate = statDate;
     this.orderCount = orderCount;
     this.totalAmount = totalAmount;
     this.refundAmount = refundAmount;
     this.avgOrderAmount = avgOrderAmount;
-    this.topSkuIds = topSkuIds == null ? List.of() : new ArrayList<>(topSkuIds);
   }
 
   /** 组装单日订单统计。 */
@@ -40,10 +34,8 @@ public final class OrderStatsDto {
       long orderCount,
       double totalAmount,
       double refundAmount,
-      double avgOrderAmount,
-      List<String> topSkuIds) {
-    return new OrderStatsDto(
-        statDate, orderCount, totalAmount, refundAmount, avgOrderAmount, topSkuIds);
+      double avgOrderAmount) {
+    return new OrderStatsDto(statDate, orderCount, totalAmount, refundAmount, avgOrderAmount);
   }
 
   public LocalDate getStatDate() {
@@ -64,9 +56,5 @@ public final class OrderStatsDto {
 
   public double getAvgOrderAmount() {
     return avgOrderAmount;
-  }
-
-  public List<String> getTopSkuIds() {
-    return topSkuIds;
   }
 }

@@ -275,15 +275,13 @@ index fade067..18962cf 100644
  }
 diff --git a/src/main/java/com/example/stats/OrderStatsDto.java b/src/main/java/com/example/stats/OrderStatsDto.java
 new file mode 100644
-index 0000000..8db83c9
+index 0000000..ba390d7
 --- /dev/null
 +++ b/src/main/java/com/example/stats/OrderStatsDto.java
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,60 @@
 +package com.example.stats;
 +
 +import java.time.LocalDate;
-+import java.util.ArrayList;
-+import java.util.List;
 +
 +/** 订单统计 DTO（对外 JSON 输出）。 */
 +public final class OrderStatsDto {
@@ -298,21 +296,17 @@ index 0000000..8db83c9
 +
 +  private final double avgOrderAmount;
 +
-+  private final List<String> topSkuIds;
-+
 +  private OrderStatsDto(
 +      LocalDate statDate,
 +      long orderCount,
 +      double totalAmount,
 +      double refundAmount,
-+      double avgOrderAmount,
-+      List<String> topSkuIds) {
++      double avgOrderAmount) {
 +    this.statDate = statDate;
 +    this.orderCount = orderCount;
 +    this.totalAmount = totalAmount;
 +    this.refundAmount = refundAmount;
 +    this.avgOrderAmount = avgOrderAmount;
-+    this.topSkuIds = topSkuIds == null ? List.of() : new ArrayList<>(topSkuIds);
 +  }
 +
 +  /** 组装单日订单统计。 */
@@ -321,10 +315,8 @@ index 0000000..8db83c9
 +      long orderCount,
 +      double totalAmount,
 +      double refundAmount,
-+      double avgOrderAmount,
-+      List<String> topSkuIds) {
-+    return new OrderStatsDto(
-+        statDate, orderCount, totalAmount, refundAmount, avgOrderAmount, topSkuIds);
++      double avgOrderAmount) {
++    return new OrderStatsDto(statDate, orderCount, totalAmount, refundAmount, avgOrderAmount);
 +  }
 +
 +  public LocalDate getStatDate() {
@@ -345,9 +337,5 @@ index 0000000..8db83c9
 +
 +  public double getAvgOrderAmount() {
 +    return avgOrderAmount;
-+  }
-+
-+  public List<String> getTopSkuIds() {
-+    return topSkuIds;
 +  }
 +}
