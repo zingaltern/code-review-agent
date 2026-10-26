@@ -93,6 +93,21 @@ final class VerificationWave {
       Map<String, FileContent> headFiles,
       DiffResult reviewDiff,
       String runId) {
+    return verify(candidates, policy, headFiles, reviewDiff, runId, List.of());
+  }
+
+  /**
+   * 验证波（v1.3.2：test 类分型——测试文件清单注入 test 类 finding 的验证 brief）。
+   *
+   * @param testFileIndex head 侧仓库测试文件清单（空 = 不可得；仅 test 类 finding 使用）
+   */
+  WaveResult verify(
+      List<FindingAggregator.Scored> candidates,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult reviewDiff,
+      String runId,
+      List<String> testFileIndex) {
     Map<String, List<FindingAggregator.Scored>> byFile = new LinkedHashMap<>();
     for (FindingAggregator.Scored scored : candidates) {
       byFile.computeIfAbsent(scored.finding().file(), k -> new ArrayList<>()).add(scored);
@@ -110,7 +125,8 @@ final class VerificationWave {
                       headFiles,
                       reviewDiff,
                       runId,
-                      degradations)));
+                      degradations,
+                      testFileIndex)));
     }
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
     long tokensIn = 0;
@@ -144,7 +160,8 @@ final class VerificationWave {
       Map<String, FileContent> headFiles,
       DiffResult reviewDiff,
       String runId,
-      List<String> degradations) {
+      List<String> degradations,
+      List<String> testFileIndex) {
     if (budget.phase() == RunBudgetTracker.Phase.STOP) {
       // 100% 预算击穿：验证不可得 → UNVERIFIED（02§4.2），不发布
       degradations.add("verifier-budget-exhausted");
@@ -164,7 +181,14 @@ final class VerificationWave {
     CitedEvidenceResolver resolver = citedResolver;
     VerificationBatchInput input =
         VerificationBatchAssembler.buildBatch(
-            file, batch, policy, headFiles, reviewDiff, verifier.budget(), resolver);
+            file,
+            batch,
+            policy,
+            headFiles,
+            reviewDiff,
+            verifier.budget(),
+            resolver,
+            testFileIndex == null ? List.of() : testFileIndex);
     AgentBrief brief = verifier.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSuffix(file));
     trace.emit(
