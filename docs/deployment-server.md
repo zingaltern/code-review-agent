@@ -137,6 +137,7 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 | 服务端无 checkout | `LocalRepoContext.localRepoRoot()` 为空：pre-existing 检测降级为不标注 + Summary 声明 | 05§2.1 |
 | 多仓库 | 每个仓库一个 PG 账本实例（按 owner/name 键控），orchestrator 按仓库缓存；仓库数增长 = 常驻线程池增长，需按部署规模评估 | ADR-0008 |
 | 多副本 | delivery 幂等由 PG 唯一键兜底，但同一仓库的 orchestrator 缓存/队列是进程内的；同 head 重跑由 core commit 闸兜底 | ADR-0008 |
+| 签发 commit 判定范围 | `CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT` 只按 commit 在全局 `review_run` 中查 DONE\|DEGRADED，**不按 repo 限定**——当前单租户假设；多租户部署需在报告/端点增加 repo 绑定并收紧查询 | ADR-0008、05§1.5 |
 | 过期 Summary 收尾 | PG 账本不落评论原文（与 SQLite 同语义）：`ReviewLedger.comment()` 为空 → 新 run 不 PATCH 旧 Summary 的 `[已被 run_xxx 取代]` 前缀；旧 Summary 仍可见 | 05§1.5、05§2.2 与本地形态一致 |
 | 事件史采集 | M4b 只有接口与调度骨架，采集器为 Noop，日志明确写“未实现” | 07§5 M4b、M4f-full |
 

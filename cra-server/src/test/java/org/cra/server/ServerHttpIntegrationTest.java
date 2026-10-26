@@ -158,6 +158,48 @@ class ServerHttpIntegrationTest {
         .isEqualTo(200);
   }
 
+  @Test
+  void invalidPayloadReturns400() {
+    String delivery = "delivery-invalid-" + System.nanoTime();
+    String body = "not-json";
+    ResponseEntity<String> response =
+        rest.exchange(
+            url("/webhooks/github"),
+            HttpMethod.POST,
+            new HttpEntity<>(body, webhookHeaders(delivery, "pull_request", body, null)),
+            String.class);
+    assertThat(response.getStatusCode().value()).isEqualTo(400);
+    assertThat(response.getBody()).contains("bad_payload");
+  }
+
+  @Test
+  void nonPullRequestEventReturns200Ignored() {
+    String delivery = "delivery-push-" + System.nanoTime();
+    String body = "{}";
+    ResponseEntity<String> response =
+        rest.exchange(
+            url("/webhooks/github"),
+            HttpMethod.POST,
+            new HttpEntity<>(body, webhookHeaders(delivery, "push", body, null)),
+            String.class);
+    assertThat(response.getStatusCode().value()).isEqualTo(200);
+    assertThat(response.getBody()).contains("ignored");
+  }
+
+  @Test
+  void draftPullRequestReturns200Ignored() {
+    String delivery = "delivery-draft-" + System.nanoTime();
+    String body = webhookBody(true);
+    ResponseEntity<String> response =
+        rest.exchange(
+            url("/webhooks/github"),
+            HttpMethod.POST,
+            new HttpEntity<>(body, webhookHeaders(delivery, "pull_request", body, null)),
+            String.class);
+    assertThat(response.getStatusCode().value()).isEqualTo(200);
+    assertThat(response.getBody()).contains("ignored");
+  }
+
   private ResponseEntity<String> postWebhook(String delivery, String body) {
     return rest.exchange(
         url("/webhooks/github"),
@@ -174,10 +216,14 @@ class ServerHttpIntegrationTest {
   }
 
   private static HttpHeaders webhookHeaders(String delivery, String signature) {
+    return webhookHeaders(delivery, "pull_request", webhookBody(), signature);
+  }
+
+  private static HttpHeaders webhookHeaders(
+      String delivery, String event, String body, String signature) {
     HttpHeaders headers = jsonContentType();
     headers.add("X-GitHub-Delivery", delivery);
-    headers.add("X-GitHub-Event", "pull_request");
-    String body = webhookBody();
+    headers.add("X-GitHub-Event", event);
     headers.add(
         "X-Hub-Signature-256",
         signature == null
@@ -194,20 +240,24 @@ class ServerHttpIntegrationTest {
   }
 
   private static String webhookBody() {
+    return webhookBody(false);
+  }
+
+  private static String webhookBody(boolean draft) {
     return """
         {
           "action": "opened",
           "number": 7,
           "pull_request": {
             "number": 7,
-            "draft": false,
+            "draft": %s,
             "base": {"sha": "base-abc123"},
             "head": {"sha": "%s"}
           },
           "repository": {"name": "repo", "owner": {"login": "owner"}}
         }
         """
-        .formatted(HEAD);
+        .formatted(draft, HEAD);
   }
 
   private String url(String path) {

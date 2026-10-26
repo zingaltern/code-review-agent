@@ -7,7 +7,12 @@ import java.sql.SQLException;
 import javax.sql.DataSource;
 import org.cra.common.exception.CraLedgerException;
 
-/** PostgreSQL 已知 commit 检查（review_run 完成标记，DONE|DEGRADED，02§4.1）。 */
+/**
+ * PostgreSQL 已知 commit 检查（review_run 完成标记，DONE|DEGRADED，02§4.1）。
+ *
+ * <p>当前按 commit 全局判定（不按 repo 限定）——单租户部署假设；多租户需在报告/端点增加 repo 绑定并收紧查询（见 docs/deployment-server.md
+ * 已知限制）。
+ */
 public final class PostgresKnownCommitChecker implements KnownCommitChecker {
 
   private final DataSource dataSource;
