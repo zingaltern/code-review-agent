@@ -19,10 +19,10 @@ index 3f36bb4..3d1585e 100644
    }
  }
 diff --git a/src/main/java/com/example/report/ReportDateUtil.java b/src/main/java/com/example/report/ReportDateUtil.java
-index 06b97e6..5fdefd0 100644
+index 06b97e6..03f9c6e 100644
 --- a/src/main/java/com/example/report/ReportDateUtil.java
 +++ b/src/main/java/com/example/report/ReportDateUtil.java
-@@ -24,4 +24,347 @@ public final class ReportDateUtil {
+@@ -24,4 +24,324 @@ public final class ReportDateUtil {
    public static String formatStorage(LocalDate date) {
      return date == null ? "" : STORAGE_FORMAT.format(date);
    }
@@ -334,29 +334,6 @@ index 06b97e6..5fdefd0 100644
 +        return java.time.ZoneId.of(DISPLAY_ZONE_12);
 +      default:
 +        return STORAGE_ZONE;
-+    }
-+  }
-+
-+  /** 按地区档位查展示格式（纯查表：未登记地区回退默认格式）。 */
-+  public static String displayPatternOf(String region) {
-+    switch (region == null ? "" : region.trim().toUpperCase(java.util.Locale.ROOT)) {
-+      case "US-EAST":
-+      case "US-CENTRAL":
-+      case "US-WEST":
-+        return DISPLAY_PATTERN_4;
-+      case "UK":
-+      case "DE":
-+      case "FR":
-+        return DISPLAY_PATTERN_3;
-+      case "JP":
-+      case "KR":
-+      case "CN":
-+      case "HK":
-+      case "SG":
-+      case "AU":
-+        return DISPLAY_PATTERN_1;
-+      default:
-+        return DISPLAY_PATTERN_1;
 +    }
 +  }
 +

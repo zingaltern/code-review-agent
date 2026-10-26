@@ -116,7 +116,7 @@ meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI �
 |---|---|---|---|---|
 | adv-ctx-03 | A 数值参照系 | 默认 page size 20→50 vs 前端按 20 分页契约（INC-2145） | `1a8843d` 引入 DEFAULT_PAGE_SIZE=20 + PageSizePolicy 契约类（触及 PageRequest.java） | PageRequest.java:7（±5） |
 | adv-ctx-04 | A 设计假设 | 新增会话内同步导出入口 vs 必须异步/会话外（INC-2201） | `e34f625` 引入 submitExport + ExportPolicy 契约类（触及 ExportService.java） | ExportService.java:19（±5） |
-| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `345ae77` 引入 MoneyFormat + MoneyPolicy 契约类（触及 MoneyFormat.java） | OrderStatsDto.java:13（±5） |
+| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `345ae77` 引入 MoneyFormat + MoneyPolicy 契约类（触及 MoneyFormat.java） | OrderStatsDto.java:14（±5） |
 | adv-ctx-06 | A 时区口径 | 报表日期 UTC 存储→Asia/Shanghai vs 一律 UTC 存储（INC-2210） | `9d68eba` 引入 STORAGE_ZONE=UTC + 绑定注释（触及 DailyReportBuilder/ReportDateUtil.java） | DailyReportBuilder.java:22（±5） |
 
 关键词均为 2 个中文行为/现象词（AND；M2 教训：英文词对中文正文系统性漏配）：
@@ -148,8 +148,15 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   06 L22 硬编码时区）属孤立视角可辩、非 filler（先例 01/02 同类噪声），保留。filler NIT
   3 处已修：03 Link.of/Section.of null 防御、05 symbolOfCurrency 未知币种返回空串、
   06 displayPatternOf 注释去掉 ISO 承诺（03/05/06 head SHA 重发）。filler NIT 的出现存在
-  采样方差（v3 未出现、v4 出现），以 v5 为最终证据。
-- **k=1 冒烟 v5（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
+  采样方差（v3 未出现、v4 出现）。
+- **k=1 冒烟 v5（2026-10-27，run 40382125115，同参数）**：`context_detection 4/4 = 1.000`；
+  published 1/7/3/6。03 完美（published=1 仅 context）、04 零 bug/security（全 test 噪声）。
+  受测变更上的 [bug]：05 L13/L14 double 金额（BugHunter 无需规则文本也会挑的通病，用例
+  本质如此）、06 L22 时区（bug+security 两条同源）。filler NIT 2 处已修：05 DTO
+  List.copyOf 对 null 元素抛 NPE → ArrayList 防御拷贝（expected 锚点 L13→L14）、
+  06 displayPatternOf 与 displayZoneOf 回退口径成对比较面 → 删除该方法只留常量表。
+  v5 对 05/06 作废。
+- **k=1 冒烟 v6（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
   验收标准：4/4、无 filler 的 bug/security findings。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 

@@ -335,29 +335,6 @@ public final class ReportDateUtil {
     }
   }
 
-  /** 按地区档位查展示格式（纯查表：未登记地区回退默认格式）。 */
-  public static String displayPatternOf(String region) {
-    switch (region == null ? "" : region.trim().toUpperCase(java.util.Locale.ROOT)) {
-      case "US-EAST":
-      case "US-CENTRAL":
-      case "US-WEST":
-        return DISPLAY_PATTERN_4;
-      case "UK":
-      case "DE":
-      case "FR":
-        return DISPLAY_PATTERN_3;
-      case "JP":
-      case "KR":
-      case "CN":
-      case "HK":
-      case "SG":
-      case "AU":
-        return DISPLAY_PATTERN_1;
-      default:
-        return DISPLAY_PATTERN_1;
-    }
-  }
-
   /** 渲染日报板块目录行（纯拼接）。 */
   public static String renderSectionCatalog() {
     return String.join(
