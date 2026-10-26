@@ -1,5 +1,6 @@
 # 07 · 实施路线图与任务拆解
 
+> 文档版本：v1.4（2026-10-26，M4b 服务化落地：cra-server / PG 账本 / 报告签名 / 部署文档 / 事件史骨架）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ⑥及终审建议）
 > **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项。
 > **v1.3**：T1.4 新段落解析；M4a 签字规矩；M4f 拆 f-lite/f-full。
@@ -30,7 +31,7 @@
 
 ## 1. M0：骨架与最小闭环
 
-**目标**：补完原项目设想的端到端流。技术栈 Java 17 / Spring Boot 3.x（仅 DI+配置）/ Maven 多模块。**仅 PR 触发，draft 过滤**（05§4）。
+**目标**：补完原项目设想的端到端流。技术栈 Java 17 / Spring Boot 3.x（DI+配置；M4b 起服务壳用 web/JDBC）/ Maven 多模块。**仅 PR 触发，draft 过滤**（05§4）。
 
 **任务**：
 
@@ -158,7 +159,7 @@
 ## 5. M4：可选池（按需排期，互不依赖）
 
 - **M4a 风险分级建议（v1.3 吸收三条签字规矩与分级表，01§3.4 担责）**：输出 Low/Medium/High 建议（只建议不审批——**agent 永远不算 approver**）；三条规矩入设计：① agent 赞成票不计为审批（已有原则）；② **approve 只对特定 commit 有效，新 commit 必须重审**——与账本 DONE/指纹的 commit 绑定语义同源（05§1.3），建议输出绑定 commit_sha；③ **指挥 agent 写代码的人必须在签字名单上**（PR 模板提示项）；分级参考（Anthropic 形态）：低风险（纯文档/功能开关，测试全过 + 可信作者 → 建议 0 人签）/ 中风险（常规业务逻辑、系统提示词 → 1 人）/ 高风险（核心高危路径、难恢复的关键配置 → 2 人）；签字语义 = 核实**意图/假设/设计**而非逐行读过（01§3.4）；
-- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；承担 M4f-full 的事件史采集定时任务；
+- **M4b webhook 服务化**：cra-server（Spring Boot web + 队列 + PG 账本），CLI/服务共用 core；顺带消除 L2 门禁荣誉制局限（服务端签名报告，04§2.4）；承担 M4f-full 的事件史采集定时任务；**已落地（2026-10-26，ADR-0008）**：`cra-server` 第二组合根（`POST /webhooks/github` HMAC-SHA256 验签 → pull_request 子集 → PG delivery 幂等 → 有界队列/503 背压 → 异步 `CoreAssembly` 评审）；`cra-store` 增 `PostgresLedger`（05§1.5 五表 + 手写幂等 DDL）；`ReportSignature`（cra-common）+ `/api/v1/reports/attest` + `cra-eval verify --signature`；docker-compose/PG/健康检查/优雅停机见 `docs/deployment-server.md`；事件史采集仅接口 + `@Scheduled` 骨架（Noop，M4f-full 实现）；`/healthz`/`/readyz` 不引入 Actuator；PG 测试 = CI service 容器优先，Testcontainers 回退（08§3.1 修订）；
 - **M4c push 模式**：直推 commit 的评审（commit-comment summary 模式）；
 - **M4d 夜间存量评审**：产出 issue 而非 PR comment；
 - **M4e GitLab/Gerrit 适配 + 语义索引/跨文件上下文**；

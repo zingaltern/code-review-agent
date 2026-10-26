@@ -90,9 +90,21 @@ java -jar cra-runner-cli/target/cra-runner-cli-0.1.0.jar review \
 
 命令先执行默认的 `mvn -B -ntp verify` 并回显真实输出，再运行评审，最后在终端打印报告。默认 `--dry-run=true`，不向 GitHub 回帖；账本写入 `~/.cra/ledger.db`，构建日志写入 `.cra/runs/`。构建或测试失败时退出码为 4。未设置 `CRA_LLM_API_KEY` 时评审段会如实跳过，只保留构建/测试结果。若只想在 `main` 上试跑，把区间改为 `--base HEAD~1 --head HEAD`。
 
+### 服务形态（M4b）
+
+常驻 webhook 服务（Spring Boot web + PostgreSQL 账本 + 有界队列 + 报告签名）用 docker-compose 启动：
+
+```bash
+cd docker && cp .env.example .env   # 填写 CRA_LLM_* / CRA_GITHUB_TOKEN 并覆盖密钥
+docker compose up --build -d
+curl -fsS http://127.0.0.1:8080/readyz
+```
+
+GitHub webhook 指向 `POST /webhooks/github`（`X-Hub-Signature-256` 验签）；报告签发走 `POST /api/v1/reports/attest`（Bearer），`cra-eval verify --signature` 验签。环境变量表、健康检查、优雅停机与已知限制见 [docs/deployment-server.md](docs/deployment-server.md)。
+
 ## 技术栈
 
-Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容 LLM 网关（模型无关、并发限流、异构路由）· jgit（blame/本地模式）· GitHub REST API 与评论账本 · SQLite（本地模式）；PostgreSQL 规划于 M4 服务化。
+Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 web/JDBC）· Maven 多模块 · OpenAI 兼容 LLM 网关（模型无关、并发限流、异构路由）· jgit（blame/本地模式）· GitHub REST API 与评论账本 · SQLite（本地模式）· PostgreSQL（M4b 服务形态，见 [docs/deployment-server.md](docs/deployment-server.md)）。
 
 ## 在 GitHub Actions 中使用
 
@@ -151,7 +163,7 @@ Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容
 | M1 工程化与账本 | 完成（v0.2.0） |
 | M2 隔离审查 + 独立复核 + 本地 pre-PR | 完成（v0.3.0）；L3 验收 2 部分通过，零发布缺口经 owner 裁决接受 |
 | M3 评测闭环 + 双验证者投票 | 工程交付完成；**标注质检校准后 L3 召回 78/90 = 86.7%（Wilson 下界 0.7813 ≥ 0.70，保守离线复核 74/90 亦达标）、零发布样本级全零 0/30 → 验收 2 通过**；context 检出 0/6 为结构性缺口（standard 自动降档，待数据层修复）；**官方 L3 报告仍为 53/90，78/90 为同批观测的离线重判（需重跑 L3 才能更新官方门禁）**；双验证者投票按数据门槛未开启 |
-| M4 服务化与扩展 | M4f-lite CrossChecker 已落地；其余子项按需排期 |
+| M4 服务化与扩展 | **M4b webhook 服务化已落地（2026-10-26）**：cra-server 第二组合根、PG 账本、有界队列/背压、HMAC 报告签名、部署文档（ADR-0008）；M4f-lite CrossChecker 已落地；其余子项按需排期 |
 
 验收记录、口径裁决与后续任务见 [docs/07](docs/07-roadmap.md)。
 
@@ -159,6 +171,7 @@ Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容
 
 - 冲突 PR 不触发 `pull_request` workflow（GitHub 平台行为，冲突解决后恢复）。
 - fork PR 无法读取 secrets；多协作者场景需要引入 App token。
+- 服务形态无本地 checkout：pre-existing 检测降级为不标注 + Summary 声明（05§2.1）；其余边界见 [docs/deployment-server.md](docs/deployment-server.md)。
 - draft PR 会被 workflow 过滤，不进入评审。
 - CrossChecker 默认关闭，且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决见 [docs/07](docs/07-roadmap.md)。
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。

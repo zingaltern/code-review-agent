@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.3.3（2026-10-26，M4b 服务化落地：cra-server 第二组合根 + PG 账本 + 报告签名，ADR-0008）
 > 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③⑤；规范包 08–11 入库时 §3 登记 cra-archtest）
 > 前置阅读：`01-background-and-research.md`
@@ -15,7 +16,7 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│  L5 接入层 Trigger（M0–M3 仅 pull_request；CLI 本地模式 M2 起）          │
+│  L5 Trigger（CI pull_request / CLI 本地 / M4b webhook）                    │
 └───────────────┬────────────────────────────────────────────────────────┘
                 │ ReviewRequest(repo, pr, depth, config)
 ┌───────────────▼────────────────────────────────────────────────────────┐
@@ -80,13 +81,13 @@ code-review-agent/
 ├── cra-agents/            # 子代理定义：角色 prompt 模板、工具白名单、输出 schema
 ├── cra-core/              # Orchestrator：Planner/Fan-out/Verify/Aggregate/Publish/Convergence
 ├── cra-runner-cli/        # CLI 入口（CI 模式 + M2 起本地 pre-PR 模式）
-├── cra-store/             # 账本抽象：GitHub 评论账本（经 CommentSource 端口取数，ADR-0005）/ SQLite（服务形态 PG）
+├── cra-store/             # 账本抽象：GitHub 评论账本（经 CommentSource 端口取数，ADR-0005）/ SQLite / PostgreSQL（M4b）
 ├── cra-eval/              # 评测框架：数据集、k 次运行统计门禁、报表
 ├── cra-archtest/          # (M0 起) 构建期架构守护：仅 ArchUnit 测试，无主代码、不被依赖（10§5）
-└── cra-server/            # (M4) webhook 常驻服务、队列、多仓库
+└── cra-server/            # (M4b) webhook 常驻服务、有界队列、多仓库、报告签发（第二组合根）
 ```
 
-依赖方向：`cra-runner-cli → cra-core → {cra-agents, cra-context, cra-llm, cra-git, cra-store, cra-common}`；所有模块 → `cra-common`。
+依赖方向：`cra-runner-cli → cra-core → {cra-agents, cra-context, cra-llm, cra-git, cra-store, cra-common}`；`cra-server` 是第二组合根，依赖集与 cli 同构（除 cli/eval/server）；所有模块 → `cra-common`。
 
 **对照原项目**：`openai-code-review-sdk` 的职责拆进 `cra-core + cra-agents + cra-git-github + cra-llm`；`openai-code-review-test` 的角色由 `cra-eval` + 自举 workflow 承担。
 
@@ -148,7 +149,7 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 |---|---|---|---|
 | CI 内嵌（GitHub Actions） | M0–M3 | **GitHub 评论账本**：bot 自身发布的 PR 评论即事实源（已发布 finding、指纹、run 标识内嵌于评论体） | `actions/upload-artifact`（保留 90 天），可选回传 data 分支 |
 | CLI 本地（pre-PR 自评审） | M2 起 | 本地 SQLite（`~/.cra/ledger.db`） | 本地 `runs/` 目录 |
-| Webhook 常驻服务 | M4 | PostgreSQL | 服务端存储 |
+| Webhook 常驻服务 | M4b | PostgreSQL（`PostgresLedger`，05§1.5 五表） | 服务端存储（`CRA_SERVER_RUN_ROOT`） |
 
 **GitHub 评论账本语义**（CI 形态的承重设计）：
 
@@ -167,6 +168,8 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
+**M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集只留接口与调度骨架（M4f-full 实现）。
+
 ## 6. 横切关注点
 
 - **安全**：密钥仅环境/密管读取；子代理工具白名单只读；**不可信内容（diff、代码注释、finding 文本）一律定界注入 + 输出转义**（04§3、05§6）；REVIEW.md 一律读 base 分支；
@@ -182,13 +185,12 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 | `openai-code-review-sdk` 打 jar 在 CI 运行 | `cra-runner-cli`（增加参数、幂等、trace、artifact 上传） |
 | push + PR 双触发 workflow | **M0–M3 仅 PR 触发**；push 直推评审（commit-comment 模式）排入 M4（05§4） |
 | `openai-code-review-test` 验证工程 | `cra-eval` + 自举 workflow |
-| 根 pom Java 8 / SB 2.7 | Java 17 / Spring Boot 3.x（仅 DI 与配置） |
+| 根 pom Java 8 / SB 2.7 | Java 17 / Spring Boot 3.x（DI/配置 + M4b 起服务壳的 web，10§5 R6） |
 
 ## 8. 已定案与未决问题
 
-已定案（v1.1）：jgit 引入（diff 解析 + blame 双用途）；账本三形态归属（§5）；push 触发移 M4；验证不可得语义（§4.2）。
+已定案（v1.1）：jgit 引入（diff 解析 + blame 双用途）；账本三形态归属（§5）；push 触发移 M4；验证不可得语义（§4.2）。**v1.3.3（M4b，2026-10-26）**：cra-server = Spring Boot web + 进程内有界队列 + PostgreSQL 账本 + HMAC 报告签名（ADR-0008）。
 
 未决（开发中定案）：
 1. artifact 回传 data 分支是否默认开启（倾向默认关闭，按需开）；
-2. `cra-server` 技术栈（倾向 Spring Boot web，团队熟悉度）；
-3. M3 双验证者的异构组合具体配对（同家族不同版本 vs 跨家族），由 M2 末的分歧率数据决定。
+2. M3 双验证者的异构组合具体配对（同家族不同版本 vs 跨家族），由 M2 末的分歧率数据决定。

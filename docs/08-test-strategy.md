@@ -1,5 +1,6 @@
 # 08 · 测试策略与验证方案
 
+> 文档版本：v1.1（2026-10-26，M4b：PG 测试引入 Testcontainers/service 容器；cra-server 接线冒烟例外，ADR-0008）
 > 文档版本：v1.0（2026-10-25，开发前规范包）
 > 定位：02§6 横切关注点中"测试策略"一句（编排逻辑单测；子代理 LLM 录制回放；端到端 fixture 仓库 + dry-run 断言；不可信输入注入用例进对抗集）的**工程化展开**——规定工程测试怎么写、怎么跑、怎么进 CI。不推翻原表述，只细化。
 > **与 06/07 的边界声明**：06 回答"评审质量好不好"（L1/L2/L3 度量、数据集与统计化门禁），07 回答"每个里程碑验收什么、按什么节奏"；本文只回答"**机制是否按设计运转**"。所有质量阈值与判定口径（Wilson 下界、k 次运行、零发布护栏等）一律以 06§1.2 / 04§2.4 为准，本文不重复数值；07 各 M 验收用例是需求清单，本文 §5 将其映射为可执行测试设计，验收执行仍以 07 文字为准，冲突按 07§6 文档即契约处理。
@@ -72,10 +73,10 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 
 `template_version` 进哈希输入的原因：prompt 改动必然改变请求体，把它显式入键可让"哪些场景受模板变更影响"在重录前即可静态列出（§8.2）。
 
-### 3.3 明确不引入的
+### 3.3 依赖边界与明确不引入的（M4b 修订）
 
-- **Testcontainers 不引入【强制】**：本项目当前无外部服务——GitHub API 用 WireMock、SQLite 是进程内 JDBC（临时目录即隔离）、PG 是 M4b 才出现（届时再议）。Docker 依赖只会让 CI 变慢变脆，违背 §1 与 §4 时长预算；
-- **Spring 全量上下文测试不引入【建议】**：DI 仅用于装配，`@SpringBootTest` 启动整上下文的收益低于其时长成本；配置绑定用 `@ConfigurationProperties` 级单测（如 05§5 `require-distinct-model-family` 违例拒绝启动）。
+- **Testcontainers 按需引入（M4b 修订）**：v1.0 的"不引入"在 M4b 前成立（无外部服务）；服务形态出现 PostgreSQL 后，PG 语义（`ON CONFLICT`/`TIMESTAMPTZ`/`UPPER()`）不可用 H2 替代。规则改为：**仅 `cra-store` 的 PG 契约测试**可用 Testcontainers（test scope）；CI 优先 `services: postgres` + `CRA_TEST_PG_URL`（不启动容器、时长可控），本地无 service 时回退 Testcontainers；仍禁止为其他测试引入 Docker 依赖；
+- **Spring 全量上下文测试仅限 cra-server 接线冒烟【建议】**：DI 仍主要用于装配，`@SpringBootTest` 只用于 `cra-server`（第二组合根）的 HTTP 接线验证（webhook→队列→执行器桩→PG；需 `CRA_TEST_PG_URL`，无 PG 时整类跳过）；配置绑定用 `@ConfigurationProperties` 级单测（如 05§5 `require-distinct-model-family` 违例拒绝启动）。其他模块仍不引入全量上下文测试。
 
 ## 4. CI 门禁演进表
 
@@ -87,6 +88,7 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | M1 | + 账本解析器与幂等闸单测（05§1.3 规则 1–5 逐条，§5 场景 3/4）；+ L1 快检接入 CI（对抗集注入 3 + 幻觉 2，~3min，04§2.4） | 解析规则全分支覆盖（§7）；L1 红**只升级不阻塞**（04§2.4） | ≤10min |
 | M2 | + 隔离机制单测：预算硬限 / 工具白名单 / UNTRUSTED 定界 / 反锚定校验器（07 T2.1/T2.4，07§6 纪律 2）；+ e2e dry-run（ArchUnit 自 M0 已随 verify 生效，v1 基线修正） | e2e 断言 finding 集合与账本标记；ArchUnit 违例即红 | ≤10min |
 | M3 | + L2 报告哈希校验：prompt/模型改动 PR 附 `cra-eval run --json` 报告，CI 校验其存在与 sha256（04§2.4 荣誉制） | 报告缺失或哈希不符即红 | ≤10min |
+| M4b | + PG 服务容器（`postgres:16-alpine`，`CRA_TEST_PG_URL` 注入 verify job）；+ PG 账本契约测试（与 SQLite 共享 `ReviewLedgerContractTest`）；+ cra-server 单测（webhook 验签/事件解析/队列背压/delivery 幂等/签发验签）；+ HTTP 接线冒烟（有 PG 时运行） | 契约测试全绿；同 delivery 两次只入队一次；篡改报告验签失败；ArchUnit R1/R3/R6 含 cra-server | ≤10min（PG 容器 ~5s 启动） |
 
 **【强制】** 任一阶段 CI 时长 >10min 视为门禁事故，处置次序固定：先把该检查挪夜间/本地 + 哈希校验（04§2.4 同款），不减门禁权威（06§1.2"被绕过的门禁等于没有门禁"）。守护方式：workflow 末尾计时 step，超限即失败。
 
@@ -113,8 +115,13 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | 17 | LLM 重试与 GitHub 退避：429/5xx 指数退避 ≤3 次、排队超时按降级语义收尾（02§4.5） | 单测（退避策略纯逻辑）+ 集成（WireMock 延迟/限流响应） | 07§1 验收 5；02§4.5；05§2.3 |
 | 18 | 大 diff 降档：>2k 行自动降 Quick、>8k 行只评 priority_paths、降档与覆盖声明如实进 Summary | 单测（Planner 输入→档位决策） | 07§2 验收 4；02§4.4；04§2.2 |
 | 19 | dual-vote 配置硬校验：`require-distinct-model-family=true` 下同家族配对 → 启动即拒绝 | 单测（配置绑定，05§5） | 07§4 验收 3 |
+| 20 | webhook 验签：合法签名 202；错签/缺头 401；非法 payload 400；非 PR 事件/draft 200 忽略 | 单测 + HTTP（MockMvc/集成） | 02§5；07§5 M4b；ADR-0008 |
+| 21 | 队列背压：容量满 → `FULL`/HTTP 503 + `Retry-After`，并释放 delivery 占位；重投同 delivery 可再次入队 | 单测（有界队列 + 内存 delivery） | 02§5；ADR-0008 |
+| 22 | delivery 幂等：同 delivery 两次只入队一次（第二次 200 duplicate）；不同 delivery 同 head → core commit 闸 SKIPPED、`review_run` 不新增 | 单测 + PG 集成 | 02§4.1；ADR-0008 |
+| 23 | PG 账本契约：与 SQLite 共享 `ReviewLedgerContractTest`（完成标记/幂等/大小写/跨实例持久化）；五表存在；`ON CONFLICT` 重复登记幂等 | 契约测试（CI service 容器或 Testcontainers） | 05§1.5；08§3.3；ADR-0008 |
+| 24 | 报告签名：服务端签发 → `cra-eval verify --signature` 通过；篡改报告/信封 → 退出码 5；未知 commit → 409；无 Bearer → 401 | 单测 + HTTP 集成 + CLI 黑盒 | 04§2.4；ADR-0008 |
 
-**【强制】** 上表 1–19 是对应里程碑 CI/验收的最低测试集：验收执行时逐条引用本表编号作为证据（PR 描述粘贴输出，00§5）。
+**【强制】** 上表 1–24 是对应里程碑 CI/验收的最低测试集：验收执行时逐条引用本表编号作为证据（PR 描述粘贴输出，00§5）。
 
 ## 6. 性能与延迟验证
 
