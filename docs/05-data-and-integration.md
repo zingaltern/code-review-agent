@@ -246,6 +246,7 @@ resolve 仍不采（GraphQL-only）。
 - **对象**：窗口内（`--since`，按 updated_at）最近的 `--max-prs` 个 PR（含 open/closed/merged），diff 语义与 PR 形态一致（base.sha..head.sha）；
 - **载体**：**每条被评审 PR 一个 issue**，标题 `[cra-nightly] PR #N <sha7> 存量评审`，正文 = Summary + 全部 finding 详情块 + 末位 run 完成标记（§1.3）；标签 `cra-nightly`（标签不存在时平台忽略，幂等不依赖标签）；
 - **汇总 issue**：一次夜间实际评审 ≥1 个 PR 时，另发一条 `[cra-nightly] 汇总 <date>`——范围、逐 PR 结果表、tokens、截断与降级声明；**汇总 issue 不承载账本标记**（它不是评审载体）。同日汇总已存在（按正文首行判定）则不重复发布；本次全部 PR 被幂等闸跳过时不发汇总（第二次夜间跑零产物）；
+- **范围/截断与失败声明**：汇总 issue 明确窗口内 PR 总数、本次评审数、被 `--max-prs` 截断数；汇总发布失败不回滚已发布的逐 PR issue，但进程以退出码 2 收尾（失败如实声明）；
 - **幂等**：DONE 闸按 `repo + head commit` 查 issue 载体账本（§1.3）；同一 head 已被任一夜间 issue 完整发布过 → 跳过；
 - **预算/截断声明复用**：逐 PR issue 内为完整 Summary（含覆盖声明、截断抑制数、降级事件），与 PR 形态同源同口径。
 

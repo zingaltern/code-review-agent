@@ -31,7 +31,7 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
  *   <li>汇总 issue：本次实际评审 ≥1 个 PR 时发布一条扫描汇总（标题含日期，同日已存在则不重复发布）； 汇总只承载范围/预算/截断声明，不承载账本标记（05§2.5）。
  * </ol>
  *
- * <p>退出码：0 = 正常（含无 PR、全跳过、部分失败已如实声明）；2 = 自身故障（配置/平台/全部失败）。
+ * <p>退出码：0 = 正常（含无 PR、全跳过）；2 = 自身故障（配置/平台/任一 PR 失败/汇总发布失败；逐 PR issue 不回滚）。
  */
 final class SweepCommand {
 
@@ -53,16 +53,17 @@ final class SweepCommand {
       GitHubComponents components =
           GitHubAssembly.createComponents(config.githubApi(), config.githubToken());
       RepoRef repo = new RepoRef(config.repoOwner(), config.repoName());
-      List<PullRequestRef> pulls =
-          components.commentSource().listPullRequests(repo, since).stream()
-              .limit(parsed.maxPrs())
-              .toList();
+      List<PullRequestRef> allPulls = components.commentSource().listPullRequests(repo, since);
+      List<PullRequestRef> pulls = allPulls.stream().limit(parsed.maxPrs()).toList();
+      int truncated = Math.max(0, allPulls.size() - pulls.size());
       LOG.info(
-          "cra sweep start: repo={}/{} since={} pulls={} max-prs={} dry-run={}",
+          "cra sweep start: repo={}/{} since={} window={} selected={} truncated={} max-prs={} dry-run={}",
           repo.owner(),
           repo.repo(),
           parsed.since(),
+          allPulls.size(),
           pulls.size(),
+          truncated,
           parsed.maxPrs(),
           config.dryRun());
       if (pulls.isEmpty()) {
@@ -72,15 +73,17 @@ final class SweepCommand {
       List<PrRun> runs = runAll(config, pulls);
       int failed = (int) runs.stream().filter(r -> r.failed()).count();
       int reviewed = (int) runs.stream().filter(r -> !r.failed() && r.reviewed()).count();
+      boolean rollupOk = true;
       if (!config.dryRun() && reviewed > 0) {
-        publishRollup(components, config, repo, parsed, since, runs, reviewed, failed);
+        rollupOk = publishRollup(components, repo, parsed, allPulls.size(), runs, reviewed, failed);
       }
       LOG.info(
-          "cra sweep end: reviewed={} skipped={} failed={}",
+          "cra sweep end: reviewed={} skipped={} failed={} rollup={}",
           reviewed,
           runs.stream().filter(r -> !r.failed() && !r.reviewed()).count(),
-          failed);
-      return failed > 0 ? 2 : 0;
+          failed,
+          rollupOk ? "OK" : "FAILED");
+      return exitCodeFor(failed, rollupOk);
     } catch (CraException e) {
       LOG.error("cra sweep config/bootstrap failure: {}", e.getMessage());
       return 2;
@@ -137,12 +140,11 @@ final class SweepCommand {
     return runs;
   }
 
-  private void publishRollup(
+  private boolean publishRollup(
       GitHubComponents components,
-      CraConfig config,
       RepoRef repo,
       SweepArgs.Parsed parsed,
-      Instant since,
+      int windowTotal,
       List<PrRun> runs,
       int reviewed,
       int failed) {
@@ -154,15 +156,12 @@ final class SweepCommand {
             .anyMatch(c -> c.body().startsWith(firstLine));
     if (exists) {
       LOG.info("cra sweep rollup 已存在（{}），不重复发布", title);
-      return;
+      return true;
     }
     StringBuilder body = new StringBuilder();
     body.append(firstLine).append("\n\n");
-    body.append("扫描窗口：since=")
-        .append(parsed.since())
-        .append("，上限 ")
-        .append(parsed.maxPrs())
-        .append(" 个 PR；每条 finding 的详情见对应 PR 的夜间评审 issue。\n\n");
+    body.append(scopeDeclaration(parsed.since(), windowTotal, runs.size(), parsed.maxPrs()))
+        .append("每条 finding 的详情见对应 PR 的夜间评审 issue。\n\n");
     body.append("| PR | head | 结果 | 发布 | 候选 | 确认 | tokens(in/out) |\n");
     body.append("|---|---|---|---|---|---|---|\n");
     long tokensIn = 0;
@@ -216,10 +215,33 @@ final class SweepCommand {
               new PostIssueCommand(
                   repo.owner(), repo.repo(), title, body.toString(), NIGHTLY_LABELS));
       LOG.info("cra sweep rollup published: {}", title);
+      return true;
     } catch (RuntimeException e) {
-      // 汇总发布失败不回滚已发布的逐 PR issue（账本已完整）；如实记录，退出码由失败计数决定
+      // 汇总发布失败不回滚已发布的逐 PR issue（账本已完整）；如实记录并由退出码 2 收尾
       LOG.error("cra sweep rollup publish failed: {}", e.getMessage());
+      return false;
     }
+  }
+
+  /** 退出码：任一 PR 失败或汇总发布失败 = 2，否则 0。 */
+  static int exitCodeFor(int failed, boolean rollupPublished) {
+    return failed > 0 || !rollupPublished ? 2 : 0;
+  }
+
+  /** 范围/截断声明：窗口总数、本次评审数、被 --max-prs 截断数。 */
+  static String scopeDeclaration(String since, int windowTotal, int selected, int maxPrs) {
+    int truncated = Math.max(0, windowTotal - selected);
+    return "扫描窗口：since="
+        + since
+        + "，窗口内 "
+        + windowTotal
+        + " 个 PR；本次评审前 "
+        + selected
+        + " 个（--max-prs 上限 "
+        + maxPrs
+        + "），截断 "
+        + truncated
+        + " 个。";
   }
 
   private static String shortSha(String sha) {
