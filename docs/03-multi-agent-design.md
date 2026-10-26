@@ -231,7 +231,7 @@ for (var e : byFile.entrySet()) {
 |---|---|---|---|---|---|---|
 | BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤2k | 3 |
 | SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤24k/chunk | ≤2k | 3 |
-| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤1k | 2 |
+| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤2k | 2 |  
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
 | VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |
