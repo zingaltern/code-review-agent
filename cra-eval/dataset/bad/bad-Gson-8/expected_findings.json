@@ -10,6 +10,16 @@
         "抽象"
       ],
       "note": "人工确认（M3 冒烟校准）：finding 实际为 UnsafeAllocator.java:L45 [bug]「移除 assertInstantiable 使接口/抽象类的创建不再抛出明确异常」——关键词取中文行为词\"接口\"+\"抽象\""
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/UnsafeAllocator.java",
+      "line": 48,
+      "category": "test",
+      "keywords": [
+        "接口",
+        "抽象"
+      ],
+      "note": "M3 标注质检校准（L2 报告 run0/run1 test 锚 L48：「删除 assertInstantiable 后缺少对接口/抽象类实例化的测试守护」）：无 → 新增 test L48 [\"接口\",\"抽象\"]，同一缺陷的 test 类表现；原 bug 条目保留"
     }
   ],
   "negative_baits": []

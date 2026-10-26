@@ -18,6 +18,15 @@
         "unquoted"
       ],
       "note": "人工确认：nextLong 同样丢失 PEEKED_UNQUOTED 处理（同一缺陷第二处）"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 1183,
+      "category": "test",
+      "keywords": [
+        "边界测试"
+      ],
+      "note": "M3 标注质检校准（L2 报告 run1 test 锚 L1182：「nextInt() 同样移除 PEEKED_UNQUOTED 分支后缺少边界测试」）：无 → 新增 test L1183 [\"边界测试\"]，第二处 hunk 的 test 类表现；原 2 条 bug 条目保留"
     }
   ],
   "negative_baits": []

@@ -3,12 +3,12 @@
   "expected": [
     {
       "file": "gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java",
-      "line": 818,
+      "line": 825,
       "category": "bug",
       "keywords": [
-        "newTypeHierarchyFactory"
+        "类型校验"
       ],
-      "note": "人工确认：删除 newTypeHierarchyFactory 相关工厂分支（TypeAdapters 适配逻辑丢失）"
+      "note": "人工确认：删除 newTypeHierarchyFactory 相关工厂分支（TypeAdapters 适配逻辑丢失）；M3 标注质检校准（L3 报告 40218288324 run0/run1 + L2 报告 run0/run1；bug 观察锚 L826/L825，正文均含「运行时类型校验」）：原 L818/['newTypeHierarchyFactory'] → 新 L825/['类型校验']，原锚为 hunk 起点且关键词为实现标识符 newTypeHierarchyFactory（中文正文未必出现），评审实际锚 825/826 且以行为词「类型校验」表述"
     }
   ],
   "negative_baits": []

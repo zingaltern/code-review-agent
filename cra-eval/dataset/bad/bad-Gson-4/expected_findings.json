@@ -18,6 +18,24 @@
         "顶层"
       ],
       "note": "M3 L3 取证校准：评审锚在调用点 L325（「嵌套打开数组/对象时错误传 root=true，绕过顶层单值约束」，run1 命中）；中文「顶层」替代英文 top-level"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+      "line": 625,
+      "category": "test",
+      "keywords": [
+        "顶层"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run2 + L2 报告 run1；评审锚 L625 为新增 beforeValue(root) 校验行）：无 → 新增 test L625 [\"顶层\"]，评审以 test 类识别同一顶层约束缺陷（「JsonWriter.beforeValue(root) 严格模式顶层非容器校验无测试覆盖」）；原 test(JsonReader L574) 与 bug(JsonWriter L325) 条目保留"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/stream/JsonReader.java",
+      "line": 574,
+      "category": "bug",
+      "keywords": [
+        "顶层"
+      ],
+      "note": "M3 标注质检校准（L2 报告 run0 bug 锚 L574：「JsonReader 在严格模式下对顶层字符串值的校验不完整」）：无 → 新增 bug L574 [\"顶层\"]，同一顶层约束缺陷的 bug 表现；原 test(JsonReader L574) 与 bug(JsonWriter L325) 条目保留"
     }
   ],
   "negative_baits": []

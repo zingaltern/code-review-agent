@@ -6,9 +6,18 @@
       "line": 120,
       "category": "bug",
       "keywords": [
-        "CapturesArguments"
+        "捕获"
       ],
-      "note": "人工确认：删除 vararg 位置参数捕获循环，CapturesArguments.captureFrom 不再被调用"
+      "note": "人工确认：删除 vararg 位置参数捕获循环，CapturesArguments.captureFrom 不再被调用；M3 标注质检校准（L3 报告 40218288324 run0/run1/run2 + L2 报告 run0/run1；L3 run2 bug 与 run0/run1 test 正文均含「参数捕获/捕获」）：原 ['CapturesArguments'] → 新 ['捕获']，原关键词为实现标识符 CapturesArguments（中文正文不出现），改为行为词「捕获」"
+    },
+    {
+      "file": "src/org/mockito/internal/invocation/InvocationMatcher.java",
+      "line": 124,
+      "category": "test",
+      "keywords": [
+        "捕获"
+      ],
+      "note": "M3 标注质检校准（同源）：无 → 新增 test L124 [\"捕获\"]，L3 run0 test 锚 L125、run1 test 锚 L123、L2 run0/run1 test 锚 L121/L124 均识别 varargs 捕获逻辑被替换为抛异常；原 bug 条目保留"
     }
   ],
   "negative_baits": []

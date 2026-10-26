@@ -30,6 +30,15 @@
         "环"
       ],
       "note": "人工确认（M3 冒烟校准）：缺陷的删除点（detectInheritanceCycle 被删，仅剩 detectImplicitPrototypeCycle）；finding 可能锚此而非 NamedType 调用点；M3 L3 取证校准：正文用「继承环/接口自环」而非「循环」"
+    },
+    {
+      "file": "src/com/google/javascript/rhino/jstype/NamedType.java",
+      "line": 190,
+      "category": "test",
+      "keywords": [
+        "测试"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run1）：无 → 新增 test L190 [\"测试\"]，评审以 test 类识别同一缺陷（「NamedType 循环检测改为 detectImplicitPrototypeCycle，丢失接口循环覆盖且无新测试」）；原 3 条 bug 条目保留"
     }
   ],
   "negative_baits": []

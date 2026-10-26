@@ -22,8 +22,8 @@
   "filtered_test_files" : [ "test/com/google/javascript/jscomp/LooseTypeCheckTest.java", "test/com/google/javascript/jscomp/TypeCheckTest.java" ],
   "annotation" : {
     "status" : "annotated",
-    "annotator" : "zcode-dataset",
-    "annotated_at" : "2026-10-25"
+    "annotator" : "zcode-annot-qc",
+    "annotated_at" : "2026-10-26"
   },
   "recheck" : {
     "status" : "pending",

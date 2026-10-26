@@ -9,6 +9,15 @@
         "自引用"
       ],
       "note": "人工确认：去掉 typeParameter != actualTypeArgument 判断后，自引用泛型上界导致无限递归/StackOverflowError（#114）；M3 L3 取证校准：正文中文「自引用类型参数」，英文 recurs 不出现"
+    },
+    {
+      "file": "src/org/mockito/internal/util/reflection/GenericMetadataSupport.java",
+      "line": 79,
+      "category": "test",
+      "keywords": [
+        "自引用"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run2 + L2 报告 run1）：无 → 新增 test L79 [\"自引用\"]，评审以 test 类识别「自引用类型参数映射行为无测试守护」；原 bug 条目保留"
     }
   ],
   "negative_baits": []

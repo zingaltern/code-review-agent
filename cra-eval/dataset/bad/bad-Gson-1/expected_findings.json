@@ -18,6 +18,15 @@
         "extractTypeForHierarchy"
       ],
       "note": "人工确认：hunk2 删除 extractTypeForHierarchy 方法（同一缺陷的第二处表现）"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/TypeInfoFactory.java",
+      "line": 90,
+      "category": "test",
+      "keywords": [
+        "测试"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run2）：无 → 新增 test L90 [\"测试\"]，评审以 test 类识别同一缺陷（「删除 TypeVariable 分支后无测试守护抛异常行为」）；原 2 条 bug 条目保留"
     }
   ],
   "negative_baits": []

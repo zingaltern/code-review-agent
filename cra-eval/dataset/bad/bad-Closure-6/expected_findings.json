@@ -15,9 +15,9 @@
       "line": 1019,
       "category": "bug",
       "keywords": [
-        "构造器"
+        "逆变"
       ],
-      "note": "人工确认（M3 冒烟校准）：finding「FunctionType this 类型协变逻辑对构造器放宽导致子类型判断错误」锚 isConstructor() 豁免行；关键词取行为词\"构造器\""
+      "note": "人工确认（M3 冒烟校准）：finding「FunctionType this 类型协变逻辑对构造器放宽导致子类型判断错误」锚 isConstructor() 豁免行；关键词取行为词\"构造器\"；M3 标注质检校准（L2 报告 run1 bug 锚 L1019；正文「破坏 this 类型逆变约束」）：原 ['构造器'] → 新 ['逆变']，原关键词为行为泛称且正文实际用实现标识符 isConstructor + 行为词「逆变」，中文「构造器」不出现"
     },
     {
       "file": "src/com/google/javascript/rhino/jstype/FunctionType.java",

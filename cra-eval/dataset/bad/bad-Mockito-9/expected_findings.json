@@ -6,9 +6,18 @@
       "line": 36,
       "category": "bug",
       "keywords": [
-        "abstract"
+        "抽象"
       ],
-      "note": "人工确认：抽象方法未委派默认答案而直接 callRealMethod，spy 抽象类时抛错（#122）"
+      "note": "人工确认：抽象方法未委派默认答案而直接 callRealMethod，spy 抽象类时抛错（#122）；M3 标注质检校准（L3 报告 40218288324 run0/run1/run2 + L2 报告 run0/run1；bug/test 正文均含「抽象方法」）：原 ['abstract'] → 新 ['抽象']，原关键词 abstract 为英文（中文正文以「抽象方法」表述），改为行为词「抽象」"
+    },
+    {
+      "file": "src/org/mockito/internal/stubbing/answers/CallsRealMethods.java",
+      "line": 35,
+      "category": "test",
+      "keywords": [
+        "抽象"
+      ],
+      "note": "M3 标注质检校准（同源）：无 → 新增 test L35 [\"抽象\"]，L3 run1 与 L2 run0 以 test 类识别「移除抽象方法兜底逻辑后缺少测试」；原 bug 条目保留"
     }
   ],
   "negative_baits": []

@@ -9,6 +9,15 @@
         "removeGlobals"
       ],
       "note": "人工确认：删除 !removeGlobals 提前返回守卫，非移除全局场景下未引用函数参数也被移除（RemoveUnusedVars 缺陷引入）"
+    },
+    {
+      "file": "src/com/google/javascript/jscomp/RemoveUnusedVars.java",
+      "line": 370,
+      "category": "test",
+      "keywords": [
+        "测试"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run0 + L2 报告 run0）：无 → 新增 test L370 [\"测试\"]，评审以 test 类识别同一缺陷（「删除 removeGlobals 守卫后未新增测试覆盖 removeUnusedVars=false 时的形参删除行为」）；原 bug 条目保留"
     }
   ],
   "negative_baits": []

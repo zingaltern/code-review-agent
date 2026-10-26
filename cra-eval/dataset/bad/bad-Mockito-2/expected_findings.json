@@ -6,9 +6,18 @@
       "line": 8,
       "category": "bug",
       "keywords": [
-        "duration"
+        "负值"
       ],
-      "note": "复核校准（2026-10-25 取证）：finding 3/3 锚构造器 L8、正文以 duration/负时长描述（validateInput 仅 1/3 正文出现，原 L23 行号差 15 超 ±5）"
+      "note": "复核校准（2026-10-25 取证）：finding 3/3 锚构造器 L8、正文以 duration/负时长描述（validateInput 仅 1/3 正文出现，原 L23 行号差 15 超 ±5）；M3 标注质检校准（L3 报告 40218288324 run1/run2 + L2 报告 run0/run1；正文均含「负值/负时长」）：原 ['duration'] → 新 ['负值']，原关键词 duration 为英文（仅英文标题出现），改为行为词「负值」"
+    },
+    {
+      "file": "src/org/mockito/internal/util/Timer.java",
+      "line": 8,
+      "category": "test",
+      "keywords": [
+        "负值"
+      ],
+      "note": "M3 标注质检校准（同源）：无 → 新增 test L8 [\"负值\"]，L3 run0 与 L2 run0 以 test 类识别「移除负值校验后无测试守护」；原 bug 条目保留"
     }
   ],
   "negative_baits": []

@@ -22,8 +22,8 @@
   "filtered_test_files" : [ "test/com/google/javascript/jscomp/CommandLineRunnerTest.java", "test/com/google/javascript/jscomp/IntegrationTest.java", "test/com/google/javascript/jscomp/RemoveUnusedVarsTest.java" ],
   "annotation" : {
     "status" : "annotated",
-    "annotator" : "zcode-coordinator",
-    "annotated_at" : "2026-10-25"
+    "annotator" : "zcode-annot-qc",
+    "annotated_at" : "2026-10-26"
   },
   "recheck" : {
     "status" : "pending",

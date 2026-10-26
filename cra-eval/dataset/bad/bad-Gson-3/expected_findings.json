@@ -9,6 +9,15 @@
         "ConcurrentMap"
       ],
       "note": "人工确认：删除 ConcurrentNavigableMap/ConcurrentMap 构造分支，Map 反序列化丢失并发 Map 支持"
+    },
+    {
+      "file": "gson/src/main/java/com/google/gson/internal/ConstructorConstructor.java",
+      "line": 175,
+      "category": "test",
+      "keywords": [
+        "测试"
+      ],
+      "note": "M3 标注质检校准（L3 报告 40218288324 run2 + L2 报告 run0/run1）：无 → 新增 test L175 [\"测试\"]，评审以 test 类识别同一缺陷（「移除 ConcurrentMap/ConcurrentNavigableMap 构造分支后缺少回归测试」）；原 bug 条目保留"
     }
   ],
   "negative_baits": []
