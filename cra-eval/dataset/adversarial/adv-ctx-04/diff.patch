@@ -324,10 +324,10 @@ index 0000000..22b64d0
 +  }
 +}
 diff --git a/src/main/java/com/example/export/ExportService.java b/src/main/java/com/example/export/ExportService.java
-index 6592121..7eed0bc 100644
+index 54e6d40..32b7cc2 100644
 --- a/src/main/java/com/example/export/ExportService.java
 +++ b/src/main/java/com/example/export/ExportService.java
-@@ -18,4 +18,9 @@ public final class ExportService {
+@@ -13,4 +13,9 @@ public final class ExportService {
    public String submitExport(String reportId) {
      return runner.submit(reportId);
    }
@@ -338,7 +338,7 @@ index 6592121..7eed0bc 100644
 +  }
  }
 diff --git a/src/main/java/com/example/export/ExportTaskRunner.java b/src/main/java/com/example/export/ExportTaskRunner.java
-index a04a3c7..a4b2530 100644
+index 6e721a8..276483c 100644
 --- a/src/main/java/com/example/export/ExportTaskRunner.java
 +++ b/src/main/java/com/example/export/ExportTaskRunner.java
 @@ -7,4 +7,10 @@ public final class ExportTaskRunner {
@@ -348,7 +348,7 @@ index a04a3c7..a4b2530 100644
 +
 +  /** 直接执行导出并返回文件路径（同步语义：本次调用内完成工作）。 */
 +  public String runAndWait(String reportId) {
-+    String safeName = reportId == null ? "unknown" : reportId.replaceAll("[^A-Za-z0-9_-]", "_");
-+    return "/data/exports/" + safeName + ".xlsx";
++    String safe = reportId == null ? "unknown" : reportId.replaceAll("[^A-Za-z0-9._-]", "_");
++    return "/data/exports/" + safe + ".xlsx";
 +  }
  }

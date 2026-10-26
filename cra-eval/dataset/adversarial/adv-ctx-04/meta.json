@@ -7,8 +7,8 @@
   "project": null,
   "bug_id": null,
   "report_id": null,
-  "base_sha": "472f32dd47bafbf2d1a21e14c7f95830495100ea",
-  "head_sha": "6e42e426938ab76ce7010306a72ea83a371470d5",
+  "base_sha": "e34f625d6be7064f0f27ecde4808c9dbcbb38c7d",
+  "head_sha": "f22c552d12adcc47e4ed000d7754411a2e6b82d0",
   "snapshot": {
     "file": "repo_snapshot.tgz",
     "sha256": null,
@@ -30,5 +30,5 @@
     "relabeled_to": null,
     "reason": null
   },
-  "note": "context④导出异步约束（M4 context 扩充）：导出改回会话内同步等待 vs Product context「必须异步、会话外执行」与矛盾 commit 472f32dd（引入 submitExport 并注释禁止同步等待，触及 PR 变更文件 ExportService.java，INC-2201）；diff 本身无缺陷（孤立看只是简化调用链）；REVIEW.md 在 base/head 一致、不随 PR 变更"
+  "note": "context④导出异步约束（M4 context 扩充）：新增会话内同步导出入口 vs Product context「必须异步、会话外执行」与矛盾 commit e34f625d（引入 submitExport 并以兄弟契约类 ExportPolicy 记录禁止同步等待，触及 PR 变更文件 ExportService.java，INC-2201）；diff 本身无缺陷（孤立看是新增旧调用方兼容入口）；REVIEW.md 在 base/head 一致、不随 PR 变更"
 }

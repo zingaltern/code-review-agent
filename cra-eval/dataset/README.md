@@ -96,24 +96,26 @@ shasum -a 256 repo_snapshot.tgz   # 回填 meta.snapshot.sha256
 统计功效不足；扩至 6 例后 n=18、通过线 ≥15/18（0.833），可容 3 miss。四例仍按三要素构造
 （diff 无缺陷 + 矛盾在代码之外 + 证据自足），矛盾 commit 触及 PR 变更文件、head 前 ~4.3 周
 （2026-09-20 → 2026-10-20，8 周窗口内），diff 均 ≥300 patch 行（`totalPatchLines` 精确口径
-379/344/346/367，standard 不降 quick）；REVIEW.md 置于 base（`history/02-constraint/`）并在
+379/345/346/367，standard 不降 quick）；REVIEW.md 置于 base（`history/02-constraint/`）并在
 head 保持不变（不进 PR diff）。快照由 `build_snapshot.sh` 可复现重建（`--emit-shas` 填
 meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI 在 release 资产解包后补建
 缺失的 adv-ctx-*）：
 
-**修订记录（独立验收意见，2026-10-27）**：首版 filler 含真实逻辑缺陷（03 offsetOf 优先级、
+**修订记录（独立验收意见，2026-10-27，两轮）**：首版 filler 含真实逻辑缺陷（03 offsetOf 优先级、
 04 encodeRow 分隔符/路径拼接、05 DTO null NPE、06 atZoneSimilarLocal 误用）且 03/04/06 的
 约束原文出现在 PR diff hunk 中，削弱 context 区分度。修订为：① filler 全部改为**纯目录/常量
-类**（无算术、无时区换算、无 null 边界逻辑）；② 04 受测变更改为「新增 exportSync 同步入口，
-异步约束注释原样保留不删」；③ 03 约束文本移至兄弟文件 PageSizePolicy（constraint commit
-创建、PR 不触及），06 约束文本全在 ReportDateUtil/REVIEW.md；④ 四例 `diff.patch` 经 grep
-核验不含 INC-/禁止/一律等约束原文。遗留建议（未实施，超出本 PR 授权范围）：为 fixture 补
-编译级检查（fixture Java 文件不在 Maven 模块内，`mvn test` 抓不到其中缺陷）。
+类**（无算术、无时区换算、无 null 边界逻辑）；② 04 受测变更改为「新增 exportSync 同步入口」
+（同步语义自洽：runAndWait 本次调用内完成，路径净化）；③ 约束文本全部移出 PR 变更文件、
+由兄弟契约类承载——03 PageSizePolicy、04 ExportPolicy（均由 constraint commit 创建、PR 不
+触及；04 的 BugHunter 在 v2 中基于全文读取把同步违约重复报为 [bug]，移出后消除），06 约束
+在 ReportDateUtil/REVIEW.md；④ 四例 `diff.patch` 经 grep 核验不含 INC-/禁止/一律等约束
+原文（filler javadoc 中的领域用词「异步」不算约束原文）。遗留建议（未实施，超出本 PR 授权
+范围）：为 fixture 补编译级检查（fixture Java 文件不在 Maven 模块内，`mvn test` 抓不到其中缺陷）。
 
 | case | 模式 | 矛盾载体 | 证据 commit（base_sha） | expected 锚点 |
 |---|---|---|---|---|
 | adv-ctx-03 | A 数值参照系 | 默认 page size 20→50 vs 前端按 20 分页契约（INC-2145） | `1a8843d` 引入 DEFAULT_PAGE_SIZE=20 + PageSizePolicy 契约类（触及 PageRequest.java） | PageRequest.java:7（±5） |
-| adv-ctx-04 | A 设计假设 | 新增会话内同步导出入口 vs 必须异步/会话外（INC-2201） | `472f32d` 引入 submitExport + 禁止同步注释（触及 ExportService.java） | ExportService.java:24（±5） |
+| adv-ctx-04 | A 设计假设 | 新增会话内同步导出入口 vs 必须异步/会话外（INC-2201） | `e34f625` 引入 submitExport + ExportPolicy 契约类（触及 ExportService.java） | ExportService.java:19（±5） |
 | adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `771d619` 引入 MoneyFormat 单一出口 + 标度注释（触及 MoneyFormat.java） | OrderStatsDto.java:13（±5） |
 | adv-ctx-06 | A 时区口径 | 报表日期 UTC 存储→Asia/Shanghai vs 一律 UTC 存储（INC-2210） | `9d68eba` 引入 STORAGE_ZONE=UTC + 绑定注释（触及 DailyReportBuilder/ReportDateUtil.java） | DailyReportBuilder.java:22（±5） |
 
@@ -127,8 +129,15 @@ diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` �
   原文（见修订记录），owner 独立验收后不批准 k=3、退回修订——该 run 结果作废，不作为证据。
   首版另有一跑（40364661499）红于 rsync quick check（size+mtime）对同长同名文件（20→50）
   误判跳过覆盖，已加 `--checksum` 修复并经 fresh clone 复现验证。
-- **k=1 冒烟 v2（修订版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
-  验收标准：4/4 且 published 降至 ~1–2、无 filler 的 bug/security findings。
+- **k=1 冒烟 v2（2026-10-27，run 40372682933，同参数）**：`context_detection 4/4 = 1.000`；
+  published 降至 5/9/1/4（首版 8/15/3/4）；03/05 零 bug/security（05 仅 1 条 context），
+  命中锚点均在 ±5 内，无 budget_exceeded。遗留两问题：04 filler 边界（runAndWait 路径拼接、
+  ColumnRef null NIT，已由 d10e1d4 修复）；04 BugHunter 基于全文读取把同步违约重复报为
+  [bug]（ExportService 内约束 javadoc 所致）——约束移兄弟契约类 ExportPolicy 后重建
+  （base `e34f625`），v2 对 04 作废。06 的 1 条 [bug]（buildToday 硬编码时区）落在受测变更
+  上、孤立视角可辩（先例 01/02 同类噪声），保留并如实报告。
+- **k=1 冒烟 v3（最终版，待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2；
+  验收标准：4/4、03–06 无 filler 的 bug/security findings、published 无 filler 噪音抬升。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 
 
