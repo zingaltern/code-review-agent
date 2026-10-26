@@ -113,7 +113,13 @@ meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI �
 diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` 绿、真实 DatasetLoader
 加载通过。k=1 冒烟与 k=3 验收结果见下（k=3 需 owner 批准后执行）。
 
-- **k=1 冒烟（待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2。
+- **k=1 冒烟（2026-10-27，run 40366325443，cases=adv-ctx-03…06、crosschecker=true、temperature=0.2）**：
+  `context_detection — context 检出 4/4 = 1.000 ≥ 阈值 0.80`；逐 case 均命中：
+  03 published=8 matched=1/1、04 published=15 matched=1/1、05 published=3 matched=1/1、
+  06 published=4 matched=1/1；无 budget_exceeded。run 整体红为 `bad_detection: 无 bad 观测
+  不可判定` 的必然退出码 5（子集不含 bad），非 context 项失败。首跑（40364661499）在快照
+  重建 step 红于 head SHA 不一致——rsync quick check（size+mtime）对同长同名文件（20→50）
+  误判跳过覆盖，已在 `build_snapshot.sh` 加 `--checksum` 修复并经 fresh clone 复现验证。
 - **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
 
 
