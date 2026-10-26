@@ -10,6 +10,7 @@ public final class ExportTaskRunner {
 
   /** 直接执行导出并返回文件路径（同步语义：本次调用内完成工作）。 */
   public String runAndWait(String reportId) {
-    return "/data/exports/" + reportId + ".xlsx";
+    String safeName = reportId == null ? "unknown" : reportId.replaceAll("[^A-Za-z0-9_-]", "_");
+    return "/data/exports/" + safeName + ".xlsx";
   }
 }

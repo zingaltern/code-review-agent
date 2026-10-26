@@ -1,6 +1,6 @@
 diff --git a/src/main/java/com/example/export/ExportPayloadCodec.java b/src/main/java/com/example/export/ExportPayloadCodec.java
 new file mode 100644
-index 0000000..881d95f
+index 0000000..22b64d0
 --- /dev/null
 +++ b/src/main/java/com/example/export/ExportPayloadCodec.java
 @@ -0,0 +1,319 @@
@@ -276,7 +276,7 @@ index 0000000..881d95f
 +
 +    /** 装配列引用。 */
 +    public static ColumnRef of(String name, String doc) {
-+      return new ColumnRef(name, doc);
++      return new ColumnRef(name == null ? "" : name, doc == null ? "" : doc);
 +    }
 +
 +    public String name() {
@@ -338,16 +338,17 @@ index 6592121..7eed0bc 100644
 +  }
  }
 diff --git a/src/main/java/com/example/export/ExportTaskRunner.java b/src/main/java/com/example/export/ExportTaskRunner.java
-index a04a3c7..42d7553 100644
+index a04a3c7..a4b2530 100644
 --- a/src/main/java/com/example/export/ExportTaskRunner.java
 +++ b/src/main/java/com/example/export/ExportTaskRunner.java
-@@ -7,4 +7,9 @@ public final class ExportTaskRunner {
+@@ -7,4 +7,10 @@ public final class ExportTaskRunner {
    public String submit(String reportId) {
      return "task-" + reportId;
    }
 +
 +  /** 直接执行导出并返回文件路径（同步语义：本次调用内完成工作）。 */
 +  public String runAndWait(String reportId) {
-+    return "/data/exports/" + reportId + ".xlsx";
++    String safeName = reportId == null ? "unknown" : reportId.replaceAll("[^A-Za-z0-9_-]", "_");
++    return "/data/exports/" + safeName + ".xlsx";
 +  }
  }

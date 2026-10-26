@@ -270,7 +270,7 @@ public final class ExportPayloadCodec {
 
     /** 装配列引用。 */
     public static ColumnRef of(String name, String doc) {
-      return new ColumnRef(name, doc);
+      return new ColumnRef(name == null ? "" : name, doc == null ? "" : doc);
     }
 
     public String name() {
