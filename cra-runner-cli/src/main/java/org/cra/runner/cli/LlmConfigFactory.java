@@ -48,7 +48,8 @@ final class LlmConfigFactory {
         1_000,
         8_000,
         parseTemperature(config.llmTemperature()),
-        extraHeadersFor(config.llmBaseUrl()));
+        extraHeadersFor(config.llmBaseUrl()),
+        reasoningEffortFor(config.llmBaseUrl()));
   }
 
   /** 档位模型名缺省继承 standard；空白串等同未配置（ModelEndpoint 拒绝 blank）。 */
@@ -135,6 +136,12 @@ final class LlmConfigFactory {
    * @param baseUrl LLM 端点根地址
    * @return 附加头（非 opencode 端点为空 map）
    */
+  private static String reasoningEffortFor(String baseUrl) {
+    // opencode 端点关闭 thinking：reasoning token 计入 max_tokens，评审任务 1–2k 输出预算
+    // 会被推理吃光（M3 冒烟实测 bug-hunter/test-reviewer budget_exceeded）
+    return baseUrl != null && baseUrl.contains("opencode.ai") ? "none" : null;
+  }
+
   private static java.util.Map<String, String> extraHeadersFor(String baseUrl) {
     if (baseUrl != null && baseUrl.contains("opencode.ai")) {
       return java.util.Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());

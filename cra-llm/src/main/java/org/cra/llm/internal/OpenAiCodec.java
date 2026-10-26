@@ -18,7 +18,8 @@ final class OpenAiCodec {
 
   private OpenAiCodec() {}
 
-  static String encodeRequest(String model, LlmRequest request, Double temperature) {
+  static String encodeRequest(
+      String model, LlmRequest request, Double temperature, String reasoningEffort) {
     ObjectNode root = MAPPER.createObjectNode();
     root.put("model", model);
     var messages = root.putArray("messages");
@@ -33,6 +34,10 @@ final class OpenAiCodec {
     if (temperature != null) {
       // 采样温度（05§5 CRA_LLM_TEMPERATURE）：null = 不传，沿用 provider 默认
       root.put("temperature", temperature);
+    }
+    if (reasoningEffort != null) {
+      // 推理力度（v1.3.2 opencode 适配）：none = 关闭 thinking（reasoning token 计入 max_tokens）
+      root.put("reasoning_effort", reasoningEffort);
     }
     return root.toString();
   }
