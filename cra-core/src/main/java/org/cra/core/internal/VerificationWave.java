@@ -278,6 +278,21 @@ final class VerificationWave {
                 "overlap", antiAnchor.overlapRatio(),
                 "refs", antiAnchor.refsTotal()));
       }
+      // 逐条判定落 trace（含理由，M3 取证需要：verify 批次事件只有计数，无法回答"为什么拒"）
+      if (verdict != null) {
+        String rationale = verdict.rationale() == null ? "" : verdict.rationale();
+        trace.emit(
+            "verification",
+            Map.of(
+                "finding_id",
+                finding.id(),
+                "verdict",
+                verdict.verdict().name(),
+                "rationale",
+                rationale.length() > 400 ? rationale.substring(0, 400) : rationale,
+                "followup",
+                followupAttempted));
+      }
       outcomes.put(
           finding.id(), new PerFinding(verdict, antiAnchor, followupAttempted, run.model()));
     }

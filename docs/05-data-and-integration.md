@@ -130,6 +130,7 @@
 {"ts":"…","event":"dedup","finding_id":"f_…","match":"exact|sliding-window|possible_duplicate|in-run-exact|none"}
 {"ts":"…","event":"blame_check","note":"…"}
 {"ts":"…","event":"verify","file_batch":"Foo.java","findings":4,"verdicts":{"confirmed":3,"refuted":1,"insufficient":0,"unavailable":0}}
+{"ts":"…","event":"verification","finding_id":"f_…","verdict":"CONFIRMED|REFUTED|INSUFFICIENT_EVIDENCE","rationale":"…（≤400 字）","followup":false}
 {"ts":"…","event":"verify_retry","file_batch":"Foo.java","reason":"…"}
 {"ts":"…","event":"verify_followup","finding_id":"f_…","file":"src/…","status":"provided|unreadable"}
 {"ts":"…","event":"anti_anchor_check","finding_id":"f_…","status":"PASS|FAIL","overlap":0.0,"refs":2}
