@@ -66,6 +66,16 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
     return ToolWhitelist.NONE;
   }
 
+  /**
+   * 强档（03§6 速查表 JudgeAgent 行：强；T2.9 路由落地后本档位从未回填，M3 验收 409 修复）。
+   *
+   * @return 强档
+   */
+  @Override
+  public org.cra.agents.api.AgentTier modelTier() {
+    return org.cra.agents.api.AgentTier.STRONG;
+  }
+
   @Override
   public AgentBudget budget() {
     return new AgentBudget(16_000, 1_000, 2, 240_000);

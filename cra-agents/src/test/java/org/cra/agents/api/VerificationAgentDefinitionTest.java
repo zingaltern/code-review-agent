@@ -70,6 +70,18 @@ class VerificationAgentDefinitionTest {
   }
 
   @Test
+  void verifierAndJudgeUseStrongTierPerSpecTable() {
+    // 03§6 速查表：VerifierAgent / JudgeAgent 均为「强」档——T2.9 路由落地后档位从未回填，
+    // 验证层长期跑在 standard 模型上（M3 验收 409 修复）
+    org.assertj.core.api.Assertions.assertThat(
+            new VerifierAgentDefinition(new TemplateLoader()).modelTier())
+        .isEqualTo(AgentTier.STRONG);
+    org.assertj.core.api.Assertions.assertThat(
+            new JudgeAgentDefinition(new TemplateLoader()).modelTier())
+        .isEqualTo(AgentTier.STRONG);
+  }
+
+  @Test
   void verifierBudgetMatchesSpecRow() {
     // 03§6：VerifierAgent ≤12k 输入 / ≤1.5k 输出 / 2 轮
     assertThat(verifier.budget().maxInputTokens()).isEqualTo(12_000);

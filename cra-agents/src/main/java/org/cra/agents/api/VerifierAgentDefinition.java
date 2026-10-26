@@ -75,6 +75,17 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
     return ToolWhitelist.NONE;
   }
 
+  /**
+   * 强档（03§6 速查表 VerifierAgent 行：M2 强 / M3 V1 强 + V2 异构；T2.9 路由落地后本档位 从未回填——验证层长期跑在 standard
+   * 模型上，是拒真/复核能力不足的结构性原因，M3 验收 409 修复）。
+   *
+   * @return 强档
+   */
+  @Override
+  public org.cra.agents.api.AgentTier modelTier() {
+    return org.cra.agents.api.AgentTier.STRONG;
+  }
+
   @Override
   public AgentBudget budget() {
     return new AgentBudget(12_000, 1_500, 2, 240_000);
