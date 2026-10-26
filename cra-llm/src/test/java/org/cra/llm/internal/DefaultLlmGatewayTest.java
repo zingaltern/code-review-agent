@@ -85,7 +85,8 @@ class DefaultLlmGatewayTest {
         queueTimeoutMs,
         500,
         10,
-        40);
+        40,
+        null);
   }
 
   /** 三档独立模型名 + 降级链 standard → light。 */
@@ -101,7 +102,8 @@ class DefaultLlmGatewayTest {
         queueTimeoutMs,
         500,
         10,
-        40);
+        40,
+        null);
   }
 
   private static LlmRequest request() {

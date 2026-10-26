@@ -38,6 +38,10 @@ on:
         description: 'strong 档模型名（verifier/judge 用；空 = 继承 standard，安全默认）'
         required: false
         default: ''
+      temperature:
+        description: '采样温度（0.0–2.0；空 = 不传沿用 provider 默认）'
+        required: false
+        default: ''
       set:
         description: '集合过滤（L2 口径 = l2；L3 全量 = all；bad = 仅检出复核）'
         required: false
@@ -80,6 +84,7 @@ jobs:
           CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
           CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
           CRA_LLM_MODEL_STRONG: ${{ inputs.model_strong }}
+          CRA_LLM_TEMPERATURE: ${{ inputs.temperature }}
         run: |
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set ${{ inputs.set }} --k ${{ inputs.k }} --depth ${{ inputs.depth }} \
@@ -96,6 +101,7 @@ jobs:
           CRA_LLM_BASE_URL: ${{ vars.CRA_LLM_BASE_URL }}
           CRA_LLM_MODEL: ${{ vars.CRA_LLM_MODEL }}
           CRA_LLM_MODEL_STRONG: ${{ inputs.model_strong }}
+          CRA_LLM_TEMPERATURE: ${{ inputs.temperature }}
         run: |
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set adversarial --k 3 --depth ${{ inputs.depth }} \

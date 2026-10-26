@@ -211,7 +211,8 @@ final class CliArgs {
         named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")),
         crossCheckerEnabled,
         crossCheckerModes,
-        crossCheckerHistoryWeeks);
+        crossCheckerHistoryWeeks,
+        blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))));
   }
 
   /** 空白值归一为 null：GitHub Actions 的空 env 是 ""，语义等同未设置（档位缺省继承 standard）。 */

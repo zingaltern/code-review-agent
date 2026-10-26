@@ -46,7 +46,8 @@ final class LlmConfigFactory {
         30_000,
         120_000,
         1_000,
-        8_000);
+        8_000,
+        parseTemperature(config.llmTemperature()));
   }
 
   /** 档位模型名缺省继承 standard；空白串等同未配置（ModelEndpoint 拒绝 blank）。 */
@@ -103,5 +104,26 @@ final class LlmConfigFactory {
       }
     }
     return rpm;
+  }
+
+  /**
+   * 采样温度解析（05§5 CRA_LLM_TEMPERATURE；空/未配置 = null 不传，沿用 provider 默认）。
+   *
+   * @param value 原始值（可为 null/空白）
+   * @return 0.0–2.0 的 Double；null 表示不传
+   */
+  private static Double parseTemperature(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      double t = Double.parseDouble(value.strip());
+      if (t < 0 || t > 2) {
+        throw new CraConfigException("CRA_LLM_TEMPERATURE 越界: " + value + "（0.0–2.0）");
+      }
+      return t;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("CRA_LLM_TEMPERATURE 非法: " + value);
+    }
   }
 }

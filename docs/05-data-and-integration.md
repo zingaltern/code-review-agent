@@ -330,6 +330,9 @@ cra:
       strong:    { provider: openai-compatible, model: "…" }
       light:     { provider: openai-compatible, model: "…" }
     fallback-chain: [standard, light]
+    # 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
+    # 评审/验证/仲裁为分类判断任务：建议 0.2 降低运行间方差（M3 全部角色共享该值）
+    temperature: null
     max-concurrency: 8              # v1.1：LLM 并发信号量
     per-model-rpm: { standard: 60, strong: 30, light: 60 }
   agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）

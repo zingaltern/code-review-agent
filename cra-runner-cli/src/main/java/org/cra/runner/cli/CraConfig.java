@@ -36,6 +36,7 @@ package org.cra.runner.cli;
  * @param llmModelLight light 档模型名（--model-light / CRA_LLM_MODEL_LIGHT；缺省继承 standard）
  * @param fallbackChain 降级链（--fallback-chain / CRA_LLM_FALLBACK_CHAIN，默认 standard,light；05§5）
  * @param rpm per-model RPM（--rpm / CRA_LLM_RPM，形如 standard=60,strong=30,light=60；默认 60/30/60）
+ * @param llmTemperature 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
  * @param crossCheckerEnabled CrossChecker 总开关（05§5 agents.crosschecker.enabled；--crosschecker /
  *     CRA_CROSSCHECKER_ENABLED，默认 false——关闭不动 Standard 基线算术，04§2.2）
  * @param crossCheckerModes 模式开关（--crosschecker-modes / CRA_CROSSCHECKER_MODES，默认 assumption,sniff）
@@ -75,7 +76,8 @@ public record CraConfig(
     String rpm,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
-    int crossCheckerHistoryWeeks) {
+    int crossCheckerHistoryWeeks,
+    String llmTemperature) {
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
@@ -175,7 +177,8 @@ public record CraConfig(
         rpm,
         false,
         "assumption,sniff",
-        8);
+        8,
+        null);
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -214,6 +217,7 @@ public record CraConfig(
         rpm(),
         crossCheckerEnabled(),
         crossCheckerModes(),
-        crossCheckerHistoryWeeks());
+        crossCheckerHistoryWeeks(),
+        llmTemperature());
   }
 }

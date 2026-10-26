@@ -18,6 +18,8 @@ import java.util.Objects;
  * @param requestTimeoutMs 单次请求超时
  * @param backoffBaseMs 指数退避基值（第 n 次重试等待 base * 2^(n-1)，封顶 backoffMaxMs）
  * @param backoffMaxMs 退避封顶
+ * @param temperature 采样温度（null = 不传，沿用 provider 默认；评审/验证/仲裁为分类判断任务， 推荐 0.2 降低运行间方差——M3
+ *     方差的直接技术根源，05§5 CRA_LLM_TEMPERATURE）
  */
 public record LlmGatewayConfig(
     Map<ModelTier, ModelEndpoint> models,
@@ -28,7 +30,8 @@ public record LlmGatewayConfig(
     long queueTimeoutMs,
     long requestTimeoutMs,
     long backoffBaseMs,
-    long backoffMaxMs) {
+    long backoffMaxMs,
+    Double temperature) {
 
   /** 并发上限默认值（02§4.5）。 */
   public static final int DEFAULT_MAX_CONCURRENCY = 8;
@@ -110,7 +113,8 @@ public record LlmGatewayConfig(
         30_000,
         120_000,
         1_000,
-        8_000);
+        8_000,
+        null);
   }
 
   /**
