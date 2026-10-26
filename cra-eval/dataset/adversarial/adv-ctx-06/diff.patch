@@ -1,0 +1,393 @@
+diff --git a/src/main/java/com/example/report/DailyReportBuilder.java b/src/main/java/com/example/report/DailyReportBuilder.java
+index 67d4429..af75050 100644
+--- a/src/main/java/com/example/report/DailyReportBuilder.java
++++ b/src/main/java/com/example/report/DailyReportBuilder.java
+@@ -1,6 +1,7 @@
+ package com.example.report;
+ 
+ import java.time.LocalDate;
++import java.time.ZoneId;
+ 
+ /** 日报构建器（日期口径：UTC 存储，commit 6d0f3b1）。 */
+ public final class DailyReportBuilder {
+@@ -18,6 +19,6 @@ public final class DailyReportBuilder {
+ 
+   /** 构建今日日报：报表日期一律 UTC 存储（INC-2210/commit 6d0f3b1），展示层按客户时区转换。 */
+   public String buildToday() {
+-    return buildFor(LocalDate.now(ReportDateUtil.STORAGE_ZONE));
++    return buildFor(LocalDate.now(ZoneId.of("Asia/Shanghai")));
+   }
+ }
+diff --git a/src/main/java/com/example/report/ReportDateUtil.java b/src/main/java/com/example/report/ReportDateUtil.java
+index 06b97e6..8767f12 100644
+--- a/src/main/java/com/example/report/ReportDateUtil.java
++++ b/src/main/java/com/example/report/ReportDateUtil.java
+@@ -1,6 +1,8 @@
+ package com.example.report;
+ 
++import java.time.DayOfWeek;
+ import java.time.LocalDate;
++import java.time.ZoneId;
+ import java.time.ZoneOffset;
+ import java.time.format.DateTimeFormatter;
+ 
+@@ -13,6 +15,87 @@ public final class ReportDateUtil {
+   /** 存储日期格式（ISO）。 */
+   public static final DateTimeFormatter STORAGE_FORMAT = DateTimeFormatter.ISO_LOCAL_DATE;
+ 
++  /** 展示时区档位常量 1：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_1 = "Asia/Shanghai";
++
++  /** 展示时区档位常量 2：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_2 = "Asia/Hong_Kong";
++
++  /** 展示时区档位常量 3：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_3 = "Asia/Tokyo";
++
++  /** 展示时区档位常量 4：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_4 = "Asia/Singapore";
++
++  /** 展示时区档位常量 5：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_5 = "Asia/Seoul";
++
++  /** 展示时区档位常量 6：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_6 = "Europe/London";
++
++  /** 展示时区档位常量 7：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_7 = "Europe/Berlin";
++
++  /** 展示时区档位常量 8：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_8 = "Europe/Paris";
++
++  /** 展示时区档位常量 9：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_9 = "America/New_York";
++
++  /** 展示时区档位常量 10：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_10 = "America/Chicago";
++
++  /** 展示时区档位常量 11：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_11 = "America/Los_Angeles";
++
++  /** 展示时区档位常量 12：按客户地区的展示时区映射（仅展示层使用）。 */
++  public static final String DISPLAY_ZONE_12 = "Australia/Sydney";
++
++  /** 展示格式档位常量 1：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_1 = "yyyy-MM-dd";
++
++  /** 展示格式档位常量 2：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_2 = "yyyy/MM/dd";
++
++  /** 展示格式档位常量 3：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_3 = "dd/MM/yyyy";
++
++  /** 展示格式档位常量 4：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_4 = "MM/dd/yyyy";
++
++  /** 展示格式档位常量 5：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_5 = "yyyyMMdd";
++
++  /** 展示格式档位常量 6：客户侧日报的日期文案格式（仅展示层使用）。 */
++  public static final String DISPLAY_PATTERN_6 = "yyyy年MM月dd日";
++
++  /** 财务口径常量 1：对账/计费窗口的切分口径。 */
++  public static final int FISCAL_MONTH_1 = 1;
++
++  /** 财务口径常量 2：对账/计费窗口的切分口径。 */
++  public static final int FISCAL_MONTH_2 = 4;
++
++  /** 财务口径常量 3：对账/计费窗口的切分口径。 */
++  public static final int FISCAL_MONTH_3 = 7;
++
++  /** 财务口径常量 4：对账/计费窗口的切分口径。 */
++  public static final int FISCAL_MONTH_4 = 10;
++
++  /** 财务口径常量 5：对账/计费窗口的切分口径。 */
++  public static final int WEEK_START_1 = 1;
++
++  /** 财务口径常量 6：对账/计费窗口的切分口径。 */
++  public static final int WEEK_START_2 = 2;
++
++  /** 财务口径常量 7：对账/计费窗口的切分口径。 */
++  public static final int QUARTER_DAYS_1 = 90;
++
++  /** 财务口径常量 8：对账/计费窗口的切分口径。 */
++  public static final int QUARTER_DAYS_2 = 91;
++
++  /** 财务口径常量 9：对账/计费窗口的切分口径。 */
++  public static final int QUARTER_DAYS_3 = 92;
++
+   private ReportDateUtil() {}
+ 
+   /** 取当前存储日期（UTC）。 */
+@@ -24,4 +107,271 @@ public final class ReportDateUtil {
+   public static String formatStorage(LocalDate date) {
+     return date == null ? "" : STORAGE_FORMAT.format(date);
+   }
++
++  /** 展示层：按客户时区把存储日期渲染为客户日历日（仅展示层使用，不改存储口径）。 */
++  public static LocalDate toDisplayDate(LocalDate storageDate, String displayZone) {
++    if (storageDate == null || displayZone == null || displayZone.isBlank()) {
++      return storageDate;
++    }
++    try {
++      ZoneId zone = ZoneId.of(displayZone.trim());
++      return storageDate.atStartOfDay(STORAGE_ZONE).atZoneSimilarLocal(zone).toLocalDate();
++    } catch (RuntimeException e) {
++      return storageDate;
++    }
++  }
++
++  /** 展示层：按客户时区取今日客户日历日（仅展示层使用）。 */
++  public static LocalDate todayForDisplay(String displayZone) {
++    return toDisplayDate(today(), displayZone);
++  }
++
++  /** 展示层：按指定 pattern 渲染客户日历日（仅展示层使用）。 */
++  public static String formatForDisplay(LocalDate storageDate, String displayZone, String pattern) {
++    LocalDate display = toDisplayDate(storageDate, displayZone);
++    if (display == null) {
++      return "";
++    }
++    try {
++      return display.format(DateTimeFormatter.ofPattern(pattern));
++    } catch (RuntimeException e) {
++      return STORAGE_FORMAT.format(display);
++    }
++  }
++
++  /** 存储日期解析（ISO，失败返回 null）。 */
++  public static LocalDate parseStorage(String raw) {
++    if (raw == null || raw.isBlank()) {
++      return null;
++    }
++    try {
++      return LocalDate.parse(raw.trim(), STORAGE_FORMAT);
++    } catch (RuntimeException e) {
++      return null;
++    }
++  }
++
++  /** 计算上月同日（存储口径）。 */
++  public static LocalDate sameDayLastMonth(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.minusMonths(1);
++  }
++
++  /** 计算上周同日（存储口径）。 */
++  public static LocalDate sameDayLastWeek(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.minusWeeks(1);
++  }
++
++  /** 本周起始（周一，存储口径）。 */
++  public static LocalDate weekStart(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.with(DayOfWeek.MONDAY);
++  }
++
++  /** 本周结束（周日，存储口径）。 */
++  public static LocalDate weekEnd(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.with(DayOfWeek.SUNDAY);
++  }
++
++  /** 本月第一天（存储口径）。 */
++  public static LocalDate monthStart(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.withDayOfMonth(1);
++  }
++
++  /** 本月最后一天（存储口径）。 */
++  public static LocalDate monthEnd(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    return storageDate.withDayOfMonth(storageDate.lengthOfMonth());
++  }
++
++  /** 财务季度起始月（1/4/7/10）。 */
++  public static int fiscalStartMonth(LocalDate storageDate) {
++    if (storageDate == null) {
++      return FISCAL_MONTH_1;
++    }
++    int month = storageDate.getMonthValue();
++    if (month >= FISCAL_MONTH_1 && month <= 3) {
++      return FISCAL_MONTH_1;
++    }
++    if (month >= 4 && month <= 6) {
++      return FISCAL_MONTH_2;
++    }
++    if (month >= 7 && month <= 9) {
++      return FISCAL_MONTH_3;
++    }
++    return FISCAL_MONTH_4;
++  }
++
++  /** 判定是否为计费窗口边界（每月 1 日）。 */
++  public static boolean isBillingBoundary(LocalDate storageDate) {
++    return storageDate != null && storageDate.getDayOfMonth() == 1;
++  }
++
++  /** 计算两个存储日期之间的天数（含首尾）。 */
++  public static long inclusiveDays(LocalDate from, LocalDate to) {
++    if (from == null || to == null || to.isBefore(from)) {
++      return 0;
++    }
++    return java.time.temporal.ChronoUnit.DAYS.between(from, to) + 1;
++  }
++
++  /** 渲染对账窗口说明（联调用）。 */
++  public static String windowNote(LocalDate from, LocalDate to) {
++    return "window=" + formatStorage(from) + ".." + formatStorage(to) + ",days=" + inclusiveDays(from, to);
++  }
++
++  /** 展示层：按客户地区解析展示时区（未登记地区回退 UTC，仅展示层使用）。 */
++  public static ZoneId displayZoneOf(String region) {
++    if (region == null || region.isBlank()) {
++      return STORAGE_ZONE;
++    }
++    switch (region.trim().toUpperCase(java.util.Locale.ROOT)) {
++      case "CN":
++        return ZoneId.of(DISPLAY_ZONE_1);
++      case "HK":
++        return ZoneId.of(DISPLAY_ZONE_2);
++      case "JP":
++        return ZoneId.of(DISPLAY_ZONE_3);
++      case "SG":
++        return ZoneId.of(DISPLAY_ZONE_4);
++      case "KR":
++        return ZoneId.of(DISPLAY_ZONE_5);
++      case "UK":
++        return ZoneId.of(DISPLAY_ZONE_6);
++      case "DE":
++        return ZoneId.of(DISPLAY_ZONE_7);
++      case "FR":
++        return ZoneId.of(DISPLAY_ZONE_8);
++      case "US-EAST":
++        return ZoneId.of(DISPLAY_ZONE_9);
++      case "US-CENTRAL":
++        return ZoneId.of(DISPLAY_ZONE_10);
++      case "US-WEST":
++        return ZoneId.of(DISPLAY_ZONE_11);
++      case "AU":
++        return ZoneId.of(DISPLAY_ZONE_12);
++      default:
++        return STORAGE_ZONE;
++    }
++  }
++
++  /** 展示层：按地区渲染今日客户日历日（仅展示层使用）。 */
++  public static LocalDate todayForRegion(String region) {
++    return todayForDisplay(displayZoneOf(region).getId());
++  }
++
++  /** 展示层：按地区与 pattern 渲染存储日期（仅展示层使用）。 */
++  public static String formatForRegion(LocalDate storageDate, String region, String pattern) {
++    return formatForDisplay(storageDate, displayZoneOf(region).getId(), pattern);
++  }
++
++  /** 判定两个存储日期是否落在同一自然月。 */
++  public static boolean sameMonth(LocalDate a, LocalDate b) {
++    if (a == null || b == null) {
++      return false;
++    }
++    return a.getYear() == b.getYear() && a.getMonthValue() == b.getMonthValue();
++  }
++
++  /** 判定两个存储日期是否落在同一财务季度。 */
++  public static boolean sameFiscalQuarter(LocalDate a, LocalDate b) {
++    if (a == null || b == null) {
++      return false;
++    }
++    return a.getYear() == b.getYear() && fiscalStartMonth(a) == fiscalStartMonth(b);
++  }
++
++  /** 计算存储日期所在季度的序号（1–4）。 */
++  public static int quarterOf(LocalDate storageDate) {
++    if (storageDate == null) {
++      return 1;
++    }
++    int month = storageDate.getMonthValue();
++    return (month - 1) / 3 + 1;
++  }
++
++  /** 渲染季度标签（如 2026-Q3）。 */
++  public static String quarterLabel(LocalDate storageDate) {
++    if (storageDate == null) {
++      return "";
++    }
++    return storageDate.getYear() + "-Q" + quarterOf(storageDate);
++  }
++
++  /** 计算存储日期是当年的第几周（ISO 周）。 */
++  public static int isoWeekOf(LocalDate storageDate) {
++    if (storageDate == null) {
++      return 0;
++    }
++    return storageDate.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear());
++  }
++
++  /** 判定是否为周末（存储日历口径）。 */
++  public static boolean isWeekend(LocalDate storageDate) {
++    if (storageDate == null) {
++      return false;
++    }
++    DayOfWeek dow = storageDate.getDayOfWeek();
++    return dow == DayOfWeek.SATURDAY || dow == DayOfWeek.SUNDAY;
++  }
++
++  /** 判定是否为工作日（存储日历口径，不含节假日表）。 */
++  public static boolean isWeekday(LocalDate storageDate) {
++    return !isWeekend(storageDate);
++  }
++
++  /** 顺延到下一个工作日（存储日历口径）。 */
++  public static LocalDate nextWeekday(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    LocalDate cursor = storageDate;
++    for (int i = 0; i < 7 && !isWeekday(cursor); i++) {
++      cursor = cursor.plusDays(1);
++    }
++    return cursor;
++  }
++
++  /** 回退到上一个工作日（存储日历口径）。 */
++  public static LocalDate previousWeekday(LocalDate storageDate) {
++    if (storageDate == null) {
++      return null;
++    }
++    LocalDate cursor = storageDate;
++    for (int i = 0; i < 7 && !isWeekday(cursor); i++) {
++      cursor = cursor.minusDays(1);
++    }
++    return cursor;
++  }
++
++  /** 渲染两口径对照行（存储日 vs 客户日，排障用）。 */
++  public static String dualCalendarNote(LocalDate storageDate, String region) {
++    LocalDate display = toDisplayDate(storageDate, displayZoneOf(region).getId());
++    return "storage=" + formatStorage(storageDate) + ",display=" + formatStorage(display) + ",region=" + region;
++  }
++
++  /** 归一化存储日期：null 回退今日（存储口径）。 */
++  public static LocalDate orToday(LocalDate storageDate) {
++    return storageDate == null ? today() : storageDate;
++  }
++
++  /** 判定存储日期是否为今天（存储口径）。 */
++  public static boolean isToday(LocalDate storageDate) {
++    return storageDate != null && storageDate.equals(today());
++  }
+ }

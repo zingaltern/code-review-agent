@@ -77,6 +77,13 @@ jobs:
             "https://github.com/${{ github.repository }}/releases/download/v0.3.0/dataset-snapshots-m3.tar"
           tar -xf /tmp/dataset-snapshots-m3.tar -C cra-eval/dataset
           find cra-eval/dataset -name repo_snapshot.tgz | wc -l
+      - name: 重建合成 context 用例快照（含 .git 三提交历史；tgz 不入 git，06§3）
+        run: |
+          for d in cra-eval/dataset/adversarial/adv-ctx-*; do
+            if [ ! -f "$d/repo_snapshot.tgz" ] && [ -f "$d/build_snapshot.sh" ]; then
+              (cd "$d" && bash build_snapshot.sh)
+            fi
+          done
       - name: 评测（集合/k/depth/tier 可配：L2 复核 = set=l2,k=2,quick,l2；L3 全量 = set=all,k=3,standard,l3）
         if: inputs.runs == 'all'
         env:

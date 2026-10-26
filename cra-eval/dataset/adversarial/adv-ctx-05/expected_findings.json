@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/stats/OrderStatsDto.java",
+      "category": "context",
+      "keywords": [
+        "金额",
+        "字段"
+      ],
+      "note": "diff 本身无缺陷（DTO 用 double 是常见写法），但违反 REVIEW.md Sniff tests：对外金额字段必须 BigDecimal、scale=2、禁止 double（INC-2176/矛盾 commit 771d619d 的 diff 内含 MoneyFormat 标度约束注释）——期望 CrossChecker 按模式 B 执行嗅探集检出 category=context；关键词取中文行为词（金额/字段，M2 教训：类型名/英文词对中文正文系统性漏配）",
+      "line": 13
+    }
+  ],
+  "negative_baits": []
+}

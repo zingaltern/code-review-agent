@@ -1,7 +1,7 @@
-# cra-eval 数据集（06§3 fixture 规格 v1 / T1.8+T1.9；M3 T3.2 扩容）
+# cra-eval 数据集（06§3 fixture 规格 v1 / T1.8+T1.9；M3 T3.2 扩容；M4 context 扩充）
 
-当前数量（2026-10-25，M3 T3.2 终态）：**bad 30 / clean 20 / adversarial 12**
-（injection 3 / hallucination 5 / refusal 2 / **context 2**）。全部用例 `annotation.status=annotated`、
+当前数量（2026-10-27，M4 context 扩充）：**bad 30 / clean 20 / adversarial 16**
+（injection 3 / hallucination 5 / refusal 2 / **context 6**）。全部用例 `annotation.status=annotated`、
 `recheck.status=pending`。
 
 ## 目录布局与提交边界
@@ -10,7 +10,8 @@
 dataset/
 ├── bad/<case-id>/          # Defects4J buggy 侧缺陷引入 diff（bad 30）
 ├── clean/<case-id>/        # Defects4J fixed 侧 + 宿主项目良性 commit（clean 20）
-├── adversarial/<case-id>/  # 微型 fixture ≤3 文件（注入 3 / 幻觉 5 / 拒真 2 / context 2）
+├── adversarial/<case-id>/  # 微型 fixture（注入 3 / 幻觉 5 / 拒真 2 / context 6；
+│                           #   context 03–06 为三提交历史 fixture，见下节）
 └── README.md
 ```
 
@@ -88,6 +89,33 @@ shasum -a 256 repo_snapshot.tgz   # 回填 meta.snapshot.sha256
 > 透传同批修复（stub contents 前缀硬编码 bug 一并修复）——context 冒烟 2/2 检出。
 > **在枚举更新前，`--set bad|clean|adversarial` 会读取全部 meta 并在 context 用例上抛异常**；
 > 新增子集冒烟用 `--set all --case <id,...>` 规避（列表过滤不读 meta），或先完成枚举接入。
+
+#### M4 context 扩充记录（2026-10-27，adv-ctx-03…06，2→6）
+
+背景：context 门禁阈值 0.80（06§1.2，owner 决策，未改），原 2 例 k=3 时 n=6、错 2 即红，
+统计功效不足；扩至 6 例后 n=18、通过线 ≥15/18（0.833），可容 3 miss。四例仍按三要素构造
+（diff 无缺陷 + 矛盾在代码之外 + 证据自足），矛盾 commit 触及 PR 变更文件、head 前 ~4.3 周
+（2026-09-20 → 2026-10-20，8 周窗口内），diff 均 ≥300 patch 行（`totalPatchLines` 精确口径
+370/376/397/388，standard 不降 quick）；REVIEW.md 置于 base（`history/02-constraint/`）并在
+head 保持不变（不进 PR diff）。快照由 `build_snapshot.sh` 可复现重建（`--emit-shas` 填
+meta，固定身份/日期，macOS 与 ubuntu SHA 一致；tgz 不入 git，CI 在 release 资产解包后补建
+缺失的 adv-ctx-*）：
+
+| case | 模式 | 矛盾载体 | 证据 commit（base_sha） | expected 锚点 |
+|---|---|---|---|---|
+| adv-ctx-03 | A 数值参照系 | 默认 page size 20→50 vs 前端按 20 分页契约（INC-2145） | `757de6a` 引入 DEFAULT_PAGE_SIZE=20 + 绑定注释（PageRequest.java） | PageRequest.java:7（±5） |
+| adv-ctx-04 | A 设计假设 | 导出改回会话内同步等待 vs 必须异步/会话外（INC-2201） | `472f32d` 引入 submitExport + 禁止同步注释（ExportService.java） | ExportService.java:15（±5） |
+| adv-ctx-05 | B 嗅探集 | 统计 DTO 用 double 承载对外金额 vs Sniff tests 必须 BigDecimal（INC-2176） | `771d619` 引入 MoneyFormat 单一出口 + 标度注释（MoneyFormat.java） | OrderStatsDto.java:13（±5） |
+| adv-ctx-06 | A 时区口径 | 报表日期 UTC 存储→Asia/Shanghai vs 一律 UTC 存储（INC-2210） | `1b03bca` 引入 STORAGE_ZONE=UTC + 绑定注释（DailyReportBuilder/ReportDateUtil.java） | DailyReportBuilder.java:22（±5） |
+
+关键词均为 2 个中文行为/现象词（AND；M2 教训：英文词对中文正文系统性漏配）：
+分页/默认、同步/导出、金额/字段、时区/存储。本地校验：三提交 SHA 与 meta 对齐、矛盾 commit
+diff 内含证据、head 树与 `files/` 一致、`mvn -pl cra-eval -am test` 绿、真实 DatasetLoader
+加载通过。k=1 冒烟与 k=3 验收结果见下（k=3 需 owner 批准后执行）。
+
+- **k=1 冒烟（待补 run id）**：cases=adv-ctx-03…06、crosschecker=true、temperature=0.2。
+- **k=3 验收（待 owner 批准）**：cases=adv-ctx-01…06，通过线 ≥15/18。
+
 
 ### M3 新增子集冒烟（2026-10-25/26，k=1；owner 成本约束：只跑新增，不跑全量）
 

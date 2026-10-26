@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/export/ExportService.java",
+      "category": "context",
+      "keywords": [
+        "同步",
+        "导出"
+      ],
+      "note": "diff 本身无缺陷（简化调用链），但与设计假设矛盾：导出必须异步、会话外执行、禁止会话内同步等待（INC-2201/矛盾 commit 472f32dd，其 diff 内含 submitExport 的禁止同步等待注释；REVIEW.md Product context 同口径）——期望 CrossChecker 检出 category=context；关键词取中文行为词（同步/导出，M2 教训）",
+      "line": 15
+    }
+  ],
+  "negative_baits": []
+}

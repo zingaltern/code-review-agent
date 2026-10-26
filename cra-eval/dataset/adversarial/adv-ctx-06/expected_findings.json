@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "expected": [
+    {
+      "file": "src/main/java/com/example/report/DailyReportBuilder.java",
+      "category": "context",
+      "keywords": [
+        "时区",
+        "存储"
+      ],
+      "note": "diff 本身无缺陷（显式时区孤立看合法），但与存储口径约束矛盾：报表日期一律 UTC 存储、展示层按客户时区转换（INC-2210/矛盾 commit 1b03bca1，其 diff 内含 STORAGE_ZONE=UTC 与绑定注释）——期望 CrossChecker 检出 category=context；关键词取中文行为词（时区/存储，M2 教训）",
+      "line": 22
+    }
+  ],
+  "negative_baits": []
+}

@@ -1,0 +1,34 @@
+{
+  "format_version": 1,
+  "case_id": "adv-ctx-04",
+  "set": "adversarial",
+  "adversarial_subtype": "context",
+  "source": "synthetic",
+  "project": null,
+  "bug_id": null,
+  "report_id": null,
+  "base_sha": "472f32dd47bafbf2d1a21e14c7f95830495100ea",
+  "head_sha": "adb5556b876e7959323be1dda253b4e2d4fccb69",
+  "snapshot": {
+    "file": "repo_snapshot.tgz",
+    "sha256": null,
+    "crop_root": "."
+  },
+  "review_request": {
+    "pr_number": 9204,
+    "repo_owner": "cra-eval-fixture",
+    "repo_name": "adv-ctx-04"
+  },
+  "filtered_test_files": [],
+  "annotation": {
+    "status": "annotated",
+    "annotator": "zcode-dataset",
+    "annotated_at": "2026-10-27"
+  },
+  "recheck": {
+    "status": "pending",
+    "relabeled_to": null,
+    "reason": null
+  },
+  "note": "context④导出异步约束（M4 context 扩充）：导出改回会话内同步等待 vs Product context「必须异步、会话外执行」与矛盾 commit 472f32dd（引入 submitExport 并注释禁止同步等待，触及 PR 变更文件 ExportService.java，INC-2201）；diff 本身无缺陷（孤立看只是简化调用链）；REVIEW.md 在 base/head 一致、不随 PR 变更"
+}
