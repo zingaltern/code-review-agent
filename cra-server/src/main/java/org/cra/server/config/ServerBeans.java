@@ -124,7 +124,8 @@ public class ServerBeans {
             1_000,
             8_000,
             config.parsedTemperature(),
-            extraHeadersFor(config.llmBaseUrl())));
+            extraHeadersFor(config.llmBaseUrl()),
+            reasoningEffortFor(config.llmBaseUrl())));
   }
 
   /**
@@ -139,6 +140,17 @@ public class ServerBeans {
       return java.util.Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());
     }
     return java.util.Map.of();
+  }
+
+  /**
+   * 推理力度（v1.3.2 opencode 适配）：与 CLI 同语义——opencode 端点自动 none。reasoning token 计入 max_tokens，评审任务的 1–2k
+   * 输出预算会被推理吃光（M3 冒烟实测 budget_exceeded）。
+   *
+   * @param baseUrl LLM 端点根地址
+   * @return "none" 或 null（不传）
+   */
+  private static String reasoningEffortFor(String baseUrl) {
+    return baseUrl != null && baseUrl.contains("opencode.ai") ? "none" : null;
   }
 
   /**
