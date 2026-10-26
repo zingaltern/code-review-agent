@@ -147,6 +147,7 @@ public record EvalReport(
       @JsonProperty("completed") long completed,
       @JsonProperty("failed") long failed,
       @JsonProperty("detection") ProportionMetric detection,
+      @JsonProperty("bug_only_detection") ProportionMetric bugOnlyDetection,
       @JsonProperty("rejection") ProportionMetric rejection,
       @JsonProperty("mean_false_positives") Double meanFalsePositives,
       @JsonProperty("invariant_violations") Integer invariantViolations,
@@ -233,6 +234,7 @@ public record EvalReport(
       @JsonProperty("run_status") String runStatus,
       @JsonProperty("completed") boolean completed,
       @JsonProperty("detected") boolean detected,
+      @JsonProperty("bug_only_detected") boolean bugOnlyDetected,
       @JsonProperty("matched_expected") int matchedExpected,
       @JsonProperty("total_expected") int totalExpected,
       @JsonProperty("published_findings") int publishedFindings,
@@ -271,6 +273,7 @@ public record EvalReport(
           runStatus,
           completed,
           detected,
+          false, // 兼容旧报告：无 bug-only 字段
           matchedExpected,
           totalExpected,
           publishedFindings,

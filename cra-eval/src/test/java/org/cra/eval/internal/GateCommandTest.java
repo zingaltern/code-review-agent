@@ -34,6 +34,7 @@ class GateCommandTest {
             null,
             null,
             null,
+            null,
             false,
             List.of(),
             new EvalReport.RunMetrics(0, 0, 0, 0, 0, 0, 0));

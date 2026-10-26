@@ -74,6 +74,15 @@ public final class ReportWriter {
             d.wilsonLow(),
             d.wilsonHigh());
       }
+      if (s.bugOnlyDetection() != null && !Double.isNaN(s.bugOnlyDetection().rate())) {
+        EvalReport.ProportionMetric b = s.bugOnlyDetection();
+        OUT.printf(
+            Locale.ROOT,
+            "bug-only 检出 %d/%d = %.3f（观察指标：仅 category=bug 的 expected 命中；test OR 条目不计入，不进任何门禁）%n",
+            b.numerator(),
+            b.denominator(),
+            b.rate());
+      }
       if (s.rejection() != null && !Double.isNaN(s.rejection().rate())) {
         EvalReport.ProportionMetric r = s.rejection();
         OUT.printf(
