@@ -1,0 +1,11 @@
+.git
+.github
+*/target
+!cra-server/target
+!cra-server/target/cra-server-0.1.0-exec.jar
+target
+cra-eval-work*
+cra-eval/dataset
+docs
+eval
+README.md

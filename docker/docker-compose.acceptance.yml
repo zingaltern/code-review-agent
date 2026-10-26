@@ -1,0 +1,40 @@
+# M4b 端到端验收 overlay：在 docker-compose.yml 之上加入 GitHub/LLM stub。
+# 用法（仅本地演示）：
+#   cd docker && docker compose -f docker-compose.yml -f docker-compose.acceptance.yml up --build -d
+# 生产不要使用本文件。
+name: cra-server
+
+services:
+  stub:
+    image: python:3.12-alpine
+    command: ["python", "/app/stub.py"]
+    volumes:
+      - ./acceptance:/app:ro
+    expose:
+      - "18080"
+      - "18081"
+    ports:
+      - "18080:18080"
+      - "18081:18081"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:18080/user')\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runtime
+    depends_on:
+      stub:
+        condition: service_healthy
+    environment:
+      CRA_GITHUB_API_BASE: http://stub:18080
+      CRA_GITHUB_TOKEN: stub-token
+      CRA_LLM_API_KEY: stub-key
+      CRA_LLM_BASE_URL: http://stub:18081/v1
+      CRA_LLM_MODEL: stub-model
+      CRA_LLM_MODEL_STRONG: stub-model
+      CRA_LLM_MODEL_LIGHT: stub-model
