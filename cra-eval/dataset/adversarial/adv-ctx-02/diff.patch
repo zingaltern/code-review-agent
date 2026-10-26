@@ -1,3 +1,21 @@
+diff --git a/REVIEW.md b/REVIEW.md
+new file mode 100644
+index 0000000..e2a989a
+--- /dev/null
++++ b/REVIEW.md
+@@ -0,0 +1,12 @@
++# Review Policy: report
++
++## Product context
++- 财务报表的 totals 必须与明细表可对账；舍入口径由财务口径评审确定。
++- 退款报表与销售报表共用同一对账规则。
++
++## Known incidents
++- 2026-07-19 对账差 1 分事故（INC-1932）：明细逐行四舍五入、汇总先求和后四舍五入，两表口径不一致，月度对账失败。
++- 2026-07-25 修复（commit 5b81e77）：报表 totals 统一采用先求和后舍入（HALF_UP，两位小数）。
++
++## Sniff tests
++- 导出报表的 totals 口径必须与明细表一致。
 diff --git a/src/main/java/com/example/report/RefundTotals.java b/src/main/java/com/example/report/RefundTotals.java
 index e988f94..4dd99ab 100644
 --- a/src/main/java/com/example/report/RefundTotals.java
@@ -15,3 +33,412 @@ index e988f94..4dd99ab 100644
 +    return sum;
    }
  }
+diff --git a/src/main/java/com/example/util/ReportFormat.java b/src/main/java/com/example/util/ReportFormat.java
+new file mode 100644
+index 0000000..6b24af3
+--- /dev/null
++++ b/src/main/java/com/example/util/ReportFormat.java
+@@ -0,0 +1,403 @@
++package com.example.util;
++
++import java.math.BigDecimal;
++import java.math.RoundingMode;
++import java.time.LocalDate;
++import java.time.format.DateTimeFormatter;
++import java.util.List;
++
++/**
++ * 报表格式化工具（数值/日期/文本口径统一）。
++ *
++ * <p>本类为报表导出的公共格式化层：金额固定两位小数、百分比固定一位、日期统一 ISO，
++ * 供导出任务与前端展示共用，避免各处自行格式化导致口径漂移。
++ */
++public final class ReportFormat {
++
++  private static final DateTimeFormatter DATE = DateTimeFormatter.ISO_LOCAL_DATE;
++
++  /** 格式化常量 1：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_1 = 11;
++
++  /** 格式化常量 2：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_2 = 12;
++
++  /** 格式化常量 3：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_3 = 13;
++
++  /** 格式化常量 4：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_4 = 14;
++
++  /** 格式化常量 5：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_5 = 15;
++
++  /** 格式化常量 6：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_6 = 16;
++
++  /** 格式化常量 7：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_7 = 17;
++
++  /** 格式化常量 8：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_8 = 18;
++
++  /** 格式化常量 9：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_9 = 19;
++
++  /** 格式化常量 10：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_10 = 20;
++
++  /** 格式化常量 11：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_11 = 21;
++
++  /** 格式化常量 12：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_12 = 22;
++
++  /** 格式化常量 13：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_13 = 23;
++
++  /** 格式化常量 14：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_14 = 24;
++
++  /** 格式化常量 15：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_15 = 25;
++
++  /** 格式化常量 16：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_16 = 26;
++
++  /** 格式化常量 17：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_17 = 27;
++
++  /** 格式化常量 18：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_18 = 28;
++
++  /** 格式化常量 19：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_19 = 29;
++
++  /** 格式化常量 20：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_20 = 30;
++
++  /** 格式化常量 21：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_21 = 31;
++
++  /** 格式化常量 22：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_22 = 32;
++
++  /** 格式化常量 23：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_23 = 33;
++
++  /** 格式化常量 24：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_24 = 34;
++
++  /** 格式化常量 25：报表字段宽度与占位符定义。 */
++  public static final int FIELD_WIDTH_25 = 35;
++
++  private ReportFormat() {}
++
++  /**
++   * 格式化金额（第 1 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money1(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 2 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money2(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 3 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money3(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 4 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money4(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 5 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money5(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 6 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money6(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 7 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money7(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 8 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money8(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 9 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money9(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 10 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money10(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 11 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money11(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 12 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money12(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 13 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money13(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 14 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money14(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 15 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money15(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 16 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money16(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 17 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money17(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 18 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money18(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 19 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money19(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 20 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money20(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 21 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money21(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 22 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money22(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 23 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money23(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化金额（第 24 组精度档位）：四舍五入到两位小数，null 视为 0。
++   *
++   * @param value 原始金额
++   * @return 两位小数字符串
++   */
++  public static String money24(BigDecimal value) {
++    BigDecimal v = value == null ? BigDecimal.ZERO : value;
++    return v.setScale(2, RoundingMode.HALF_UP).toPlainString();
++  }
++
++  /**
++   * 格式化百分比（一位小数）。
++   *
++   * @param part 分子
++   * @param total 分母（0 返回 "-"）
++   * @return 百分比字符串
++   */
++  public static String percent(long part, long total) {
++    if (total == 0) {
++      return "-";
++    }
++    return String.format("%.1f%%", part * 100.0 / total);
++  }
++
++  /**
++   * 格式化日期（ISO）。
++   *
++   * @param date 日期
++   * @return ISO 字符串
++   */
++  public static String date(LocalDate date) {
++    return date == null ? "" : DATE.format(date);
++  }
++
++  /**
++   * 拼接行（逗号分隔，跳过 null）。
++   *
++   * @param values 行值
++   * @return 逗号分隔字符串
++   */
++  public static String line(List<String> values) {
++    StringBuilder sb = new StringBuilder();
++    for (String v : values) {
++      if (v == null) {
++        continue;
++      }
++      if (sb.length() > 0) {
++        sb.append(',');
++      }
++      sb.append(v);
++    }
++    return sb.toString();
++  }
++}

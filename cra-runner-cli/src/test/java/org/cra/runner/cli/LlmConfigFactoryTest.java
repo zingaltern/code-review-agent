@@ -80,6 +80,9 @@ class LlmConfigFactoryTest {
 
     var plain = new LlmConfigFactoryTestSupport().createWithBaseUrl("https://api.deepseek.com");
     org.assertj.core.api.Assertions.assertThat(plain.extraHeaders()).isEmpty();
+    // opencode 端点自动关闭 thinking（reasoning token 计入 max_tokens）
+    org.assertj.core.api.Assertions.assertThat(gateway.reasoningEffort()).isEqualTo("none");
+    org.assertj.core.api.Assertions.assertThat(plain.reasoningEffort()).isNull();
   }
 
   @Test

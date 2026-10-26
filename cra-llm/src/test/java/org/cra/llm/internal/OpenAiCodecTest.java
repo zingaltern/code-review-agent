@@ -18,7 +18,10 @@ class OpenAiCodecTest {
   void jsonModeCarriesResponseFormat() throws Exception {
     String body =
         OpenAiCodec.encodeRequest(
-            "m1", new LlmRequest("sys", "user", ResponseMode.JSON, 500, "general-reviewer"), null);
+            "m1",
+            new LlmRequest("sys", "user", ResponseMode.JSON, 500, "general-reviewer"),
+            null,
+            null);
     JsonNode root = MAPPER.readTree(body);
     assertThat(root.path("response_format").path("type").asText()).isEqualTo("json_object");
     assertThat(root.path("max_tokens").asInt()).isEqualTo(500);
@@ -32,13 +35,13 @@ class OpenAiCodecTest {
     // 05§5 CRA_LLM_TEMPERATURE：配置值进请求体；null 时不传（沿用 provider 默认）
     String withTemp =
         OpenAiCodec.encodeRequest(
-            "m1", new LlmRequest("sys", "user", ResponseMode.JSON, 100, "x"), 0.2);
+            "m1", new LlmRequest("sys", "user", ResponseMode.JSON, 100, "x"), 0.2, null);
     JsonNode root = MAPPER.readTree(withTemp);
     assertThat(root.path("temperature").asDouble()).isEqualTo(0.2);
 
     String without =
         OpenAiCodec.encodeRequest(
-            "m1", new LlmRequest("sys", "user", ResponseMode.JSON, 100, "x"), null);
+            "m1", new LlmRequest("sys", "user", ResponseMode.JSON, 100, "x"), null, null);
     assertThat(MAPPER.readTree(without).has("temperature")).isFalse();
   }
 
@@ -46,7 +49,7 @@ class OpenAiCodecTest {
   void textModeOmitsResponseFormat() throws Exception {
     String body =
         OpenAiCodec.encodeRequest(
-            "m1", new LlmRequest("sys", "user", ResponseMode.TEXT, null, "x"), null);
+            "m1", new LlmRequest("sys", "user", ResponseMode.TEXT, null, "x"), null, null);
     JsonNode root = MAPPER.readTree(body);
     assertThat(root.has("response_format")).isFalse();
     assertThat(root.has("max_tokens")).isFalse();
