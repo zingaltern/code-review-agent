@@ -124,6 +124,8 @@ Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容
 | `review --local --security-block` | 存在 confirmed 安全 finding 时返回退出码 3 |
 | `review --local --crosschecker --crosschecker-modes assumption,sniff` | 启用 CrossChecker 上下文核对；仅 standard/deep 触发，默认关闭 |
 | `review --repo owner/name --pr N --base SHA --head SHA` | CI 模式：评审指定 PR 并回帖 |
+| `review --push --repo owner/name --head SHA` | push 直推评审（M4c）：载体是 commit comment，base 自动解析为上一完成 commit |
+| `sweep --repo owner/name --since 30d --max-prs 10` | 夜间存量评审（M4d）：批量评审历史 PR，产出 issue（逐 PR + 汇总） |
 | `review --local --ledger-db ~/.cra/ledger.db` | 指定本地账本路径 |
 
 完整参数、退出码与评测命令见 [docs/05 §3](docs/05-data-and-integration.md)。
@@ -151,7 +153,7 @@ Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容
 | M1 工程化与账本 | 完成（v0.2.0） |
 | M2 隔离审查 + 独立复核 + 本地 pre-PR | 完成（v0.3.0）；L3 验收 2 部分通过，零发布缺口经 owner 裁决接受 |
 | M3 评测闭环 + 双验证者投票 | 工程交付完成；**标注质检校准后 L3 召回 78/90 = 86.7%（Wilson 下界 0.7813 ≥ 0.70，保守离线复核 74/90 亦达标）、零发布样本级全零 0/30 → 验收 2 通过**；context 检出 0/6 为结构性缺口（standard 自动降档，待数据层修复）；双验证者投票按数据门槛未开启 |
-| M4 服务化与扩展 | M4f-lite CrossChecker 已落地；其余子项按需排期 |
+| M4 服务化与扩展 | **M4c push 直推（commit comment 载体 + 幂等）与 M4d 夜间存量（issue 载体 + 汇总）已落地**；M4f-lite CrossChecker 已落地；其余子项按需排期 |
 
 验收记录、口径裁决与后续任务见 [docs/07](docs/07-roadmap.md)。
 
@@ -160,6 +162,8 @@ Java 17 · Spring Boot 3.x（仅 DI/配置）· Maven 多模块 · OpenAI 兼容
 - 冲突 PR 不触发 `pull_request` workflow（GitHub 平台行为，冲突解决后恢复）。
 - fork PR 无法读取 secrets；多协作者场景需要引入 App token。
 - draft PR 会被 workflow 过滤，不进入评审。
+- push 形态只评审 `branches` 过滤内的直推（默认 `main`），merge commit 与 bot 自己的提交不触发；commit comment 无行级锚，全部 finding 以详情进正文（docs/05 §2.4）。
+- 夜间存量默认 `quick` 档、最多 10 个 PR/次；已评审过的 head commit 不会重复产 issue（docs/05 §2.5）。
 - CrossChecker 默认关闭，且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决见 [docs/07](docs/07-roadmap.md)。
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。
 

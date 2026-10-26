@@ -1,6 +1,7 @@
 # 11 · 扩展性契约
 
-> 文档版本：v1.1（2026-10-25，v1.0 入库后协调修订：§3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制，消除同批文档间的定义冲突）
+> 文档版本：v1.2（2026-10-26，M4c/M4d 载体扩展登记：Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行补 commit-comment 与 issue 载体及键控方法；§7 对应两项转为"已登记并实现"）
+> v1.1（2026-10-25，v1.0 入库后协调修订：§3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制，消除同批文档间的定义冲突）
 > 前置阅读：`02-architecture-design.md`、`03-multi-agent-design.md`、`04-context-and-prompt-design.md`、`05-data-and-integration.md`、`07-roadmap.md`
 > 定位：本文是本项目扩展点的**唯一登记表**——目标一句话："想接新平台 / 新角色时，照 checklist 做就不会漏"。
 > **诚实声明**：这是个人项目，无对外 API 冻结承诺，不发布 SDK。本契约管的是**未来的自己与开发 agent 在接扩展点时怎么不搞坏既有机制**（幂等 / 收敛 / 验证 / 门禁）。本文不引入新机制，全部内容汇总自仓内既有设计（02/03/04/05/06/07）。
@@ -22,10 +23,11 @@
 
 | 扩展点 | 接口或机制 | 稳定性 | 当前实现 | 新增实现的最小集 |
 |---|---|---|---|---|
-| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3） | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；接入走 §6 checklist |
-| 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
-| 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1） |
-| 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态），按部署形态选择（02§5） | 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植** |
+| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3）；**M4c/M4d 载体扩展已落地**（commit comment / issue） | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；**M4c/M4d 载体（05§2.4/§2.5）**：`postCommitReview` + `postIssueReview` 两个 `default` 方法——默认抛 `UnsupportedOperationException`（不可得显式拒绝，§4 第 5 条），平台不支持 push/夜间形态时不得静默丢发布；接入走 §6 checklist |
+| 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法）；**M4c/M4d 账本读侧**（commit comment / issue） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；**载体账本扩展（05§1.3）**：`fetchCommitBotComments` / `fetchIssueBotComments` / `listBotIssues` 三个 `default` 方法——前两者默认显式拒绝（静默空账本会导致重复发布），`listBotIssues` 默认空列表（不可得语义）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
+| 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1）；**M4c：`firstParentChain`**（default 空列表 = 不可得，push 基线解析据此要求显式 `--base`） |
+| 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态），按部署形态选择（02§5）；**M4c/M4d 键控扩展**：`ReviewKey`（repo + 形态 + (pr\|commit)）| 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植**；键控方法以 default 加入（05§1.3 v1.4），无 PR 载体粒度 = 载体评论级 |
+
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |
 | Prompt 模板 | classpath 资源 + 版本记录（04§4） | 演进 | `cra-agents/src/main/resources/prompts/` 目录树（04§4） | 新模板落对应子目录，mustache 占位符 + 引用 shared 三件套 + UNTRUSTED 定界（04§3.3）；`prompt_template_versions` 与 run 关联（05§1.2）；改动必过评测回归（06§1.2、04§2.4） |
 | LLM 模型路由 | `application.yml` 三档配置（05§5） | 演进（配置级） | standard / strong / light + fallback-chain + per-model RPM（05§5） | **无代码改动**：配置增条目即可；换模型家族属"模型改动"，触发 L2 评测回归（04§2.4） |
@@ -119,13 +121,13 @@ grep "context" 应命中并核对：
 |---|---|---|
 | M4a 风险分级建议 | 编排内部 + Prompt 模板（演进） | 聚合与 Summary 逻辑属编排内部（§2 暂不开放）；建议输出绑定 commit_sha，复用账本 DONE / 指纹的 commit 绑定语义（07§5） |
 | M4b webhook 服务化 | 启用既有扩展点 | ReviewLedger PG 形态（02§5 三形态表）；cra-server 只是新壳——core 全部逻辑与形态无关（02§5），CLI 与 server 同构 |
-| M4c push 模式 | 需新增扩展点 | 触发层 push 事件 + commit-comment 发布载体：`postReview` 现签名面向 PR review，按 §4 第 1 条以 default 方法扩展，"不可得"语义按 §4 第 5 条定义 |
-| M4d 夜间存量评审 | 需新增扩展点（发布载体）+ 纯配置 | 产出 issue 而非 PR comment（07§5、06§4）；评审流水线与账本复用，仅触发与发布形态变化 |
+| M4c push 模式 | 已登记并实现（§2 载体扩展） | 触发层 push 事件 + commit-comment 发布载体：`postCommitReview`（default，不可得显式拒绝）+ `ReviewKey(repo, commit)` 键控 + `LocalRepoContext.firstParentChain` 基线解析（05§1.3/§2.4） |
+| M4d 夜间存量评审 | 已登记并实现（§2 载体扩展） | 产出 issue 而非 PR comment（07§5、06§4）：`postIssueReview` + `fetchIssueBotComments`/`listBotIssues`；评审流水线与账本复用，仅触发与发布形态变化（05§2.5） |
 | M4e GitLab / Gerrit 适配 | 启用既有扩展点 | `GitPlatformAdapter` 新实现，走 §6 checklist 全部 7 步；同项的"语义索引 / 跨文件上下文"属 ContextAssembler 内部（§2） |
 | M4f-lite CrossChecker | 启用既有扩展点 + 纯配置 | 新角色走 §5 checklist；数据前提 = T1.4 REVIEW.md 新段落解析（07§5）；开关 = `crosschecker.enabled`（05§5），默认关闭不动 Standard 基线算术（04§2.2） |
 | M4f-full 事件史管道 | 需新增扩展点 | 产品事件史采集是独立数据面（依赖 M4b 定时任务，07§5），不在任何现有扩展点内 |
 
-读法【强制】：标"需新增扩展点"的三项（M4c / M4d / M4f-full）动工前必须先修订 §2 总表登记（§1 第 1 条）；"启用既有"与"纯配置"项不得顺手改内部接缝——改了即触发 §3 演进变更程序。
+读法【强制】：标"需新增扩展点"的项动工前必须先修订 §2 总表登记（§1 第 1 条）——M4c/M4d 已于 2026-10-26 登记并实现（载体方法入 §2 Git 平台适配 / 账本取数端口两行），剩余未登记者为 M4f-full；"启用既有"与"纯配置"项不得顺手改内部接缝——改了即触发 §3 演进变更程序。
 
 ## 8. 反模式
 
@@ -149,3 +151,5 @@ grep "context" 应命中并核对：
 | 版本 | 日期 | 内容 |
 |---|---|---|
 | v1.0 | 2026-10-25 | 首版：7 类开放扩展点 + 2 处内部接缝登记；三级稳定性；SPI 演进规则；角色 / 平台接入 checklist（各含 DoD 与传播地图）；M4 可选池映射 |
+| v1.1 | 2026-10-25 | §3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制 |
+| v1.2 | 2026-10-26 | M4c/M4d 载体扩展登记（Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行）；§7 两项转为"已登记并实现" |
