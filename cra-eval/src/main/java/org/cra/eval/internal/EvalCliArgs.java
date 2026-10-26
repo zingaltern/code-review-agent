@@ -55,16 +55,28 @@ public final class EvalCliArgs {
       Path fixture, String action, String toSet, String annotator, String reason) {}
 
   /**
-   * verify 命令参数（T3.3：CI 校验本地 L2 报告）。
+   * verify 命令参数（T3.3：CI 校验本地 L2 报告；M4b 增服务端签名校验）。
    *
    * @param report 报告 JSON 路径
-   * @param sha256 期望哈希（可与 sha256File 二选一/同时给）
+   * @param sha256 期望哈希（与 sha256File/signature 至少给一个）
    * @param sha256File 哈希文件路径
    * @param tier 要求档位（可空）
    * @param expectCommit 要求报告 commit（CI 传 PR head）
+   * @param signature 服务端签名信封路径（可空；04§2.4 M4b）
+   * @param signingKeyEnv 读取 HMAC 密钥的环境变量名（可空 = CRA_REPORT_SIGNING_KEY）
+   * @param signingKeyFile HMAC 密钥文件（可空；与 signingKeyEnv 二选一）
+   * @param signingKeyId 要求签名信封的 key_id（可空 = 不校验）
    */
   public record VerifyArgs(
-      Path report, String sha256, Path sha256File, String tier, String expectCommit) {}
+      Path report,
+      String sha256,
+      Path sha256File,
+      String tier,
+      String expectCommit,
+      Path signature,
+      String signingKeyEnv,
+      Path signingKeyFile,
+      String signingKeyId) {}
 
   /**
    * gate 命令参数（T3.1：对已有报告离线重判，不重跑 LLM）。
