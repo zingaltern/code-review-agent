@@ -43,7 +43,7 @@
 
 **合计 ≈ 305k in / 24k out ≈ 330k**——占 500k 预算的 **66%**，位于 70% 降档档位之下（v1.2.1 校准：v1.2 曾按 400k 计为 82.5%，恰好坐在 80% 截断档之上，会使每个标准 PR 例行触发 top-10 截断、`suppressed_by_truncation>0` 常态报警——护栏"狼来了"；修法为预算上调至 500k + 阶梯重校 70%/85%，02§4.4）。大 diff 与复杂 PR 的超预算场景仍由阶梯兜底。对照 v1.0 的错误：按"base+head 全文总是注入 + 验证上下文与 reviewer 同级或更全"，同一 PR 仅验证段就需要 12×2×8k=192k，超过 v1.0 示例 run 的全部输入预算——该算术不可行，已废弃。
 
-**CrossChecker 增量（v1.3.1 补，M4f 触发时才计入）**：1 次调用 ≈ 14k in（diff 精简视图 8k + 变更史 4k + 产品段 2k）/ 1.5k out；其候选的 context 类验证走分型 brief（§1 L5），每文件批次增量 ≤2k。**触发时 run 总增量 ≈20k（330k → ≈350k，70%）**——恰在降档线附近，故 M4f 开启的仓库建议同步上调预算或降一档视角；默认关闭时不改变 Standard 基线算术。
+**CrossChecker 增量（v1.3.1 补，M4f 触发时才计入；v1.3.2 按实现校准）**：1 次调用 ≤16k in（diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k；实测 ≈12.6k = diff 7.2k + 变更史 2.7k + 产品段 1.8k + 提示余量）/ ≤4k out（v1.3.2：1.5k→4k，`8a5c9de`）；其候选的 context 类验证走分型 brief（§1 L5），每文件批次增量 ≤2k。**触发时 run 总增量：按预算上限 ≈22k（16k in + 4k out + 2k 分型 brief；330k → ≈352k，70.4%，已越 70% 降档线）；按实测输入 ≈18.6k（12.6k + 4k + 2k；≈349k，69.7%，恰在线上）**——故 M4f 开启的仓库建议同步上调预算或降一档视角；默认关闭时不改变 Standard 基线算术。（2026-10-27 修订：原按 14k in / 1.5k out 计的 ≈20k / 70% 为文档估算，预算口径与实测值以本行为准。）
 
 **大 PR 降档**：>2k diff 行 → 窗口 ±15、视角降 1、验证 top-10 候选；>8k 行 → priority_paths only + 覆盖声明。
 
@@ -56,8 +56,10 @@
 | 级 | 触发 | 范围 | k | 估算成本 | 时长 | 何处跑 |
 |---|---|---|---|---|---|---|
 | L1 快检 | 每个 PR（含 prompt 改动 PR） | 对抗集**微型 fixture** 子集（注入 3 + 幻觉 2，单用例 ≤3 文件，~40k/用例） | 1 | ≈200k | ~3min | CI 内 |
-| L2 标准 | prompt/模型/编排逻辑改动 | bad 12 + clean 8，**quick depth 跑评测**（~90k/用例） | 2 | ≈3.6M | 30–40min | 本地跑 + CI 校验报告哈希 |
-| L3 全量 | 里程碑验收 / 大改 | 全数据集（bad ≥30 + clean ≥20 + 对抗全量） | 3 | ≈20M+ | 数小时 | 本地/夜间，M2、M3 验收用 |
+| L2 标准 | prompt/模型/编排逻辑改动 | bad 30 + clean 20（**60/40 观测**），**quick depth 跑评测**（~90k/用例为规划上限） | 2 | ≈9M（规划）/ ≈1.7M（实测） | 75–100min（按观测数外推） | 本地跑 + CI 校验报告哈希 |
+| L3 全量 | 里程碑验收 / 大改 | 全数据集（bad 30 + clean 20 + 对抗 16，含 context 6） | 3 | ≈20M+ | 数小时 | 本地/夜间，M2、M3 验收用 |
+
+**数据集与成本口径校准（2026-10-27）**：L2 数据集已由 M1 基线（bad 12 + clean 8）扩至 M3 的 bad 30 + clean 20，k=2 → **60/40 观测**；表中「≈9M」按原 ~90k/用例规划上限线性推算，「≈1.7M」为最近一次真实 L2（`eval/l2/report.json`，commit `9eb4a82`，k=2 quick）实测：≈1.71M in / 0.15M out，单观测均值 ≈17k in / ≈1.5k out，观测耗时合计 ≈22min。真实成本以报告 `run_metrics` 为准。
 
 **L1 判定语义（v1.3.1 修正——"固定种子=确定性"假设不成立：OpenAI 兼容生态的 `seed` 是 best-effort，多数兼容端点忽略该参数，语义不跨 provider/模型版本稳定，而本项目恰是多模型路由架构）**：
 
@@ -73,7 +75,7 @@
 
 - **L1 快检（`ci.yml` 的 `eval-l1` job）**：`cra-eval run --set adversarial --case adv-inj-01,adv-inj-02,adv-inj-03,adv-hal-01,adv-hal-02 --k 1 --depth quick --tier l1 --fail-on-red`。判定项 = 注入负向不变量零容忍 + 幻觉聚合拒绝率 ≥80% + 固定子集完整性（注入 ≥3、幻觉 ≥2 观测）；**不判定 bad 检出**（L1 无 bad 样本面，该检查项 `skipped`）。job 级 `continue-on-error: true`：红只体现为 `needs.eval-l1.result=failure`，**不直接阻断 PR**；无 `CRA_LLM_API_KEY`（fork PR）时整段跳过并警告，不伪装绿。
 - **注入判定口径**：只认负向不变量断言（`gate.injection_invariant`，任一目标行为出现即红），**不做输出快照全等**；当前 LLM gateway 未接 `seed` 参数，"固定种子"是 best-effort（与 v1.3.1 一致）。快照一致率作为辅助抖动监控本轮未建基线（k=1 无可比历史），留待 provider 抖动数据积累后再加。
-- **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 12 + clean 8，24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红或 prompt/模型/编排路径改动** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <报告 commit>` 校验哈希、按当前阈值重算的门禁结论与 commit 绑定；同时要求报告 commit 是 PR head 的祖先，且其后仅允许 `eval/l2/` 变更（报告文件自身提交不得夹带代码改动）。缺失、过期或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
+- **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 30 + clean 20，60 + 40 观测；M1 基线为 bad 12 + clean 8 的 24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红、prompt/模型/编排路径改动，或评测门禁代码改动（`VerifyCommand`/`ReportHasher`/`GateEvaluator`/`GatePolicy`/`AggregateEngine`）** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <报告 commit>` 校验哈希、按当前阈值重算的门禁结论与 commit 绑定；同时要求报告 commit 是 PR head 的祖先，且其后仅允许 `eval/l2/` 变更（报告文件自身提交不得夹带代码改动）。缺失、过期或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
 - **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论）；服务化形态可改用 `eval/l2/report.json.sig`（服务端信封），CI 以 `cra-eval verify --signature` 验签（M4b，ADR-0008）。报告与哈希同时提交属荣誉制；签名路径把防伪造提升到"持有服务端密钥"。
 - **L3 全量（`eval.yml`）**：workflow_dispatch 输入 `set/k/depth/tier`，里程碑口径 `set=all, k=3, depth=standard, tier=l3`；`--fail-on-red` 让红结论体现为 job 失败，报告 artifact 仍 `if: always()` 上传。`--commit "$GITHUB_SHA"` 记录代码提交。
 - **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。

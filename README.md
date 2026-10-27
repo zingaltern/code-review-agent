@@ -175,8 +175,12 @@ Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 we
 - draft PR 会被 workflow 过滤，不进入评审。
 - 服务形态的 `review_run` 只持久化 DONE/DEGRADED 完成标记；同 head 重跑返回 SKIPPED 但不会新增 PG 行，审计看 `/healthz` 与日志（05§1.3）。
 - 服务形态对 draft/非 PR 的 webhook 只回 200，当前没有专用日志行；排障以 GitHub delivery 状态与 HTTP 响应体为准。
-- CrossChecker 默认关闭，且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决见 [docs/07](docs/07-roadmap.md)。
+- CrossChecker 默认关闭（`CRA_CROSSCHECKER_ENABLED=false`），且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决与闭环记录见 [docs/07](docs/07-roadmap.md)。
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。
+- **M4e/M4f-full 尚未全部实现**：M4e 的 GitLab 适配器第一半见 PR #13（CLI/server 未接线、真实写操作待 owner token）；Gerrit 适配、语义索引/跨文件上下文与 M4f-full 产品事件史采集仍未实现（M4b 仅有接口 + `@Scheduled` Noop 骨架）。
+- **真实 GitHub 验收已完成（2026-10-27）**：M4b/M4c/M4d 在私有 scratch 仓库完成 webhook→PG、push commit comment、nightly issue/汇总/截断/幂等全链路；证据见 [docs/deployment-server.md](docs/deployment-server.md) §9。
+- **M4b 签发已按 repo 限定（v2）**：`X-CRA-Repo` + `(repo, commit)` 查 `review_run`；v1 签名需重签（ADR-0009，PR #14）。
+- **最近一次官方 L3 全量（2026-10-27，198 观测，run 40416120356）bad 召回 71/90 = 78.9%（Wilson 下界 0.6937 < 0.70）为红**；clean 0.55、幻觉 0.933、注入 0、context 18/18、零发布样本级 1/30 均绿。**owner 2026-10-27 裁决 A：接受为已知红，不调阈值**——记录见 [docs/07](docs/07-roadmap.md)「M4 收口记录」与 `docs/audits/owner-decisions-2026-10-27.md`。
 
 ## 开发与自检
 
