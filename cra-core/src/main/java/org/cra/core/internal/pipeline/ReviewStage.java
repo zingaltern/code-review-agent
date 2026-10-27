@@ -2,6 +2,7 @@ package org.cra.core.internal.pipeline;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
@@ -197,6 +198,44 @@ public final class ReviewStage {
       String policySection,
       CrossCheckHistory crossCheckHistory,
       CrossCheckEvents crossCheckEvents) {
+    return execute(
+        runId,
+        trace,
+        diff,
+        policy,
+        depthPlan,
+        plan,
+        headFiles,
+        budget,
+        prTitle,
+        commitMessages,
+        policySection,
+        crossCheckHistory,
+        crossCheckEvents,
+        SemanticContext.disabled());
+  }
+
+  /**
+   * 执行评审扇出（含 M4e 语义上下文：L2 跨文件切片，ADR-0014）。
+   *
+   * @param semanticContext 语义上下文（关闭时切片为空且无声明，行为与开关引入前一致）
+   * @return 汇聚产出
+   */
+  public StageOutcome execute(
+      String runId,
+      TraceWriter trace,
+      DiffResult diff,
+      ReviewPolicy policy,
+      DepthPlan depthPlan,
+      ChunkPlanner.Plan plan,
+      Map<String, FileContent> headFiles,
+      RunBudgetTracker budget,
+      String prTitle,
+      String commitMessages,
+      String policySection,
+      CrossCheckHistory crossCheckHistory,
+      CrossCheckEvents crossCheckEvents,
+      SemanticContext semanticContext) {
     CrossCheckHistory crossHistory =
         crossCheckHistory == null ? CrossCheckHistory.none() : crossCheckHistory;
     CrossCheckEvents crossEvents =
@@ -211,6 +250,8 @@ public final class ReviewStage {
     List<String> degradations = new ArrayList<>();
     List<String> contextNotes = new ArrayList<>();
     List<String> trimDecisions = new ArrayList<>();
+    // chunk 级切片声明去重（同一句在每 chunk 重复没有信息量）
+    LinkedHashSet<String> sliceNotes = new LinkedHashSet<>();
     List<ChunkPlanner.Chunk> chunks = plan.chunks();
     int chunkIndex = 0;
     boolean stopped = false;
@@ -260,6 +301,9 @@ public final class ReviewStage {
           // 在飞派发严格 ≤ MAX_PARALLEL（网关侧信号量仍为硬限，02§4.5），降档相位对未开始的 chunk 语义确定
           while (chunkIndex < chunks.size() && futures.size() + waveSize <= MAX_PARALLEL) {
             ChunkPlanner.Chunk chunk = chunks.get(chunkIndex++);
+            // M4e（ADR-0014）：本 chunk 的 L2 跨文件切片（关闭/不可得时为空，不产生声明）
+            CrossFileSlices slices = semanticContext.slicesFor(chunk.files());
+            sliceNotes.addAll(slices.notes());
             for (BugHunterDefinition.Perspective perspective : effective) {
               SubAgent<ReviewAgentInput> agent = agentOf(perspective);
               futures.add(
@@ -274,7 +318,8 @@ public final class ReviewStage {
                       commitMessages,
                       policySection,
                       runId,
-                      trace));
+                      trace,
+                      slices));
             }
             if (securityEnabled) {
               futures.add(
@@ -289,7 +334,8 @@ public final class ReviewStage {
                       commitMessages,
                       policySection,
                       runId,
-                      trace));
+                      trace,
+                      slices));
             }
             if (perfEnabled) {
               futures.add(
@@ -304,7 +350,8 @@ public final class ReviewStage {
                       commitMessages,
                       policySection,
                       runId,
-                      trace));
+                      trace,
+                      slices));
             }
           }
           if (futures.isEmpty()) {
@@ -482,6 +529,8 @@ public final class ReviewStage {
       degradations.add("llm-unavailable-agents:" + unavailableCount);
       contextNotes.add(unavailableCount + " 个评审代理因 LLM 不可得缺失（失败隔离，02§4.2），其余代理产出照常汇聚");
     }
+    contextNotes.addAll(semanticContext.coverageNotes());
+    contextNotes.addAll(sliceNotes);
     // 汇聚：跨代理精确去重合并（03§4.5；T2.8 汇聚侧）
     List<CandidateFinding> merged = FindingMerger.mergePrecise(all, trace);
     if (merged.size() < all.size()) {

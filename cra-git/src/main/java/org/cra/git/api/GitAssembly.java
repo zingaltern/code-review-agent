@@ -19,6 +19,17 @@ public final class GitAssembly {
   }
 
   /**
+   * 创建语义索引（jgit 树读取 + Java 词法/结构抽取；ADR-0014）。目录不是 git 仓库时 {@code build} 返回不可得快照—— 与 {@link
+   * #createLocalRepoContext(Path)} 同属降级形态，不抛异常（11§4 第 5 条）。
+   *
+   * @param workspaceRoot 候选仓库根（CI checkout 目录或本地工作区；null 视为不可得）
+   * @return SymbolIndex
+   */
+  public static SymbolIndex createSymbolIndex(Path workspaceRoot) {
+    return new org.cra.git.internal.JgitSymbolIndex(workspaceRoot);
+  }
+
+  /**
    * 打开本地 git 适配器（M2 本地 pre-PR 模式，02§5 本地形态；T2.10）。目录不是 git 仓库时 组装期失败（CraIntegrationException）——与
    * {@link #createLocalRepoContext(Path)} 的降级形态不同：本地模式的 diff 数据面必须可得。
    *

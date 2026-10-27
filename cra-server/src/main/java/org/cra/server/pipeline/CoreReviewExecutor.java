@@ -48,6 +48,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
   private final PipelineOptions pipelineOptions;
   private final CrossCheckerOptions crossCheckerOptions;
   private final EventHistoryQuery eventHistoryQuery;
+  private final org.cra.core.api.SemanticContextOptions semanticContextOptions;
+  private final org.cra.git.api.SymbolIndex symbolIndex;
   private final Path runRoot;
   private final Depth depth;
   private final boolean dryRun;
@@ -64,6 +66,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
    * @param pipelineOptions 编排参数
    * @param crossCheckerOptions CrossChecker 配置
    * @param eventHistoryQuery 事件史查询端口（M4f-full；null = 未装配）
+   * @param semanticContextOptions 语义上下文配置（M4e，ADR-0014；null = 关闭）
+   * @param symbolIndex 语义索引端口（M4e；null = 未装配 → 开启时按不可得声明）
    * @param config 服务配置（深度/runRoot/dryRun）
    */
   public CoreReviewExecutor(
@@ -77,6 +81,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryQuery eventHistoryQuery,
+      org.cra.core.api.SemanticContextOptions semanticContextOptions,
+      org.cra.git.api.SymbolIndex symbolIndex,
       ServerConfig config) {
     this.dataSource = dataSource;
     this.adapter = adapter;
@@ -88,6 +94,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
     this.pipelineOptions = pipelineOptions;
     this.crossCheckerOptions = crossCheckerOptions;
     this.eventHistoryQuery = eventHistoryQuery;
+    this.semanticContextOptions = semanticContextOptions;
+    this.symbolIndex = symbolIndex;
     this.runRoot = config.runRoot();
     this.depth = Depth.valueOf(config.reviewDepth().toUpperCase(Locale.ROOT));
     this.dryRun = config.dryRun();
@@ -149,6 +157,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
         localRepoContext,
         crossCheckerOptions,
         SignoffOptions.disabled(),
-        eventHistoryQuery);
+        eventHistoryQuery,
+        semanticContextOptions,
+        symbolIndex);
   }
 }

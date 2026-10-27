@@ -218,6 +218,32 @@ public class ServerBeans {
    * @param config 服务配置
    * @return CrossCheckerOptions
    */
+  /**
+   * 语义上下文配置（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片。
+   *
+   * @param config 服务配置
+   * @return SemanticContextOptions
+   */
+  @Bean
+  public org.cra.core.api.SemanticContextOptions semanticContextOptions(ServerConfig config) {
+    return org.cra.core.api.SemanticContextOptions.of(
+        config.semanticContextEnabled(),
+        config.semanticContextMaxFiles(),
+        config.semanticContextMaxFileBytes(),
+        config.semanticContextSliceTokens());
+  }
+
+  /**
+   * 语义索引端口（ADR-0014：jgit 树读取；工作区非 git checkout 时 build 返回不可得快照）。
+   *
+   * @param config 服务配置
+   * @return SymbolIndex
+   */
+  @Bean
+  public org.cra.git.api.SymbolIndex symbolIndex(ServerConfig config) {
+    return org.cra.git.api.GitAssembly.createSymbolIndex(config.workspace());
+  }
+
   @Bean
   public CrossCheckerOptions crossCheckerOptions(ServerConfig config) {
     Set<CrossCheckerOptions.Mode> modes = config.parsedCrossCheckerModes();
@@ -303,6 +329,8 @@ public class ServerBeans {
    * @param pipelineOptions 编排参数
    * @param crossCheckerOptions CrossChecker 配置
    * @param eventHistoryStore 事件史查询端口（CrossChecker 的 context 类外部证据面，M4f-full）
+   * @param semanticContextOptions 语义上下文配置（M4e，ADR-0014；默认关闭）
+   * @param symbolIndex 语义索引端口（M4e）
    * @param config 服务配置
    * @return ReviewExecutor
    */
@@ -318,6 +346,8 @@ public class ServerBeans {
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryStore eventHistoryStore,
+      org.cra.core.api.SemanticContextOptions semanticContextOptions,
+      org.cra.git.api.SymbolIndex symbolIndex,
       ServerConfig config) {
     return new CoreReviewExecutor(
         dataSource,
@@ -330,6 +360,8 @@ public class ServerBeans {
         pipelineOptions,
         crossCheckerOptions,
         eventHistoryStore,
+        semanticContextOptions,
+        symbolIndex,
         config);
   }
 
