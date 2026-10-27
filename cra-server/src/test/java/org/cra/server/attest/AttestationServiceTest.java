@@ -26,29 +26,40 @@ class AttestationServiceTest {
   }
 
   private static AttestationService service(boolean known, CapturingStore store) {
-    return new AttestationService(KEY, "key-v1", true, commit -> known, store);
+    return new AttestationService(KEY, "key-v1", true, (repo, commit) -> known, store);
   }
 
   @Test
   void signsAndVerifiesReport() {
     CapturingStore store = new CapturingStore();
-    AttestationService.Result result = service(true, store).attest(REPORT, "api-token");
+    AttestationService.Result result =
+        service(true, store).attest(REPORT, "owner/repo", "api-token");
 
     ReportSignature.Envelope envelope = ReportSignature.parse(result.envelopeText());
     assertThat(
             ReportSignature.verify(
                 KEY.getBytes(StandardCharsets.UTF_8), envelope, ReportSignature.sha256(REPORT)))
         .isTrue();
+    assertThat(envelope.repo()).isEqualTo("owner/repo");
     assertThat(envelope.commit()).isEqualTo("abc1234");
     assertThat(envelope.tier()).isEqualTo("l2");
     assertThat(envelope.keyId()).isEqualTo("key-v1");
     assertThat(store.records).hasSize(1);
     assertThat(store.records.get(0).attestationId()).isEqualTo(result.attestationId());
+    assertThat(store.records.get(0).repo()).isEqualTo("owner/repo");
+  }
+
+  @Test
+  void refusesMissingRepoWhenPolicyEnabled() {
+    assertThatThrownBy(() -> service(true, new CapturingStore()).attest(REPORT, "", "api-token"))
+        .isInstanceOf(AttestationRejectedException.class)
+        .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
 
   @Test
   void refusesUnknownCommitWhenPolicyEnabled() {
-    assertThatThrownBy(() -> service(false, new CapturingStore()).attest(REPORT, "api-token"))
+    assertThatThrownBy(
+            () -> service(false, new CapturingStore()).attest(REPORT, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
@@ -56,7 +67,8 @@ class AttestationServiceTest {
   @Test
   void refusesMissingCommitWhenPolicyEnabled() {
     byte[] noCommit = "{\"tier\":\"l2\"}".getBytes(StandardCharsets.UTF_8);
-    assertThatThrownBy(() -> service(true, new CapturingStore()).attest(noCommit, "api-token"))
+    assertThatThrownBy(
+            () -> service(true, new CapturingStore()).attest(noCommit, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
@@ -64,8 +76,8 @@ class AttestationServiceTest {
   @Test
   void permissivePolicySignsUnknownCommit() {
     AttestationService permissive =
-        new AttestationService(KEY, "key-v1", false, commit -> false, new CapturingStore());
-    AttestationService.Result result = permissive.attest(REPORT, "api-token");
+        new AttestationService(KEY, "key-v1", false, (repo, commit) -> false, new CapturingStore());
+    AttestationService.Result result = permissive.attest(REPORT, "owner/repo", "api-token");
     assertThat(ReportSignature.parse(result.envelopeText()).commit()).isEqualTo("abc1234");
   }
 
@@ -74,7 +86,7 @@ class AttestationServiceTest {
     assertThatThrownBy(
             () ->
                 service(true, new CapturingStore())
-                    .attest("not-json".getBytes(StandardCharsets.UTF_8), "api-token"))
+                    .attest("not-json".getBytes(StandardCharsets.UTF_8), "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(400));
   }
@@ -82,7 +94,7 @@ class AttestationServiceTest {
   @Test
   void tamperedReportFailsVerification() {
     AttestationService.Result result =
-        service(true, new CapturingStore()).attest(REPORT, "api-token");
+        service(true, new CapturingStore()).attest(REPORT, "owner/repo", "api-token");
     ReportSignature.Envelope envelope = ReportSignature.parse(result.envelopeText());
     byte[] tampered =
         (new String(REPORT, StandardCharsets.UTF_8) + " ").getBytes(StandardCharsets.UTF_8);

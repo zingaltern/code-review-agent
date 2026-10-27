@@ -16,7 +16,7 @@ final class EvalUsage {
               [--annotator NAME] [--reason TEXT]
           cra-eval verify --report <json> [--sha256 <hex>|--sha256-file <path>] [--tier l1|l2|l3]
               [--expect-commit SHA]
-              [--signature <envelope> [--signing-key-env NAME|--signing-key-file PATH]
+              [--signature <envelope> [--repo owner/name] [--signing-key-env NAME|--signing-key-file PATH]
               [--signing-key-id ID]]
           cra-eval gate --report <json> [--tier l1|l2|l3] [--json-out PATH] [--sha256-out PATH]
               [--crosschecker-enabled]

@@ -65,11 +65,12 @@ public final class AttestationService {
    * 签发报告。
    *
    * @param reportBytes 报告文件原始字节
+   * @param repo 报告归属仓库（owner/name；v2 必填）
    * @param requestedBy 请求方标识
    * @return 签发结果
-   * @throws AttestationRejectedException 报告非法或 commit 未经服务端评审
+   * @throws AttestationRejectedException 报告非法或 repo/commit 未经服务端评审
    */
-  public Result attest(byte[] reportBytes, String requestedBy) {
+  public Result attest(byte[] reportBytes, String repo, String requestedBy) {
     if (reportBytes == null || reportBytes.length == 0) {
       throw new AttestationRejectedException(400, "报告为空");
     }
@@ -85,24 +86,41 @@ public final class AttestationService {
     String commit = text(root, "commit");
     String tier = text(root, "tier");
     if (requireKnownCommit) {
+      if (repo == null || repo.isBlank()) {
+        throw new AttestationRejectedException(409, "报告缺 repo 绑定，拒绝签发");
+      }
       if (commit.isEmpty()) {
         throw new AttestationRejectedException(409, "报告缺 commit 绑定，拒绝签发");
       }
-      if (!knownCommitChecker.exists(commit)) {
+      if (!knownCommitChecker.exists(repo.strip(), commit)) {
         throw new AttestationRejectedException(
-            409, "commit " + commit + " 未经服务端完成评审（review_run 无 DONE|DEGRADED）");
+            409,
+            "repo "
+                + repo.strip()
+                + " 的 commit "
+                + commit
+                + " 未经服务端完成评审（review_run 无 DONE|DEGRADED）");
       }
     }
     String reportSha256 = ReportSignature.sha256(reportBytes);
     String attestationId = "att_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     Instant issuedAt = Instant.now();
+    String effectiveRepo = repo == null ? "" : repo.strip();
     ReportSignature.Envelope envelope =
         ReportSignature.sign(
-            signingKey, keyId, reportSha256, commit, tier, issuedAt.toString(), attestationId);
+            signingKey,
+            keyId,
+            reportSha256,
+            effectiveRepo,
+            commit,
+            tier,
+            issuedAt.toString(),
+            attestationId);
     attestationStore.record(
         new AttestationRecord(
             attestationId,
             reportSha256,
+            effectiveRepo,
             commit,
             tier,
             keyId,

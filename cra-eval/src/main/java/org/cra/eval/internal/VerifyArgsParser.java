@@ -42,6 +42,7 @@ final class VerifyArgsParser {
         sha256File == null ? null : Path.of(sha256File),
         tier,
         named.get("--expect-commit"),
+        named.get("--repo"),
         hasSignature ? Path.of(signature) : null,
         named.getOrDefault("--signing-key-env", DEFAULT_SIGNING_KEY_ENV),
         signingKeyFile == null ? null : Path.of(signingKeyFile),
