@@ -15,7 +15,7 @@
 | 8 | CrossChecker 默认关闭 | **B：保持默认关闭** | `CRA_CROSSCHECKER_ENABLED=false`；开启约 +20k token/次；按仓库/路径按需开启 |
 | 9 | L3 翻转 case 的 expected 是否过严 | **B：审计，只修正确有错误者** | 审计报告 docs/audits/l3-flip-audit-2026-10-27.md（PR #12）：A=1（Mockito-3 锚点）、B=4（验证层误拒）、C/D=3（无候选/类别口径）；本审计未改数据/阈值 |
 | 10 | L2/L3 模型与温度不统一 | **A：标准化** | opencode-go `deepseek-v4.1-flash` + **temperature 0.2 维持**；本地 `deepseek-chat` L2 报告标记非标准。**稳定性实验完成（2026-10-27）**：8 个翻转 case × k=3，0.0 与 0.2 聚合检出同为 19/24；0.0 多 2 次预算击穿、0.2 零发布观测更少（3/24 vs 5/24）；维持 0.2，详见 `docs/audits/l3-stability-2026-10-27.md` |
-| 11 | 是否立即打 v0.5.0 | 等真实环境验收 + L3 决策后再打 | 当前不打 tag；真实验收 PR #10、L3 稳定性实验仍在进行 |
+| 11 | 是否立即打 v0.5.0 | 等真实环境验收 + L3 决策后再打 | **条件已满足**：真实验收 PR #10、L3 裁决 1A、稳定性实验完成；**v0.5.0 本轮打**（tag 说明列出已知红与待办） |
 | 12 | M4a 签字建议是否强制 | **保持“只建议”** | `agentApprover()` 恒 false；不接入 branch protection；如需强制走平台策略 |
 | 13 | M4c/M4d 分支过滤/cron | 真实环境验收时确认后再调 | 真实验收已完成（PR #10 `55dc873`）；当前 push 仅 `main`、nightly 18:00 UTC；见部署文档 §9 |
 
