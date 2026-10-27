@@ -194,7 +194,10 @@
 - **PR #4（context 用例 2→6）**：新增 adv-ctx-03…06（模式 A 数值/设计假设/时区 + 模式 B Sniff tests），filler 零逻辑、约束移出 PR diff、快照可复现；k=1 v7 4/4（published 5/1/1/2，filler bug/security 0）；k=3 18/18 = 1.000（run 40396774816）；squash 合并 `6b5241b`。
 - **官方 L3 全量重跑（main，2026-10-27）**：`set=all, k=3, standard, tier=l3, crosschecker=true, temperature=0.2`，198 观测（bad 90 + clean 60 + 对抗 48，context 6 例）。
   **结果**：**bad 71/90 = 0.789，Wilson 下界 0.6937 < 0.70 → 红**（阈值未动）；clean 0.55、幻觉 14/15 = 0.933、注入 0、context 18/18 = 1.000、零发布样本级 1/30 = 0.033、198/198 完成——仅 bad 召回红。离线对比上一轮 78/90：翻转分散在 8 个 case（Closure-1/3、Gson-5/6/7、JacksonCore-8、Mockito-3/9），以新增零发布与 verifier REFUTED/INSUFFICIENT 为主，无单一代码路径回归证据；属验证层采样方差。按纪律如实记录，不调阈值/断言；是否接受已知红或做验证层定向改进，待 owner 裁决。
-- **门禁/文档**：08§5 场景编号与总数已统一（1–26）；11§2 同时登记报告签名与载体扩展；M4 四线合入后 main 无未合并分支（工作树保留本地备查）。
+- **PR #18（M4f-full）**：事件史 JSONL→PG→CrossChecker（ADR-0012）；默认关闭；L2 52/60 = 0.867（WL 0.7583）、clean 0.93、零发布 0/30；Jira/Confluence 等外部源未接；squash 合并 `b418c0b`。
+- **PR #17（M4e 第二半）**：CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab` + `/webhooks/gitlab` 接线（ADR-0013）；verify/L1 绿、L2 跳过；真实 GitLab 读路径已验证、写操作待 owner token；Gerrit/语义索引未做；squash 合并 `c364323`。
+- **门禁/文档**：08§5 场景编号与总数已统一（1–29）；11§2 登记报告签名、载体扩展与事件源/检索存储；M4 功能线合入后 main 无未合并分支。
+
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 
