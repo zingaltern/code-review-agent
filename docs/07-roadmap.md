@@ -1,5 +1,6 @@
 # 07 · 实施路线图与任务拆解
 
+> 文档版本：v1.5（2026-10-27，M4 收口：M4a/M4b/M4c/M4d 合入 + context 用例 2→6 + 官方 L3 全量重跑）
 > 文档版本：v1.4（2026-10-26，M4b 服务化落地 + M4c push 直推 + M4d 夜间存量落地记录与验收证据）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ⑥及终审建议）
 > **v1.2.1**：DONE 完整标记、Summary issue comment 载体、锚行滑窗、Wilson 修正等 7 项。
@@ -180,6 +181,16 @@
   - [x] **M4f-lite（零服务依赖，可独立排期）**：模式 A 子集（隐含假设清单 + jgit 上下游近 8 周变更史 + REVIEW.md Product context/Known incidents 段）+ 模式 B 全量（Sniff tests 段执行）；复用 CI checkout 的本地 jgit 与现有验证晋升管线，与流水线同构；数据前提 = T1.4 解析器新段落支持；**已落地（2026-10-26）：`cross-checker` 角色 + 单次 LLM 调用（预算 16k/1.5k/2 轮）+ `LocalRepoContext.recentCommits` jgit 实现（窗口以 head committer time 为锚，排除本 PR 自身 commit）+ `agents.crosschecker` 配置（默认关闭，standard/deep 档 1 实例，quick/无数据优雅跳过并进覆盖声明）+ 矛盾来源引用格式权威定义（`ContextCitation`：`commit <sha> path <path>` / `REVIEW.md <段名>: <条目>`）+ verifier/judge 分型组装解析该格式；验收 fixture（真实 git 仓库 + REVIEW.md Known incidents）端到端产出 category=context 的 confirmed finding，见 `CrossCheckPipelineTest`**；
   - **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库，M4b 定时任务）——"检索矛盾事件"的完整数据面； tribal knowledge 不可见是硬边界（01§3.4），本项只覆盖已文档化部分；
   - 验收（lite）：构造复现"会话超时案例"模式的 fixture（diff 本身无问题 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit）→ CrossChecker 产出 category=context 的 confirmed finding 并引用矛盾来源；该 fixture 同步固化为对抗集第 4 类用例（06§1.2）进 L3 门禁——context 召回有持续度量，不靠单例自证。**执行记录（2026-10-26）**：单测 + 本地 fixture e2e 通过（07§5 门禁开闸条件：M3 T3.1+T3.3 落地前不做 L3 全量验收）；fixture 格式与对抗集对齐由协调者在合并后统一处理（本线未改 cra-eval/dataset）；增量实测：标准 10 文件规模下单次输入 ≈12.6k token（diff 7.2k + 变更史 2.7k + 产品段 1.8k + 系统提示余量），输出预算 1.5k——对照 04§2.2 的 ≈14k in / ≈20k run 增量，属保守上限内的实测值。
+
+### M4 收口记录（2026-10-27）
+
+- **PR #3（M4c/M4d）**：合并 main `425006d` 解 README 冲突；L2 报告在收口 head `9008229` 重跑——bad 47/60 = 0.783（Wilson 下界 0.6638 ≥ 0.35）、clean 0.78、零发布样本级 2/30、100/100 完成，门禁绿；CI 全绿后 squash 合并 `c113d33`。
+- **PR #5（M4b）**：合并 main `c113d33` 解 5 处 docs 冲突（08§5 场景编号统一为 M4c/M4d=20/21、M4b=22–26）；本地 1695 tests / 107s、HTTP 集成 6 例；PR CI verify + eval-l1 绿（L2 按规则跳过），squash 合并 `1298682`。
+- **PR #6（M4a）**：合并 main `1298682`，融合 signoff 与 M4c/M4d 载体（`ReviewRequest` 双字段、`CraConfig` 三字段、renderer signoff+detailed、publisher 载体+stale）；core 216 + runner-cli 53 tests 绿；L2 在 `9eb4a82` 重跑——bad 48/60 = 0.800（WL 0.6822）、clean 0.83、零发布 1/30、100/100，门禁绿；squash 合并 `a2f6fb1`。
+- **PR #4（context 用例 2→6）**：新增 adv-ctx-03…06（模式 A 数值/设计假设/时区 + 模式 B Sniff tests），filler 零逻辑、约束移出 PR diff、快照可复现；k=1 v7 4/4（published 5/1/1/2，filler bug/security 0）；k=3 18/18 = 1.000（run 40396774816）；squash 合并 `6b5241b`。
+- **官方 L3 全量重跑（main，2026-10-27）**：`set=all, k=3, standard, tier=l3, crosschecker=true, temperature=0.2`，198 观测（bad 90 + clean 60 + 对抗 48，context 6 例）。
+  **结果**：**bad 71/90 = 0.789，Wilson 下界 0.6937 < 0.70 → 红**（阈值未动）；clean 0.55、幻觉 14/15 = 0.933、注入 0、context 18/18 = 1.000、零发布样本级 1/30 = 0.033、198/198 完成——仅 bad 召回红。离线对比上一轮 78/90：翻转分散在 8 个 case（Closure-1/3、Gson-5/6/7、JacksonCore-8、Mockito-3/9），以新增零发布与 verifier REFUTED/INSUFFICIENT 为主，无单一代码路径回归证据；属验证层采样方差。按纪律如实记录，不调阈值/断言；是否接受已知红或做验证层定向改进，待 owner 裁决。
+- **门禁/文档**：08§5 场景编号与总数已统一（1–26）；11§2 同时登记报告签名与载体扩展；M4 四线合入后 main 无未合并分支（工作树保留本地备查）。
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 
