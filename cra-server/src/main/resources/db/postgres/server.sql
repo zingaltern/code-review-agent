@@ -37,6 +37,39 @@ CREATE INDEX IF NOT EXISTS idx_report_attestation_commit
 CREATE INDEX IF NOT EXISTS idx_report_attestation_repo
   ON report_attestation (repo, commit_sha);
 
+-- M4f-full（ADR-0012）：产品事件史（工单/事故复盘）与采集水位。
+-- 幂等键 = (repo, event_id)；commit_refs/paths 是 JSONB 数组（GIN 索引供 CrossChecker 检索）。
+CREATE TABLE IF NOT EXISTS product_event (
+  event_id TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  service TEXT,
+  tenant TEXT,
+  occurred_at TIMESTAMPTZ NOT NULL,
+  type TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  source_url TEXT,
+  commit_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
+  paths JSONB NOT NULL DEFAULT '[]'::jsonb,
+  raw_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+  collected_at TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (repo, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_product_event_repo_time
+  ON product_event (repo, occurred_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_product_event_commit_refs
+  ON product_event USING GIN (commit_refs jsonb_path_ops);
+
+CREATE INDEX IF NOT EXISTS idx_product_event_paths
+  ON product_event USING GIN (paths jsonb_path_ops);
+
+CREATE TABLE IF NOT EXISTS event_collection_checkpoint (
+  source_id TEXT PRIMARY KEY,
+  watermark TIMESTAMPTZ NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schema_migration (
   version TEXT PRIMARY KEY,
   applied_at TIMESTAMPTZ NOT NULL

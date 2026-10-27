@@ -7,6 +7,8 @@ import static org.mockito.ArgumentMatchers.eq;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -18,6 +20,9 @@ import org.cra.agents.api.VerifierAgentDefinition;
 import org.cra.agents.internal.TemplateLoader;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
+import org.cra.common.event.EventHistoryQuery;
+import org.cra.common.event.EventQuery;
+import org.cra.common.event.ProductEvent;
 import org.cra.common.git.CommitSummary;
 import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffHunk;
@@ -121,6 +126,7 @@ class CrossCheckPipelineTest {
   private GitPlatformAdapter adapter;
   private ReviewLedger ledger;
   private ScriptedGateway scripted;
+  private EventHistoryQuery eventHistoryQuery;
   private String headSha;
   private String oldSha;
 
@@ -130,6 +136,7 @@ class CrossCheckPipelineTest {
     adapter = Mockito.mock(GitPlatformAdapter.class);
     ledger = Mockito.mock(ReviewLedger.class);
     scripted = new ScriptedGateway();
+    eventHistoryQuery = null;
     Mockito.when(ledger.findCompletion(7, headSha)).thenReturn(Optional.empty());
     Mockito.when(ledger.findCompletion(Mockito.anyInt(), Mockito.anyString()))
         .thenReturn(Optional.empty());
@@ -279,6 +286,61 @@ class CrossCheckPipelineTest {
         .contains("矛盾来源");
   }
 
+  @Test
+  void crossCheckerFindsContradictionInEventHistoryAndCitesEventId() throws Exception {
+    ProductEvent event =
+        new ProductEvent(
+            "EVT-42",
+            "o/r",
+            "billing",
+            null,
+            Instant.now().minus(10, ChronoUnit.DAYS),
+            "incident",
+            "2026-08-14 会话超时事故：企业长会话窗口被改为 8h（SessionKeepAlive）",
+            "https://tracker/EVT-42",
+            List.of(oldSha),
+            List.of(FILE),
+            "{}",
+            Instant.now());
+    eventHistoryQuery = new SingleEventQuery("o/r", event);
+    scripted.review(EMPTY_FINDINGS);
+    scripted.crossChecker(contextFindingWithEvent("important"));
+
+    ReviewResult result = pipeline(enabled(), eventHistoryQuery).run(request(Depth.DEEP));
+
+    // 事件史进入 CrossChecker brief（路径相关 + event id 供引用）
+    String crossPrompt = scripted.crossCheckerCalls.get(0).userPrompt();
+    assertThat(crossPrompt)
+        .contains("相关产品事件史")
+        .contains("- event EVT-42")
+        .contains("type=incident")
+        .contains("2026-08-14 会话超时事故")
+        .contains("paths=" + FILE);
+
+    // 验证层分型组装：按 event id 预取事件条目（摘要/类型/来源），context 类不再失明
+    String verifierBrief = scripted.verifierCalls.get(0).userPrompt();
+    assertThat(verifierBrief)
+        .contains("被引事件史条目")
+        .contains("event EVT-42")
+        .contains("type=incident")
+        .contains("source=https://tracker/EVT-42")
+        .contains("企业长会话窗口被改为 8h");
+
+    // 评审→验证→晋升：context 类 confirmed 并发布，引用 event id 随 finding 正文可见
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(result.stats().confirmed()).isEqualTo(1);
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    Mockito.verify(adapter).postReview(captor.capture());
+    String body = captor.getValue().inlineComments().get(0).body();
+    assertThat(body).contains("cat=context").contains("event EVT-42");
+
+    String trace = traceOf(result);
+    assertThat(trace)
+        .contains("\"event\":\"crosscheck\"")
+        .contains("\"events_available\":true")
+        .contains("\"events_count\":1");
+  }
+
   // ---------- 触发条件（05§5 默认关闭 / 02§4.3 档位联动 / T1.4 段落缺失优雅跳过） ----------
 
   @Test
@@ -391,6 +453,10 @@ class CrossCheckPipelineTest {
   // ---------- fixture 构造 ----------
 
   private ReviewPipeline pipeline(CrossCheckerOptions options) {
+    return pipeline(options, null);
+  }
+
+  private ReviewPipeline pipeline(CrossCheckerOptions options, EventHistoryQuery eventQuery) {
     ReviewCrew crew =
         new ReviewCrew(
             List.of(
@@ -417,7 +483,9 @@ class CrossCheckPipelineTest {
         runRoot,
         PipelineOptions.defaults(),
         new JgitLocalRepoContext(workspace),
-        options);
+        options,
+        org.cra.core.api.SignoffOptions.disabled(),
+        eventQuery);
   }
 
   private static CrossCheckerOptions enabled() {
@@ -451,6 +519,47 @@ class CrossCheckPipelineTest {
   private String traceOf(ReviewResult result) throws Exception {
     return Files.readString(
         Path.of(result.traceRef().substring("file://".length())).resolve("trace.ndjson"));
+  }
+
+  private String contextFindingWithEvent(String severity) {
+    return """
+        {"findings":[{"category":"context","title":"会话超时假设与产品事件史矛盾",
+          "description":"shouldKeepAlive 以 30 分钟为硬边界，但产品事件史记录企业长会话窗口 8h",
+          "failure_mode":"触发条件：企业长会话客户；错误结果：30 分钟后会话被提前回收",
+          "file":"%s","line":8,"side":"RIGHT",
+          "evidence":"L8: return sessionAge.compareTo(Duration.ofMinutes(30)) < 0;\\n矛盾来源：\\n- event EVT-42 — 2026-08-14 会话超时事故",
+          "severity_proposed":"%s","pre_existing_suspect":false,"confidence":0.9}]}"""
+        .formatted(FILE, severity);
+  }
+
+  /** 单事件查询端口（只服务本 PR 的 repo；不触 PG）。 */
+  private static final class SingleEventQuery implements EventHistoryQuery {
+
+    private final String repo;
+    private final ProductEvent event;
+
+    private SingleEventQuery(String repo, ProductEvent event) {
+      this.repo = repo;
+      this.event = event;
+    }
+
+    @Override
+    public List<ProductEvent> search(EventQuery query) {
+      if (query == null || query.repo() == null || !query.repo().equals(repo)) {
+        return List.of();
+      }
+      if (query.since() != null && event.occurredAt().isBefore(query.since())) {
+        return List.of();
+      }
+      return List.of(event);
+    }
+
+    @Override
+    public Optional<ProductEvent> find(String repo, String eventId) {
+      return this.repo.equals(repo) && event.eventId().equals(eventId)
+          ? Optional.of(event)
+          : Optional.empty();
+    }
   }
 
   private static String firstIdIn(String userPrompt) {

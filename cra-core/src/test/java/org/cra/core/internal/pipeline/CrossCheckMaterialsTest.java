@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.List;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
+import org.cra.common.event.ProductEvent;
 import org.cra.common.git.CommitHistoryEntry;
 import org.cra.common.git.DiffFile;
 import org.junit.jupiter.api.Test;
@@ -117,5 +118,87 @@ class CrossCheckMaterialsTest {
         .isLessThanOrEqualTo(CrossCheckMaterials.CONTEXT_TOKEN_CAP + 10);
     assertThat(materials.notes()).anyMatch(n -> n.contains("diff 精简视图超预算截断"));
     assertThat(materials.notes()).anyMatch(n -> n.contains("产品段超预算截断"));
+  }
+
+  @Test
+  void eventHistoryIsInjectedIntoHistorySectionWithCitationId() {
+    ProductEvent event =
+        new ProductEvent(
+            "INC-42",
+            "owner/repo",
+            "billing",
+            "acme",
+            Instant.parse("2026-08-14T03:00:00Z"),
+            "incident",
+            "会话超时事故：企业长会话窗口被改为 8h",
+            "https://tracker/INC-42",
+            List.of("abc1234"),
+            List.of("src/billing"),
+            "{}",
+            Instant.parse("2026-10-27T00:00:00Z"));
+    ReviewPolicy policy =
+        new ReviewPolicy(
+            true, List.of(), null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+            List.of(), List.of());
+
+    CrossCheckMaterials.Materials materials =
+        CrossCheckMaterials.build(List.of(FILE), List.of(), 8, policy, true, false, List.of(event));
+
+    assertThat(materials.historyText())
+        .contains("相关产品事件史")
+        .contains("- event INC-42")
+        .contains("type=incident")
+        .contains("service=billing")
+        .contains("tenant=acme")
+        .contains("paths=src/billing")
+        .contains("commit_refs: abc1234")
+        .contains("source: https://tracker/INC-42")
+        .contains("会话超时事故");
+
+    CrossCheckMaterials.Materials withoutEvents =
+        CrossCheckMaterials.build(List.of(FILE), List.of(), 8, policy, true, false, List.of());
+    assertThat(withoutEvents.historyText()).doesNotContain("相关产品事件史");
+  }
+
+  @Test
+  void eventAndCommitHistoryShareTheFourKTokenBudget() {
+    List<CommitHistoryEntry> history = new java.util.ArrayList<>();
+    for (int i = 0; i < 200; i++) {
+      history.add(
+          new CommitHistoryEntry(
+              String.format("%040x", i + 1),
+              "feat: 企业长会话定制与超时参数调整（携带较长说明文本）" + i,
+              Instant.parse("2026-09-08T10:00:00Z")));
+    }
+    List<ProductEvent> events = new java.util.ArrayList<>();
+    for (int i = 0; i < 50; i++) {
+      events.add(
+          new ProductEvent(
+              "INC-" + i,
+              "owner/repo",
+              "billing",
+              null,
+              Instant.parse("2026-08-14T03:00:00Z"),
+              "incident",
+              "会话超时事故：企业长会话窗口被改为 8h（事件 " + i + "，摘要用于预算测量）",
+              null,
+              List.of(),
+              List.of("src/billing"),
+              "{}",
+              Instant.parse("2026-10-27T00:00:00Z")));
+    }
+    ReviewPolicy policy =
+        new ReviewPolicy(
+            true, List.of(), null, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+            List.of(), List.of());
+
+    CrossCheckMaterials.Materials materials =
+        CrossCheckMaterials.build(List.of(FILE), history, 8, policy, true, false, events);
+
+    assertThat(TokenMath.estimateTokens(materials.historyText()))
+        .isLessThanOrEqualTo(CrossCheckMaterials.HISTORY_TOKEN_CAP + 10);
+    assertThat(TokenMath.estimateTokens(CrossCheckMaterials.eventsText(events, 8)))
+        .isLessThanOrEqualTo(CrossCheckMaterials.EVENT_TOKEN_CAP + 10);
+    assertThat(materials.notes()).anyMatch(n -> n.contains("超预算截断"));
   }
 }

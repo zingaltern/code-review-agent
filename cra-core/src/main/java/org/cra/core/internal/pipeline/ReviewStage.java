@@ -161,8 +161,46 @@ public final class ReviewStage {
       String commitMessages,
       String policySection,
       CrossCheckHistory crossCheckHistory) {
+    return execute(
+        runId,
+        trace,
+        diff,
+        policy,
+        depthPlan,
+        plan,
+        headFiles,
+        budget,
+        prTitle,
+        commitMessages,
+        policySection,
+        crossCheckHistory,
+        CrossCheckEvents.none());
+  }
+
+  /**
+   * 执行评审扇出（含 CrossChecker + 产品事件史，M4f-full）。
+   *
+   * @param crossCheckEvents 与变更相关的产品事件史（未启用/未命中时 {@link CrossCheckEvents#none()}）
+   * @return 汇聚产出
+   */
+  public StageOutcome execute(
+      String runId,
+      TraceWriter trace,
+      DiffResult diff,
+      ReviewPolicy policy,
+      DepthPlan depthPlan,
+      ChunkPlanner.Plan plan,
+      Map<String, FileContent> headFiles,
+      RunBudgetTracker budget,
+      String prTitle,
+      String commitMessages,
+      String policySection,
+      CrossCheckHistory crossCheckHistory,
+      CrossCheckEvents crossCheckEvents) {
     CrossCheckHistory crossHistory =
         crossCheckHistory == null ? CrossCheckHistory.none() : crossCheckHistory;
+    CrossCheckEvents crossEvents =
+        crossCheckEvents == null ? CrossCheckEvents.none() : crossCheckEvents;
     List<BugHunterDefinition.Perspective> basePerspectives =
         ReviewRoutingPolicy.routePerspectives(depthPlan.effectiveDepth());
     boolean securityEnabled = crew.securityReviewer() != null;
@@ -312,16 +350,17 @@ public final class ReviewStage {
                   runId,
                   trace));
         }
-        // M4f-lite CrossChecker（03§3.1）：全 PR 单实例；配置开启 + standard/deep 档 + 至少一个模式有数据
+        // M4f-lite/full CrossChecker（03§3.1）：全 PR 单实例；配置开启 + standard/deep 档 + 至少一个模式有数据
         boolean crossCheck =
             ReviewRoutingPolicy.crossCheckTriggered(
-                depthPlan, policy, crew, crossCheckerOptions, crossHistory);
+                depthPlan, policy, crew, crossCheckerOptions, crossHistory, crossEvents);
         if (crossCheck) {
           boolean assumptionMode =
               crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION)
                   && (!policy.productContext().isEmpty()
                       || !policy.knownIncidents().isEmpty()
-                      || crossHistory.hasData());
+                      || crossHistory.hasData()
+                      || crossEvents.hasData());
           boolean sniffMode =
               crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.SNIFF)
                   && !policy.sniffTests().isEmpty();
@@ -332,16 +371,26 @@ public final class ReviewStage {
                   crossCheckerOptions.historyWeeks(),
                   policy,
                   assumptionMode,
-                  sniffMode);
+                  sniffMode,
+                  assumptionMode ? crossEvents.entries() : List.of());
           contextNotes.addAll(crossHistory.notes());
+          contextNotes.addAll(crossEvents.notes());
           contextNotes.addAll(materials.notes());
           Map<String, Object> event = new LinkedHashMap<>();
           event.put("triggered", true);
           event.put("modes", ReviewRoutingPolicy.activeModes(assumptionMode, sniffMode));
           event.put("history_available", crossHistory.available());
           event.put("history_commits", crossHistory.entries().size());
+          event.put("events_available", crossEvents.available());
+          event.put("events_count", crossEvents.entries().size());
           event.put("diff_tokens", TokenMath.estimateTokens(materials.diffDigest()));
           event.put("history_tokens", TokenMath.estimateTokens(materials.historyText()));
+          event.put(
+              "event_tokens",
+              TokenMath.estimateTokens(
+                  CrossCheckMaterials.eventsText(
+                      assumptionMode ? crossEvents.entries() : List.of(),
+                      crossCheckerOptions.historyWeeks())));
           event.put("context_tokens", TokenMath.estimateTokens(materials.trustedSections()));
           trace.emit("crosscheck", event);
           futures.add(
@@ -357,7 +406,8 @@ public final class ReviewStage {
         } else if (crossCheckerOptions.enabled()) {
           // 覆盖声明（07 T1.4：段落缺失时相关检查优雅跳过——跳过原因必须可见，不静默）
           String reason =
-              ReviewRoutingPolicy.crossCheckSkipReason(depthPlan, policy, crew, crossHistory);
+              ReviewRoutingPolicy.crossCheckSkipReason(
+                  depthPlan, policy, crew, crossHistory, crossEvents);
           contextNotes.add("CrossChecker 未触发：" + reason);
           trace.emit("crosscheck", Map.of("triggered", false, "reason", reason));
         }

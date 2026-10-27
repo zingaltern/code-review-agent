@@ -1,31 +1,58 @@
 package org.cra.server.history;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
- * 事件史采集定时任务骨架（07§5 M4b：只留接口与调度骨架，具体采集在 M4f-full）。
+ * 事件史采集定时任务（07§5 M4f-full，ADR-0012）。
  *
  * <p>默认关闭（CRA_SERVER_EVENT_HISTORY_ENABLED=false）；开启时按 CRA_SERVER_EVENT_HISTORY_CRON（Spring 六段式）调度，
- * 调用 {@link EventHistoryCollector} 并记录结果。M4b 装配的是 {@link
- * NoopEventHistoryCollector}——日志会明确写"未实现"，不伪装采集成功。
+ * 调用 {@link EventHistoryCollector} 并如实记录结果。采集器失败时 {@code executed=false} 且 note 写明原因——不伪装采集成功。
+ *
+ * <p>cron 由 Spring 占位符直接解析（环境变量/application.yml 同源），ServerConfig 组装期已用 {@code CronExpression}
+ * 校验合法性。
  */
 public final class EventHistoryCollectionJob {
 
   private static final Logger LOG = LoggerFactory.getLogger(EventHistoryCollectionJob.class);
 
+  /** 05§5 默认窗口（天）。 */
+  static final int DEFAULT_LOOKBACK_DAYS = 7;
+
   private final boolean enabled;
   private final EventHistoryCollector collector;
+  private final int lookbackDays;
+  private final Clock clock;
 
   /**
    * @param enabled 开关（CRA_SERVER_EVENT_HISTORY_ENABLED）
-   * @param collector 采集端口（M4b = Noop）
+   * @param collector 采集端口（关闭时装配 Noop）
    */
   public EventHistoryCollectionJob(boolean enabled, EventHistoryCollector collector) {
+    this(enabled, collector, DEFAULT_LOOKBACK_DAYS, Clock.systemUTC());
+  }
+
+  /**
+   * @param lookbackDays 单次窗口（天）
+   */
+  public EventHistoryCollectionJob(
+      boolean enabled, EventHistoryCollector collector, int lookbackDays) {
+    this(enabled, collector, lookbackDays, Clock.systemUTC());
+  }
+
+  /**
+   * @param clock 窗口锚点（测试可固定）
+   */
+  EventHistoryCollectionJob(
+      boolean enabled, EventHistoryCollector collector, int lookbackDays, Clock clock) {
     this.enabled = enabled;
     this.collector = collector;
+    this.lookbackDays = lookbackDays;
+    this.clock = clock == null ? Clock.systemUTC() : clock;
   }
 
   /** 调度入口（cron 由配置注入；enabled=false 时只记一条 debug）。 */
@@ -44,15 +71,24 @@ public final class EventHistoryCollectionJob {
       LOG.debug("event-history 采集未启用（CRA_SERVER_EVENT_HISTORY_ENABLED=false）");
       return EventHistoryCollector.CollectionResult.skipped("disabled");
     }
-    Instant since = Instant.now().minusSeconds(7L * 24 * 3600);
-    LOG.info("event-history 采集开始: since={}", since);
+    Instant since = clock.instant().minus(lookbackDays, ChronoUnit.DAYS);
+    LOG.info("event-history 采集开始: since={} lookbackDays={}", since, lookbackDays);
     EventHistoryCollector.CollectionResult result = collector.collect(since);
     LOG.info(
-        "event-history 采集结束: executed={} tickets={} incidents={} note={}",
+        "event-history 采集结束: executed={} fetched={} inserted={} updated={} skipped={} failed={}"
+            + " tickets={} incidents={} note={}",
         result.executed(),
+        result.fetched(),
+        result.inserted(),
+        result.updated(),
+        result.skipped(),
+        result.failed(),
         result.tickets(),
         result.incidents(),
         result.note());
+    if (!result.executed()) {
+      LOG.warn("event-history 采集未成功（如实记录，不重试到调度之外）: {}", result.note());
+    }
     return result;
   }
 }

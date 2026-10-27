@@ -2,11 +2,12 @@ package org.cra.server.history;
 
 import java.time.Instant;
 
-/** M4f-full 占位实现：只声明"未实现"，不伪造采集结果（07§5 M4b 只留接口与调度骨架）。 */
+/** 关闭形态占位实现：只声明"未启用"，不伪造采集结果（M4f-full 真实采集见 {@link IncrementalEventHistoryCollector}）。 */
 public final class NoopEventHistoryCollector implements EventHistoryCollector {
 
   @Override
   public CollectionResult collect(Instant since) {
-    return CollectionResult.skipped("event-history 采集未实现（M4b 仅接口与调度骨架；具体采集在 M4f-full）");
+    return CollectionResult.skipped(
+        "event-history 采集未启用（Noop；CRA_SERVER_EVENT_HISTORY_ENABLED=false 时装配）");
   }
 }
