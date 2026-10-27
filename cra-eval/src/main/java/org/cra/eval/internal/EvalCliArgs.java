@@ -73,6 +73,7 @@ public final class EvalCliArgs {
       Path sha256File,
       String tier,
       String expectCommit,
+      String repo,
       Path signature,
       String signingKeyEnv,
       Path signingKeyFile,

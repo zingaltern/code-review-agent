@@ -63,13 +63,14 @@ class VerifyCommandTest {
   }
 
   private EvalCliArgs.VerifyArgs args(Path report, String sha, String tier, String commit) {
-    return new EvalCliArgs.VerifyArgs(report, sha, null, tier, commit, null, null, null, null);
+    return new EvalCliArgs.VerifyArgs(
+        report, sha, null, tier, commit, null, null, null, null, null);
   }
 
   private EvalCliArgs.VerifyArgs signatureArgs(
       Path report, Path signature, Path keyFile, String tier, String commit) {
     return new EvalCliArgs.VerifyArgs(
-        report, null, null, tier, commit, signature, null, keyFile, null);
+        report, null, null, tier, commit, null, signature, null, keyFile, null);
   }
 
   private Path writeKey(String value) throws Exception {
@@ -87,6 +88,7 @@ class VerifyCommandTest {
             secret,
             "test-key-v1",
             ReportSignature.sha256(Files.readAllBytes(report)),
+            "owner/repo",
             commit,
             tier,
             "2026-10-26T21:00:00Z",
@@ -134,7 +136,8 @@ class VerifyCommandTest {
     Path hashFile = tmp.resolve("l2.json.sha256");
     ReportHasher.writeSha256File(path, hashFile);
     EvalCliArgs.VerifyArgs args =
-        new EvalCliArgs.VerifyArgs(path, null, hashFile, "l2", "abc1234", null, null, null, null);
+        new EvalCliArgs.VerifyArgs(
+            path, null, hashFile, "l2", "abc1234", null, null, null, null, null);
     assertThat(VerifyCommand.execute(args)).isZero();
   }
 
@@ -145,6 +148,21 @@ class VerifyCommandTest {
     Path signature = writeSignature(path, key, "abc1234", "l2");
     assertThat(VerifyCommand.execute(signatureArgs(path, signature, key, "l2", "abc1234")))
         .isZero();
+  }
+
+  @Test
+  void signatureRepoBindingIsCheckedWhenProvided() throws Exception {
+    Path path = writeReport("l2-signed-repo.json", report(19, true));
+    Path key = writeKey("integration-signing-key");
+    Path signature = writeSignature(path, key, "abc1234", "l2");
+    EvalCliArgs.VerifyArgs match =
+        new EvalCliArgs.VerifyArgs(
+            path, null, null, "l2", "abc1234", "owner/repo", signature, null, key, null);
+    assertThat(VerifyCommand.execute(match)).isZero();
+    EvalCliArgs.VerifyArgs mismatch =
+        new EvalCliArgs.VerifyArgs(
+            path, null, null, "l2", "abc1234", "other/repo", signature, null, key, null);
+    assertThat(VerifyCommand.execute(mismatch)).isEqualTo(5);
   }
 
   @Test

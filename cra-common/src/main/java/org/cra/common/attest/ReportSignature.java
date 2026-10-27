@@ -18,9 +18,10 @@ import javax.crypto.spec.SecretKeySpec;
  * <p>信封格式（行序固定，UTF-8）：
  *
  * <pre>
- * cra-report-hmac-sha256-v1
+ * cra-report-hmac-sha256-v2
  * key_id:&lt;服务端密钥标识&gt;
  * report_sha256:&lt;报告文件 SHA-256 小写十六进制&gt;
+ * repo:&lt;owner/name&gt;
  * commit:&lt;报告绑定的代码提交，可为空&gt;
  * tier:&lt;l1|l2|l3，可为空&gt;
  * issued_at:&lt;ISO-8601 签发时间&gt;
@@ -34,7 +35,7 @@ import javax.crypto.spec.SecretKeySpec;
 public final class ReportSignature {
 
   /** 签名方案标识（格式变更必须 bump 版本并写 ADR）。 */
-  public static final String SCHEME = "cra-report-hmac-sha256-v1";
+  public static final String SCHEME = "cra-report-hmac-sha256-v2";
 
   private static final String HMAC_ALGORITHM = "HmacSHA256";
   private static final int SHA256_HEX_LENGTH = 64;
@@ -46,6 +47,7 @@ public final class ReportSignature {
    *
    * @param keyId 服务端密钥标识（轮换时区分密钥）
    * @param reportSha256 报告文件 SHA-256（小写十六进制）
+   * @param repo 报告归属仓库（owner/name，v2 新增；多租户签发范围限定）
    * @param commit 报告绑定的代码提交（可为空串）
    * @param tier 报告门禁档位（l1|l2|l3，可为空串）
    * @param issuedAt 签发时间（ISO-8601）
@@ -55,6 +57,7 @@ public final class ReportSignature {
   public record Envelope(
       String keyId,
       String reportSha256,
+      String repo,
       String commit,
       String tier,
       String issuedAt,
@@ -64,6 +67,7 @@ public final class ReportSignature {
     public Envelope {
       keyId = requireText(keyId, "keyId");
       reportSha256 = requireSha256(reportSha256, "reportSha256");
+      repo = requireRepo(repo);
       commit = commit == null ? "" : commit.strip();
       tier = tier == null ? "" : tier.strip();
       issuedAt = requireText(issuedAt, "issuedAt");
@@ -82,6 +86,7 @@ public final class ReportSignature {
           SCHEME,
           "key_id:" + keyId,
           "report_sha256:" + reportSha256,
+          "repo:" + repo,
           "commit:" + commit,
           "tier:" + tier,
           "issued_at:" + issuedAt,
@@ -118,6 +123,7 @@ public final class ReportSignature {
    * @param secret HMAC 密钥（服务端持有；UTF-8 原始字节）
    * @param keyId 密钥标识
    * @param reportSha256 报告文件 SHA-256
+   * @param repo 报告归属仓库（owner/name）
    * @param commit 报告绑定的代码提交（可空）
    * @param tier 档位（可空）
    * @param issuedAt 签发时间
@@ -128,15 +134,16 @@ public final class ReportSignature {
       byte[] secret,
       String keyId,
       String reportSha256,
+      String repo,
       String commit,
       String tier,
       String issuedAt,
       String runId) {
     requireSecret(secret);
     Envelope unsigned =
-        new Envelope(keyId, reportSha256, commit, tier, issuedAt, runId, "0".repeat(64));
+        new Envelope(keyId, reportSha256, repo, commit, tier, issuedAt, runId, "0".repeat(64));
     String signature = hmacHex(secret, unsigned.canonicalText());
-    return new Envelope(keyId, reportSha256, commit, tier, issuedAt, runId, signature);
+    return new Envelope(keyId, reportSha256, repo, commit, tier, issuedAt, runId, signature);
   }
 
   /**
@@ -177,8 +184,8 @@ public final class ReportSignature {
             .map(String::strip)
             .filter(line -> !line.isEmpty())
             .toList();
-    if (lines.size() != 8) {
-      throw new IllegalArgumentException("签名信封行数非法: " + lines.size() + "（期望 8）");
+    if (lines.size() != 9) {
+      throw new IllegalArgumentException("签名信封行数非法: " + lines.size() + "（期望 9）");
     }
     if (!SCHEME.equals(lines.get(0))) {
       throw new IllegalArgumentException("签名方案不支持: " + lines.get(0));
@@ -186,11 +193,12 @@ public final class ReportSignature {
     return new Envelope(
         value(lines.get(1), "key_id"),
         value(lines.get(2), "report_sha256"),
-        value(lines.get(3), "commit"),
-        value(lines.get(4), "tier"),
-        value(lines.get(5), "issued_at"),
-        value(lines.get(6), "run_id"),
-        value(lines.get(7), "signature"));
+        value(lines.get(3), "repo"),
+        value(lines.get(4), "commit"),
+        value(lines.get(5), "tier"),
+        value(lines.get(6), "issued_at"),
+        value(lines.get(7), "run_id"),
+        value(lines.get(8), "signature"));
   }
 
   private static String value(String line, String field) {
@@ -209,6 +217,14 @@ public final class ReportSignature {
       throw new IllegalArgumentException(field + " 不得包含换行");
     }
     return value.strip();
+  }
+
+  private static String requireRepo(String value) {
+    String normalized = requireText(value, "repo");
+    if (!normalized.matches("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) {
+      throw new IllegalArgumentException("repo 必须为 owner/name 形式: " + value);
+    }
+    return normalized;
   }
 
   private static String requireSha256(String value, String field) {

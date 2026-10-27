@@ -7,6 +7,7 @@ import java.time.Instant;
  *
  * @param attestationId 签发标识（att_…）
  * @param reportSha256 报告文件 SHA-256
+ * @param repo 报告归属仓库（owner/name，v2）
  * @param commitSha 报告绑定的 commit
  * @param tier 报告档位
  * @param keyId 密钥标识
@@ -17,6 +18,7 @@ import java.time.Instant;
 public record AttestationRecord(
     String attestationId,
     String reportSha256,
+    String repo,
     String commitSha,
     String tier,
     String keyId,

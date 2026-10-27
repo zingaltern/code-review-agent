@@ -18,6 +18,7 @@ class ReportSignatureTest {
         SECRET,
         "test-key-v1",
         ReportSignature.sha256(REPORT),
+        "owner/repo",
         "abc1234",
         "l2",
         "2026-10-26T21:00:00Z",
@@ -46,6 +47,7 @@ class ReportSignatureTest {
         new ReportSignature.Envelope(
             signed.keyId(),
             signed.reportSha256(),
+            signed.repo(),
             "deadbeef",
             signed.tier(),
             signed.issuedAt(),
@@ -85,7 +87,14 @@ class ReportSignatureTest {
     assertThatThrownBy(
             () ->
                 ReportSignature.sign(
-                    new byte[0], "k", ReportSignature.sha256(REPORT), "", "", "t", "r"))
+                    new byte[0],
+                    "k",
+                    ReportSignature.sha256(REPORT),
+                    "owner/repo",
+                    "",
+                    "",
+                    "t",
+                    "r"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("密钥");
   }
