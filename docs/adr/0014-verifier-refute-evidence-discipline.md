@@ -146,10 +146,12 @@ judge（arbitrate.md）：
 - trace 观察指标（不进门禁）：`refute_evidence_check` 的 DOWNGRADE 计数与 reason 分布、
   `call_site_index` 可得率、judge 调用数增量；
 - 有界对比：8 个翻转 case × k=3 × temperature=0.2 × L3 standard，改前基线
-  `40536205522`，改后同参数各跑一次；指标 = 检出、REFUTED/INSUFFICIENT 计数、
-  JacksonCore-8 是否 CONFIRMED、零发布观测、token；
-- `mvn -B -ntp verify` 全绿；L2 按 04§2.4 重跑并作为 PR 最后一个提交；全量 L3 只在
-  owner 批准后执行。
+  `40536205522`（19/24，JacksonCore-8 0/3），改后 `40548011855`
+  （22/24，JacksonCore-8 2/3，样本级全零 0/8）；机制上改后 0 次机械降级——
+  提示词让模型直接不再以引述不符判 REFUTED（CONFIRMED 或 INSUFFICIENT），机械门未触发；
+  judge 调用 6→14 次（+28.3k in / +2.2k out）；详见 07§M4 收口记录与 PR；
+- `mvn -B -ntp verify` 全绿（2109 tests，含 PG 集成）；L2 按 04§2.4 重跑并作为 PR 最后一个提交；
+  全量 L3 只在 owner 批准后执行。
 
 ## 5. 已知局限
 
@@ -157,5 +159,6 @@ judge（arbitrate.md）：
 - 调用点索引只扫同目录候选，跨包调用者仍可能不可见；这是有界成本下的近似，简报显式声明。
 - 评测 harness 的 stub tree 为空 → L3 上索引 `available=false`；索引路径由单测 + 脚本化
   LLM fixture 覆盖，L3 结论只反映 2.1/2.3 的效果。生产 GitHub 形态一次 tree 调用即可用。
-- 机械校验对非 bug 类不生效（security 类 REFUTED 仍走既有抽查保险丝）；是否扩展到全部类别
-  留待数据（拒真池）积累后决定。
+- 机械校验只对 bug 类生效：改后有界对比中唯一残留的 REFUTED 候选为非 bug 类（gate
+  NOT_APPLICABLE，按设计放行）——是否把纪律扩展到 test/security 需等拒真池数据。
+- 单次有界对比 n=24，Wilson 区间与基线重叠；提升幅度（+3）不作为显著性结论。
