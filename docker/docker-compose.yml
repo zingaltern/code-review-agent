@@ -1,4 +1,4 @@
-# M4b 服务化部署（PG + cra-server）。生产必须覆盖默认密钥与 LLM/GitHub 配置。
+# M4b 服务化部署（PG + cra-server）。生产必须覆盖默认密钥与 LLM/GitHub/GitLab 配置。
 name: cra-server
 
 services:
@@ -50,9 +50,15 @@ services:
       # 服务端无 checkout：pre-existing 检测降级声明（05§2.1）
       CRA_SERVER_WORKSPACE: /workspace
       CRA_SERVER_RUN_TOTAL_TOKENS: ${CRA_SERVER_RUN_TOTAL_TOKENS:-500000}
+      # --- 平台选择（M4e 第二半，ADR-0012） ---
+      CRA_SERVER_PLATFORM: ${CRA_SERVER_PLATFORM:-github}
       # --- GitHub ---
       CRA_GITHUB_API_BASE: ${CRA_GITHUB_API_BASE:-https://api.github.com}
       CRA_GITHUB_TOKEN: ${CRA_GITHUB_TOKEN:-}
+      # --- GitLab（platform=gitlab 时生效） ---
+      CRA_GITLAB_BASE_URL: ${CRA_GITLAB_BASE_URL:-https://gitlab.com/api/v4}
+      CRA_GITLAB_TOKEN: ${CRA_GITLAB_TOKEN:-}
+      CRA_GITLAB_BOT_USERNAME: ${CRA_GITLAB_BOT_USERNAME:-}
       # --- LLM（必填；缺失则拒绝启动） ---
       CRA_LLM_API_KEY: ${CRA_LLM_API_KEY:-}
       CRA_LLM_BASE_URL: ${CRA_LLM_BASE_URL:-}

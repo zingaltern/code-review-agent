@@ -1,34 +1,36 @@
 # cra-server 部署形态（M4b 服务化）
 
-> 依据：02§5（部署形态与状态归属）、07§5 M4b、ADR-0008。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
-> 适用读者：部署本服务的 owner / 运维。评审逻辑本身见 02/03/04，不在本文重复。
+> 依据：02§5（部署形态与状态归属）、07§5 M4b/M4e、ADR-0008/ADR-0012。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
+> 适用读者：部署本服务的 owner / 运维。评审逻辑本身见 02/03/04，不在本文重复；GitLab 平台事实见 `deployment-gitlab.md`。
 
 ---
 
 ## 1. 形态总览
 
 ```
-GitHub ──webhook(HMAC)──▶ cra-server
-                            ├─ WebhookController（验签 → pull_request 子集解析）
-                            ├─ WebhookIngestService（delivery 幂等 claim → 有界队列）
-                            ├─ ReviewQueue（有界 + 背压 + 固定 worker）
-                            │     └─ ReviewJobHandler → CoreReviewExecutor
-                            │            └─ cra-core ReviewPipeline（与 CLI 同一实现）
-                            ├─ PostgreSQL 账本（cra-store PostgresLedger，05§1.5 五表）
-                            └─ AttestationController（/api/v1/reports/attest，HMAC 报告签名）
+GitHub ──webhook(HMAC)──┐
+                        ├─▶ cra-server
+GitLab ──webhook(token)─┘      ├─ WebhookController / GitLabWebhookController（按平台注册）
+                               │     └─ 验签 → PR/MR 事件子集解析
+                               ├─ WebhookIngestService（delivery 幂等 claim → 有界队列）
+                               ├─ ReviewQueue（有界 + 背压 + 固定 worker）
+                               │     └─ ReviewJobHandler → CoreReviewExecutor
+                               │            └─ cra-core ReviewPipeline（与 CLI 同一实现）
+                               ├─ PostgreSQL 账本（cra-store PostgresLedger，05§1.5 五表）
+                               └─ AttestationController（/api/v1/reports/attest，HMAC 报告签名）
 ```
 
-- **第二组合根**：cra-server 与 cra-runner-cli 只是两种壳（02§5），评审逻辑完全复用 core；
-- **账本**：PostgreSQL，按仓库创建 `ReviewLedger` 实例（delivery 表与签发表为 server 自有）；
-- **队列**：进程内有界队列（不引入外部 broker，理由见 ADR-0008）；满时 HTTP 503 → GitHub 按同一 delivery 重投；
-- **幂等**：delivery id（PG 唯一键）挡重复投递；core 的 commit 闸 + 指纹账本挡同 head 重跑（02§4.1）；
+- **第二组合根**：cra-server 与 cra-runner-cli 只是两种壳（02§5），评审逻辑完全复用 core；**平台由 `CRA_SERVER_PLATFORM` 在装配期决定**（M4e 第二半，ADR-0012），只注册当前平台的 webhook 端点；
+- **账本**：PostgreSQL，按仓库创建 `ReviewLedger` 实例（delivery 表与签发表为 server 自有）；账本键仍为 repo + pr/commit，与平台无关；
+- **队列**：进程内有界队列（不引入外部 broker，理由见 ADR-0008）；满时 HTTP 503 → 平台按同一 delivery/event 重投；
+- **幂等**：delivery id（PG 唯一键）挡重复投递（GitLab 用 `X-Gitlab-Event-UUID`，缺失时用 payload 摘要）；core 的 commit 闸 + 指纹账本挡同 head 重跑（02§4.1）；
 - **签名报告**：服务端对 L2 报告签发 HMAC 信封，`cra-eval verify --signature` 校验（04§2.4）。
 
 ## 2. 快速启动（docker-compose）
 
 ```bash
 cd docker
-cp .env.example .env          # 覆盖全部密钥；填入 CRA_LLM_* 与 CRA_GITHUB_TOKEN
+cp .env.example .env          # 覆盖全部密钥；填入 CRA_LLM_* 与平台凭证（GitHub 或 GitLab）
 docker compose up --build -d
 docker compose ps             # 等 postgres 与 server 都 healthy
 curl -fsS http://127.0.0.1:8080/readyz
@@ -50,6 +52,19 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 服务端只接受 `X-Hub-Signature-256`（HMAC-SHA256），验签在 JSON 解析之前；失败 401，不泄露细节。
 
+### 2.2 GitLab webhook 配置（M4e 第二半，ADR-0012）
+
+设置 `CRA_SERVER_PLATFORM=gitlab` 后只注册 GitLab 端点（GitHub 端点返回 404）；默认 `github` 只注册 GitHub 端点。
+
+| 项 | 值 |
+|---|---|
+| Payload URL | `https://<your-host>/webhooks/gitlab` |
+| Secret token | 与 `CRA_SERVER_WEBHOOK_SECRET` 一致（`X-Gitlab-Token` 直传校验，不是 HMAC） |
+| Trigger | Merge request events（push/issue/note 等事件 200 ignored，带显式 `reason`） |
+| 评审动作 | `open` / `reopen` / 带新提交的 `update`（`oldrev` 非空）；draft、merge、close、审批、仅元数据更新显式忽略 |
+
+GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployment-gitlab.md](deployment-gitlab.md) §8/§9。
+
 ## 3. 环境变量表
 
 密钥只从环境变量读（05§6）；下表“必填”项缺失时服务拒绝启动（fail closed）。
@@ -60,7 +75,12 @@ curl -fsS http://127.0.0.1:8080/readyz
 | `CRA_SERVER_DB_URL` | 否 | `jdbc:postgresql://localhost:5432/cra` | PG JDBC URL（compose 注入） |
 | `CRA_SERVER_DB_USER` / `CRA_SERVER_DB_PASSWORD` | 否 | `cra` | PG 凭据（compose 注入；生产必须覆盖密码） |
 | `CRA_SERVER_DB_POOL` | 否 | `10` | Hikari 连接池上限 |
-| `CRA_SERVER_WEBHOOK_SECRET` | 是 | — | GitHub webhook HMAC 密钥 |
+| `CRA_SERVER_WEBHOOK_SECRET` | 是 | — | webhook 密钥：GitHub = HMAC 密钥；GitLab = webhook Secret token（`X-Gitlab-Token`） |
+| `CRA_SERVER_PLATFORM` | 否 | `github` | 平台选择（`github`\|`gitlab`，小写；M4e 第二半，ADR-0012） |
+| `CRA_GITLAB_BASE_URL` | 否 | `https://gitlab.com/api/v4` | GitLab API 根（实例根或已含 `/api/v4` 均可，自动归一） |
+| `CRA_GITLAB_TOKEN` | gitlab 模式必填 | — | GitLab access token（`api` scope；PRIVATE-TOKEN） |
+| `CRA_GITLAB_TOKEN_FILE` | 否 | — | token 文件路径（容器/K8s secret mount；与 `CRA_GITLAB_TOKEN` 二选一，前者优先） |
+| `CRA_GITLAB_BOT_USERNAME` | 否 | — | `/user` 不可读时的 bot 身份回退（CI job token 场景必填） |
 | `CRA_SERVER_API_TOKEN` | 是 | — | `/api/v1/**` Bearer token |
 | `CRA_SERVER_SIGNING_KEY` | 是 | — | 报告签名 HMAC 密钥（CI 侧同名 `CRA_REPORT_SIGNING_KEY`） |
 | `CRA_SERVER_SIGNING_KEY_ID` | 否 | `cra-server-v1` | 密钥标识（轮换用，进签名信封） |
@@ -91,9 +111,10 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 | 端点 | 鉴权 | 说明 |
 |---|---|---|
-| `POST /webhooks/github` | HMAC-SHA256 | 202 已入队；200 重复 delivery / 事件忽略；400 缺头/非法 payload；401 验签失败；503 队列满（带 `Retry-After: 30`） |
+| `POST /webhooks/github` | HMAC-SHA256 | 202 已入队；200 重复 delivery / 事件忽略；400 缺头/非法 payload；401 验签失败；503 队列满（带 `Retry-After: 30`）。仅 `CRA_SERVER_PLATFORM=github`（或未设置）时注册 |
+| `POST /webhooks/gitlab` | `X-Gitlab-Token` | 语义同上；200 ignored 带 `reason`（`unsupported_event` / `draft` / `merged` / `metadata_update` 等）。仅 `CRA_SERVER_PLATFORM=gitlab` 时注册 |
 | `POST /api/v1/reports/attest` | Bearer | 原始报告 JSON → `text/plain` 签名信封；400 非法报告；409 commit 未经服务端评审；401 未授权 |
-| `GET /healthz` | 无 | 进程 + 队列统计（capacity/queued/inFlight/accepted/completed/failed/rejected） |
+| `GET /healthz` | 无 | 进程 + 队列统计（capacity/queued/inFlight/accepted/completed/failed/rejected）+ `platform` |
 | `GET /readyz` | 无 | PG 可达才 200；不可达 503（docker healthcheck 用） |
 
 **背压语义**：队列满时先释放 delivery 占位再回 503——GitHub 重投同一 delivery 时可再次 claim，不会因为一次背压永久丢失；成功 delivery 的重复投递在 claim 阶段被拒（200 duplicate），不会二次评审；**失败 delivery 的重投允许重试**（`FAILED → RECEIVED` 原子重置，仅一个重投能成功），LLM 暂不可得等可恢复故障不必人工换 delivery id。

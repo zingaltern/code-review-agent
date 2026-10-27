@@ -1,6 +1,6 @@
 # 05 · 数据模型与集成设计
 
-> 文档版本：v1.5（2026-10-27，M4e 第一半：GitLab 适配器端点差异/账本映射/待验证项落 ADR-0011 与 docs/deployment-gitlab.md；SPI 签名不变）
+> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0012）；调试/契约不变）
 > 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
@@ -279,7 +279,7 @@ resolve 仍不采（GraphQL-only）。
 
 **resolve 状态为 GraphQL-only**：REST v3 锁定下不采、不操作（06§1.1、02§5）。
 
-**GitLab 实现（M4e 第一半，ADR-0011）**：端点、认证、分页、限流、触发边界、账本映射与不可得信号的**主载体**是 `docs/deployment-gitlab.md`（11§6 要求的平台边界表落点）。本节 GitHub 端点清单不适用于 GitLab；SPI 签名与账本标记格式不变。
+**GitLab 实现（M4e，ADR-0011/0012）**：端点、认证、分页、限流、触发边界、账本映射与不可得信号的**主载体**是 `docs/deployment-gitlab.md`（11§6 要求的平台边界表落点）。本节 GitHub 端点清单不适用于 GitLab；SPI 签名与账本标记格式不变。M4e 第二半起 CLI/server 可按平台选择 GitLab 实现（`--platform gitlab` / `CRA_SERVER_PLATFORM=gitlab`），账本键仍为 repo + pr/commit。
 
 ## 3. CLI 契约（cra-runner-cli）
 
@@ -309,7 +309,16 @@ cra review --push --repo "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
 
 # 夜间存量评审（M4d，05§2.5；产出 issue，扫描范围可配）
 cra sweep --repo owner/name --since 30d --max-prs 10 --depth quick --token "$GITHUB_TOKEN" [--dry-run]
+
+# GitLab CI 模式（M4e 第二半，ADR-0012；token 只认 CRA_GITLAB_TOKEN / _FILE）
+cra review --platform gitlab --gitlab-project "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID" \
+  --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --depth standard
+
+# GitLab 夜间存量（issue 载体，语义与 GitHub sweep 同口径）
+cra sweep --platform gitlab --gitlab-project group/project --since 30d --max-prs 10
 ```
+
+**平台选择语义（M4e 第二半）**：`--platform` > `CRA_GIT_PLATFORM` > `github`；GitLab 模式的项目路径取 `--gitlab-project` > `CRA_GITLAB_PROJECT` > `CI_PROJECT_PATH` > `--repo`（嵌套 group 按最后一个 `/` 拆分）；`--token` 在 GitLab 模式被拒绝（防串用），token 只从 `CRA_GITLAB_TOKEN` / `CRA_GITLAB_TOKEN_FILE` 读取；`--gitlab-base-url` 可给实例根或 `/api/v4` 根（自动归一）。`--local` 形态与平台无关（jgit + SQLite，不要求远程 token）。
 
 **push 形态参数语义（v1.4）**：`--push` 与 `--pr`/`--local` 互斥；`--base` 省略时由 CLI 沿首父链查 commit
 comment 账本解析"上一完成 commit"（`--lookback` 默认 20；首次 = 仓库初版），`--baseline` 是 `--base` 的同义显式
@@ -467,6 +476,18 @@ cra:
     review-policy-source: base      # v1.1：固定 base，禁 head（04§3.2）
 ```
 
+**平台选择（M4e 第二半，ADR-0012）**：平台不是 `application.yml` 的模型配置，而是组合根启动参数（平台实现模块互不依赖，11§4）：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `CRA_GIT_PLATFORM` / `--platform` | CLI 平台（`github`\|`gitlab`） | `github` |
+| `CRA_SERVER_PLATFORM` | server 平台（`github`\|`gitlab`，小写） | `github` |
+| `CRA_GITLAB_BASE_URL` / `--gitlab-base-url` | GitLab API 根（实例根或 `/api/v4` 根自动归一） | `https://gitlab.com/api/v4` |
+| `CRA_GITLAB_TOKEN` / `CRA_GITLAB_TOKEN_FILE` | GitLab token（只从环境/文件；`--token` 仅 GitHub） | — |
+| `CRA_GITLAB_PROJECT` / `--gitlab-project` | CLI 的 GitLab 项目（`group/project`，可嵌套 group）；server 从 MR payload 的 `project.path_with_namespace` 取 | `CI_PROJECT_PATH` |
+| `CRA_GITLAB_BOT_USERNAME` | `/user` 不可读时的 bot 身份回退 | 空 |
+| `CRA_SERVER_WEBHOOK_SECRET` | GitHub HMAC 密钥 / GitLab webhook Secret token | 必填 |
+
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 
 ```markdown
@@ -478,7 +499,7 @@ M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复
 
 ## 6. 安全与合规检查单（v1.1 扩充）
 
-- [ ] 密钥只从环境变量读取，trace/日志脱敏（`sk-`、`ghp_` 前缀正则掩码）；
+- [ ] 密钥只从环境变量/密钥文件读取（`CRA_GITLAB_TOKEN_FILE` 错误信息不含内容）；token 不写入 trace/日志/仓库；
 - [ ] 子代理无网络、无 shell、无仓库外路径（实现层硬编码，不靠 prompt）；
 - [ ] **REVIEW.md 只读 base SHA**；PR 含 REVIEW.md 变更时按 base 策略执行并警告（04§3.2）；
 - [ ] **不可信内容（diff/注释/commit msg/finding/验证输出）一律 UNTRUSTED 定界**，system prompt 含指令层级声明（04§3.3）；
