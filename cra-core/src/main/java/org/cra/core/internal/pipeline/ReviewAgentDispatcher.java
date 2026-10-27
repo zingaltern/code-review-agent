@@ -80,9 +80,45 @@ final class ReviewAgentDispatcher {
       String policySection,
       String runId,
       TraceWriter trace) {
+    return submitChunk(
+        agent,
+        chunk,
+        headFiles,
+        depthPlan,
+        simplified,
+        extraSection,
+        prTitle,
+        commitMessages,
+        policySection,
+        runId,
+        trace,
+        CrossFileSlices.empty());
+  }
+
+  /**
+   * 按 chunk 派发（含 L2 跨文件切片；ADR-0014：仅 BH-dataflow / Security 注入，切片 token 从 L1 预算扣除）。
+   *
+   * @param slices 本 chunk 的 L2 切片（未启用/不可得为 {@link CrossFileSlices#empty()}）
+   */
+  Future<DispatchOutcome> submitChunk(
+      SubAgent<ReviewAgentInput> agent,
+      ChunkPlanner.Chunk chunk,
+      Map<String, FileContent> headFiles,
+      DepthPlan depthPlan,
+      boolean simplified,
+      String extraSection,
+      String prTitle,
+      String commitMessages,
+      String policySection,
+      String runId,
+      TraceWriter trace,
+      CrossFileSlices slices) {
     Map<String, FileContent> scoped = scopedFiles(chunk, headFiles);
+    boolean sliceRole = CrossFileSliceAssembler.isSliceRole(agent.role().id());
+    long sliceTokens = sliceRole ? slices.estimatedTokens() : 0L;
     ContextInput contextInput =
-        buildContextInput(chunk, headFiles, depthPlan, simplified, agent.budget().maxInputTokens());
+        buildContextInput(
+            chunk, headFiles, depthPlan, simplified, agent.budget().maxInputTokens(), sliceTokens);
     return pool.submit(
         () ->
             dispatch(
@@ -95,7 +131,8 @@ final class ReviewAgentDispatcher {
                 commitMessages,
                 policySection,
                 runId,
-                trace));
+                trace,
+                sliceRole ? slices : CrossFileSlices.empty()));
   }
 
   /** 全 PR 级专角色派发（Test/Convention：仅 L0 diff，无窗口/全文；scope = 全部 chunk 文件）。 */
@@ -122,7 +159,8 @@ final class ReviewAgentDispatcher {
                 commitMessages,
                 policySection,
                 runId,
-                trace));
+                trace,
+                CrossFileSlices.empty()));
   }
 
   /**
@@ -161,7 +199,7 @@ final class ReviewAgentDispatcher {
                           materials.diffDigest()
                               + materials.historyText()
                               + materials.trustedSections());
-                  return new Prepared(input, hasTools, estimated, List.of(), List.of());
+                  return new Prepared(input, hasTools, estimated, 0L, List.of(), List.of());
                 },
                 whole.scoped(),
                 runId,
@@ -183,7 +221,8 @@ final class ReviewAgentDispatcher {
       String commitMessages,
       String policySection,
       String runId,
-      TraceWriter trace) {
+      TraceWriter trace,
+      CrossFileSlices slices) {
     return executeGuarded(
         agent,
         scope,
@@ -196,14 +235,15 @@ final class ReviewAgentDispatcher {
                   commitMessages,
                   context.diffText(),
                   context.windowText(),
-                  "", // L2 切片（04§1）：M2 未实现切片生成，dataflow/security 模板如实渲染占位说明
+                  slices.text(), // L2 跨文件切片（04§1；ADR-0014，仅 dataflow/security 注入）
                   extraSection,
                   policySection,
                   hasTools ? scoped.keySet() : EMPTY_PATHS);
           return new Prepared(
               input,
               hasTools,
-              context.estimatedTokens(),
+              context.estimatedTokens() + slices.estimatedTokens(),
+              slices.estimatedTokens(),
               context.coverageNotes(),
               context.trimDecisions());
         },
@@ -217,6 +257,7 @@ final class ReviewAgentDispatcher {
       ReviewAgentInput input,
       boolean hasTools,
       long estimatedTokens,
+      long slicesTokens,
       List<String> coverageNotes,
       List<String> trimDecisions) {}
 
@@ -239,6 +280,7 @@ final class ReviewAgentDispatcher {
               "chunk", scope.key(),
               "brief_path", briefPath.toString(),
               "est_tokens", prepared.estimatedTokens(),
+              "slices_tokens", prepared.slicesTokens(),
               "trim_decisions", prepared.trimDecisions()));
       AgentRunner.AgentRun<List<CandidateFinding>> run =
           agentRunner.execute(
@@ -383,10 +425,13 @@ final class ReviewAgentDispatcher {
       Map<String, FileContent> headFiles,
       DepthPlan depthPlan,
       boolean simplified,
-      long agentInputBudget) {
+      long agentInputBudget,
+      long sliceTokens) {
     boolean fullText = depthPlan.conditionalFullText() && !simplified;
     int window = simplified ? Math.min(depthPlan.windowLines(), 15) : depthPlan.windowLines();
-    long reserved = TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000;
+    // L2 切片占用该代理的输入预算（ADR-0014）：从 L1 预算扣除，保证 brief 不越单代理硬限
+    long reserved =
+        TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000 + Math.max(0, sliceTokens);
     long l1Budget = Math.max(1_000, agentInputBudget - reserved);
     return new ContextInput(
         chunk.files(), headFiles, window, fullText, depthPlan.fullFileMaxLines(), l1Budget);

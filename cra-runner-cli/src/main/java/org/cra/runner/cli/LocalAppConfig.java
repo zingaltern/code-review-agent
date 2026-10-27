@@ -104,6 +104,18 @@ class LocalAppConfig {
   }
 
   @Bean
+  org.cra.core.api.SemanticContextOptions semanticContextOptions() {
+    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片
+    return config.semanticContext().toOptions();
+  }
+
+  @Bean
+  org.cra.git.api.SymbolIndex symbolIndex() {
+    // ADR-0014：jgit 树读取 + Java 词法抽取；非 git checkout 时 build 返回不可得快照（不炸 run）
+    return org.cra.git.api.GitAssembly.createSymbolIndex(java.nio.file.Path.of(config.workspace()));
+  }
+
+  @Bean
   Orchestrator orchestrator(
       GitPlatformAdapter adapter,
       ReviewLedger ledger,
@@ -114,7 +126,9 @@ class LocalAppConfig {
       org.cra.core.api.PipelineOptions pipelineOptions,
       org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
       org.cra.core.api.SignoffOptions signoffOptions,
-      LocalRepoContext localRepoContext) {
+      LocalRepoContext localRepoContext,
+      org.cra.core.api.SemanticContextOptions semanticContextOptions,
+      org.cra.git.api.SymbolIndex symbolIndex) {
     return CoreAssembly.createOrchestrator(
         adapter,
         ledger,
@@ -126,6 +140,9 @@ class LocalAppConfig {
         pipelineOptions,
         localRepoContext,
         crossCheckerOptions,
-        signoffOptions);
+        signoffOptions,
+        null,
+        semanticContextOptions,
+        symbolIndex);
   }
 }

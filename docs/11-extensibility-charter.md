@@ -1,5 +1,6 @@
 # 11 · 扩展性契约
 
+> 文档版本：v1.5（2026-10-28，M4e 池内项"语义索引 / 跨文件上下文"第一版：§2 登记 `SymbolIndex`（**内部接缝**，ADR-0014；不改 ContextAssembler 签名）；§7 M4e 更新为"GitLab 已接线、语义索引已落地（默认关闭）、Gerrit 未做"）
 > 文档版本：v1.4（2026-10-27，M4e 第二半 + M4f-full：两行补 CLI/server 平台选择（ADR-0013）；新增事件源/事件检索/存储登记（ADR-0012）；真实写操作 pending）
 > 文档版本：v1.3（2026-10-27，M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；Gerrit 与语义索引未做）
 > 文档版本：v1.2（2026-10-26，M4b：账本 PG 形态落地 + 报告签名信封登记；M4c/M4d：载体扩展登记——Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行补 commit-comment 与 issue 载体及键控方法，§7 对应两项转为"已登记并实现"）
@@ -36,7 +37,8 @@
 | 事件检索/存储 | `EventHistoryQuery` / `EventHistoryStore`（`cra-common`，05§1.6、ADR-0012） | 稳定 | `PostgresEventHistoryStore`（M4f-full；`product_event` + 水位表）；`EventHistoryQuery.empty()` 供 CLI/无数据部署 | 读：`search(EventQuery)` + `find(repo,eventId)`；写：`upsertAll`（幂等键 `(repo,event_id)`）+ `checkpoint/saveCheckpoint`；不可得语义 = 运行时异常 → CrossChecker 降级 `available=false` + 覆盖声明（不得当作"已检查无矛盾"）；接入走 §6 checklist |
 | LLM 模型路由 | `application.yml` 三档配置（05§5） | 演进（配置级） | standard / strong / light + fallback-chain + per-model RPM（05§5） | **无代码改动**：配置增条目即可；换模型家族属"模型改动"，触发 L2 评测回归（04§2.4） |
 | 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 30 + clean 20 + 对抗 16（含 context 6；M1 基线为 bad 12 + clean 8 + 对抗 10），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
-| ContextAssembler 切片策略 | L0–L5 分层与裁剪（04§1） | **内部，暂不开放** | cra-context（02§3） | 不开放原因：切片启发式与 04§2 预算算术、Summary 覆盖声明强耦合（04§1 裁剪优先级）——外部定制切片会绕过成本核算与覆盖声明 |
+| 语义索引数据面 | `SymbolIndex`（`cra-git/api`，ADR-0014） | **内部，暂不开放**（单一实现，且与 L2 预算/覆盖声明强耦合） | `JgitSymbolIndex`：jgit 树读取 + Java 词法/结构抽取（Java-only）；快照 POJO 在 `cra-common.semantic`；**默认关闭**（`CRA_SEMANTIC_CONTEXT_ENABLED=false`） | 不开放原因：索引形状与消费方（跨文件切片、CrossChecker 路径集）强耦合，切片又与 04§2 预算算术/覆盖声明耦合——开放会诱导绕过预算核算。变更程序（11§4）：接口只加 `default` 方法；不可得语义 = 返回不可得快照（不抛异常）；若要换实现（如 JavaParser/多语言），保持端口形状不变、按 ADR 记录 |
+| ContextAssembler 切片策略 | L0–L5 分层与裁剪（04§1） | **内部，暂不开放** | cra-context（02§3）；**L2 切片的"数据面"由 cra-git `SymbolIndex` + cra-core `CrossFileSliceAssembler` 承载（ADR-0014，默认关闭）**——`ContextAssembler` 签名不变（切片走 `ReviewAgentInput.slicesText` 槽位） | 不开放原因：切片启发式与 04§2 预算算术、Summary 覆盖声明强耦合（04§1 裁剪优先级）——外部定制切片会绕过成本核算与覆盖声明 |
 | 编排 pipeline 步骤 | Orchestrator ①–⑦（02§1） | **内部，暂不开放** | cra-core（02§3） | 不开放原因：步骤顺序承载幂等 / 收敛 / 降级语义（02§4）——可插拔步骤抽象会诱导绕过账本闸与预算闸 |
 
 读表规则【强制】：任何"接新东西"的开发工作开始前，先在本表登记新条目或确认命中既有条目；稳定性等级定义见 §3；角色接入程序见 §5，平台接入程序见 §6。
@@ -127,7 +129,7 @@ grep "context" 应命中并核对：
 | M4b webhook 服务化 | 启用既有扩展点 | ReviewLedger PG 形态（02§5 三形态表）已落地（M4b）；cra-server 只是新壳——core 全部逻辑与形态无关（02§5），CLI 与 server 同构；报告签名信封为新增演进级格式约定（§2，ADR-0008） |
 | M4c push 模式 | 已登记并实现（§2 载体扩展） | 触发层 push 事件 + commit-comment 发布载体：`postCommitReview`（default，不可得显式拒绝）+ `ReviewKey(repo, commit)` 键控 + `LocalRepoContext.firstParentChain` 基线解析（05§1.3/§2.4） |
 | M4d 夜间存量评审 | 已登记并实现（§2 载体扩展） | 产出 issue 而非 PR comment（07§5、06§4）：`postIssueReview` + `fetchIssueBotComments`/`listBotIssues`；评审流水线与账本复用，仅触发与发布形态变化（05§2.5） |
-| M4e GitLab / Gerrit 适配 | 启用既有扩展点 | **GitLab 第二半已接线（2026-10-27）**：`cra-git-gitlab` 走 §6 checklist 1–7 步，ADR-0011/0013 + `docs/deployment-gitlab.md` 边界表；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab`/`/webhooks/gitlab` 已落地并由单测/WireMock/HTTP+PG 集成覆盖；**真实写操作 pending（无 owner token）**，读路径已对公共项目验证。Gerrit 未做。同项的"语义索引 / 跨文件上下文"属 ContextAssembler 内部（§2） |
+| M4e GitLab / Gerrit 适配 + 语义索引/跨文件上下文 | 启用既有扩展点 + 内部接缝 | **GitLab 第二半已接线（2026-10-27）**：`cra-git-gitlab` 走 §6 checklist 1–7 步，ADR-0011/0013 + `docs/deployment-gitlab.md` 边界表；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab`/`/webhooks/gitlab` 已落地并由单测/WireMock/HTTP+PG 集成覆盖；**真实写操作 pending（无 owner token）**，读路径已对公共项目验证。**语义索引/跨文件上下文第一版已落地（2026-10-28，ADR-0014）**：`SymbolIndex`（§2 内部接缝，Java-only、默认关闭）+ `CrossFileSliceAssembler` 注入 L2 切片（dataflow/security/verifier，≤4k，从 L1 预算扣除）+ CrossChecker 路径集增强；gerrit 未做 |
 | M4f-lite CrossChecker | 启用既有扩展点 + 纯配置 | 新角色走 §5 checklist；数据前提 = T1.4 REVIEW.md 新段落解析（07§5）；开关 = `crosschecker.enabled`（05§5），默认关闭不动 Standard 基线算术（04§2.2） |
 | M4f-full 事件史管道 | 已登记并实现（§2 产品事件源 / 事件检索存储两行） | 产品事件史是独立数据面（依赖 M4b 定时任务，07§5）：JSONL 源 → 采集器 → PG → `EventHistoryQuery` → CrossChecker/验证层引用；ADR-0012。Jira/Confluence/服务台等连接器留作 `EventHistorySource` 实现，不在第一版 |
 
@@ -159,3 +161,4 @@ grep "context" 应命中并核对：
 | v1.2 | 2026-10-26 | M4c/M4d 载体扩展登记（Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行）；§7 两项转为"已登记并实现" |
 | v1.3 | 2026-10-27 | M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；§7 M4e 更新为 GitLab 已落地、Gerrit 未做 |
 | v1.4 | 2026-10-27 | M4e 第二半 + M4f-full：Git 平台适配 / CommentSource 两行补 CLI/server 平台选择（ADR-0013）；新增 `EventHistorySource` / `EventHistoryQuery` / `EventHistoryStore` 登记（ADR-0012）；§7 M4e/M4f-full 更新为已接线/已登记并实现 |
+| v1.5 | 2026-10-28 | M4e 池内项"语义索引/跨文件上下文"第一版：§2 新增 `SymbolIndex`（内部接缝，ADR-0014）并在 ContextAssembler 行注明 L2 数据面对应关系（签名不变）；§7 更新 M4e 三项状态 |

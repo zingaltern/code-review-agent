@@ -9,6 +9,7 @@
 > **v1.3.1**：§1 补**验证层 brief 按 category 分型组装**（context 类注入 cited commit diff 节选与产品段条目）；§2.2 补 CrossChecker 触发时的增量算术；§2.4 L1 注入用例改**负向不变量断言**（seed 是 best-effort，OpenAI 兼容生态多数端点忽略之，"固定种子=确定性"假设不成立）。
 > **v1.3.3**（2026-10-27，M4f-full，ADR-0012）：§1 L5 增**产品事件史条目**（按 `event <id>` 预取，≤1.5k/批）；§2.2 CrossChecker 增量改"变更史/事件史共享 ≤4k"；§2.4 声明事件史不进 CLI 评测（服务端数据面）。
 > **v1.3.4**（2026-10-28，ADR-0015）：§2.4 补验证层反证纪律的增量成本（预算不变，仅 bug 类降级仲裁有界增加）；§4.2 verifier 骨架补 `refutation` 契约与 bug 类调用点索引的组装纪律。
+> **v1.4**（2026-10-28，M4e 池内项，ADR-0014）：§1 **L2 从"未注入"变为"条件注入（默认关闭）"**——确定性符号索引（Java-only）+ 跨文件切片，仅 dataflow/security/verifier 注入、单 brief ≤4k 且从 L1 预算扣除；§2.2 补 L2 切片算术；§2.4 声明 L2 收益度量不在本轮评测口径内。
 
 ---
 
@@ -18,12 +19,12 @@
 |---|---|---|
 | L0 | 变更 diff（unified，带 hunk 头与行号） | 总是，全部角色 |
 | L1 | **默认：hunk ±30 行窗口**；仅当满足条件才注入文件全文：文件 ≤200 行、或角色为 Security/Perf/Judge/Verifier（这些角色的判断依赖完整文件结构，但仍受预算约束） | 条件注入，预算裁决 |
-| L2 | 依赖切片：直接 import 的本项目文件、被变更符号的调用方（grep 实现，M4 前不做索引） | 按角色默认注入：BH-dataflow、Security、Verifier；其余按需 |
+| L2 | 依赖切片：**变更符号**的定义行 + 跨文件引用位置（file:line + 行摘录）+ import 关联（谁 import 了本 PR 变更的类型）——数据面 = 确定性语义索引（`SymbolIndex`，jgit 树读取 + Java 词法抽取，**ADR-0014**；默认关闭） | 条件注入：`CRA_SEMANTIC_CONTEXT_ENABLED=true` 且 standard/deep 档时，按角色默认注入 **BH-dataflow、Security、Verifier**；quick 不触发；单 brief ≤4k token 且**从 L1 预算扣除**，超预算截断并写声明（关闭时 brief 与开关引入前逐字节一致） |
 | L3 | 仓库规范：**base 分支的** `REVIEW.md`、`AGENTS.md`/`CLAUDE.md` 相关目录段、依赖清单（安全用） | 相关时注入；见 §3 信任模型 |
 | L4 | 账本记忆：该 PR 已发布 finding 指纹、pre-existing 复核结果 | 用于收敛控制；**不注入**给新 reviewer（防锚定） |
 | L5（v1.3.1） | **外部证据**（仅 category=context 的候选）：finding 引用的 commit diff 节选（jgit show 预取内联，每 commit ≤1k）+ REVIEW.md Product context/Known incidents 对应条目 + **产品事件史条目**（M4f-full，ADR-0012：按 `event <id>` 从 PG 预取摘要/类型/时间/来源，每批 ≤5 条、≤1.5k token） | 注入 verifier/judge brief（03§4.2 分型组装）与 CrossChecker 输入（03§3.1）——context 类证据在代码之外，不预取则验证层失明 |
 
-裁剪优先级（预算不足时依次丢弃）：L2 非核心切片 → L1 的窗口收窄（±30→±15）→ light 角色整段任务。**L0 永不丢弃**；丢弃决策记入 trace 并反映到 Summary 覆盖声明。
+裁剪优先级（预算不足时依次丢弃）：L2 非核心切片 → L1 的窗口收窄（±30→±15）→ light 角色整段任务。L2 切片自身超预算时按符号顺序截断并在 brief 末尾写截断声明（ADR-0014）。**L0 永不丢弃**；丢弃决策记入 trace 并反映到 Summary 覆盖声明。
 
 ## 2. Token 预算与算术示例（v1.1 重算）
 
@@ -46,6 +47,8 @@
 **合计 ≈ 305k in / 24k out ≈ 330k**——占 500k 预算的 **66%**，位于 70% 降档档位之下（v1.2.1 校准：v1.2 曾按 400k 计为 82.5%，恰好坐在 80% 截断档之上，会使每个标准 PR 例行触发 top-10 截断、`suppressed_by_truncation>0` 常态报警——护栏"狼来了"；修法为预算上调至 500k + 阶梯重校 70%/85%，02§4.4）。大 diff 与复杂 PR 的超预算场景仍由阶梯兜底。对照 v1.0 的错误：按"base+head 全文总是注入 + 验证上下文与 reviewer 同级或更全"，同一 PR 仅验证段就需要 12×2×8k=192k，超过 v1.0 示例 run 的全部输入预算——该算术不可行，已废弃。
 
 **CrossChecker 增量（v1.3.1 补，M4f 触发时才计入；v1.3.2 按实现校准；v1.3.3 事件史共享预算）**：1 次调用 ≤16k in（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k；实测 ≈12.6k = diff 7.2k + 变更史 2.7k + 产品段 1.8k + 提示余量，无事件史时）/ ≤4k out（v1.3.2：1.5k→4k，`8a5c9de`）；其候选的 context 类验证走分型 brief（§1 L5），每文件批次增量 ≤2k（含事件条目 ≤1.5k）。**触发时 run 总增量：按预算上限 ≈22k（16k in + 4k out + 2k 分型 brief；330k → ≈352k，70.4%，已越 70% 降档线）；按实测输入 ≈18.6k（12.6k + 4k + 2k；≈349k，69.7%，恰在线上）**——故 M4f 开启的仓库建议同步上调预算或降一档视角；默认关闭时不改变 Standard 基线算术。（2026-10-27 修订：原按 14k in / 1.5k out 计的 ≈20k / 70% 为文档估算，预算口径与实测值以本行为准；事件史不扩大 16k 输入上限，只与 commit 变更史竞争同一 4k 槽。）
+
+**L2 跨文件切片（v1.4 补，ADR-0014；仅 `CRA_SEMANTIC_CONTEXT_ENABLED=true` 时计入）**：单 brief ≤4k token（默认 4000，可配 500–12000），且**从该代理的 L1 预算中扣除**（`ReviewAgentDispatcher.buildContextInput` / `VerificationBatchAssembler.buildBatch`），不扩大单代理输入硬限。注入面 = dataflow（每 chunk 1 次）+ security（每 chunk 1 次）+ 验证批次（每文件批次 1 次）。Standard 中型 PR 最坏情况 8 × 4k = 32k 名义上限，但由于从 L1 扣除，**只有 L1 已被压到 1k 下限时总输入才会上升**；实测（486 个 Java 文件仓库、单符号 6 处引用）切片 ≈352 token，8 符号上限对应 ≈1–3k。索引构建 0.56s（冷）/0.16s（热）。关闭时（默认）本节不计入任何算术，04§2.2 基线不变。
 
 **大 PR 降档**：>2k diff 行 → 窗口 ±15、视角降 1、验证 top-10 候选；>8k 行 → priority_paths only + 覆盖声明。
 
@@ -82,6 +85,7 @@
 - **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 30 + clean 20，60 + 40 观测；M1 基线为 bad 12 + clean 8 的 24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红、prompt/模型/编排路径改动，或评测门禁代码改动（`VerifyCommand`/`ReportHasher`/`GateEvaluator`/`GatePolicy`/`AggregateEngine`）** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <报告 commit>` 校验哈希、按当前阈值重算的门禁结论与 commit 绑定；同时要求报告 commit 是 PR head 的祖先，且其后仅允许 `eval/l2/` 变更（报告文件自身提交不得夹带代码改动）。缺失、过期或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
 - **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论）；服务化形态可改用 `eval/l2/report.json.sig`（服务端信封），CI 以 `cra-eval verify --signature` 验签（M4b，ADR-0008）。报告与哈希同时提交属荣誉制；签名路径把防伪造提升到"持有服务端密钥"。
 - **L3 全量（`eval.yml`）**：workflow_dispatch 输入 `set/k/depth/tier`，里程碑口径 `set=all, k=3, depth=standard, tier=l3`；`--fail-on-red` 让红结论体现为 job 失败，报告 artifact 仍 `if: always()` 上传。`--commit "$GITHUB_SHA"` 记录代码提交。
+- **M4e 语义上下文不进 L1/L2/L3 默认口径（v1.4，ADR-0014）**：`CRA_SEMANTIC_CONTEXT_ENABLED` 默认 false，评测组合根不开启 → L1/L2/L3 不度量 L2 切片收益，也不因该数据面改变观测口径；关闭态字节级一致由 `SemanticContextPipelineTest` 断言。开/关收益对比是后续独立任务（需新口径与预算）。
 - **M4f-full 事件史不进 L1/L2/L3（v1.3.3，ADR-0012）**：事件史是服务端数据面（PG + 调度采集），CLI 评测组合根未装配 `EventHistoryQuery`；context 门禁仍由 M4f-lite 数据面（git 变更史 + REVIEW.md）驱动。事件史路径的验收 = 单测 + PG 集成 + `CrossCheckPipelineTest` 的脚本化 LLM fixture（08§3.1），不靠评测集自证；如未来要让评测覆盖事件史，需在评测组合根装配端口与 fixture 数据集（独立任务）。
 - **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。
 

@@ -123,6 +123,45 @@ public final class CoreAssembly {
   }
 
   /**
+   * 创建 M4e 形态编排器（追加语义上下文：L2 跨文件切片；ADR-0014）。
+   *
+   * @param semanticContextOptions 语义上下文配置（05§5 semantic_context；null 用关闭态）
+   * @param symbolIndex 语义索引端口（null = 未装配；开启时按不可得声明）
+   * @return Orchestrator
+   */
+  public static Orchestrator createOrchestrator(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
+      EventHistoryQuery eventHistoryQuery,
+      SemanticContextOptions semanticContextOptions,
+      org.cra.git.api.SymbolIndex symbolIndex) {
+    return new org.cra.core.internal.ReviewPipeline(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options == null ? PipelineOptions.defaults() : options,
+        localRepoContext,
+        crossCheckerOptions,
+        signoffOptions == null ? SignoffOptions.defaults() : signoffOptions,
+        eventHistoryQuery,
+        semanticContextOptions == null ? SemanticContextOptions.disabled() : semanticContextOptions,
+        symbolIndex);
+  }
+
+  /**
    * 创建 M4f-full 形态编排器（追加事件史查询端口；null = 未装配，CrossChecker 声明事件史不可得）。
    *
    * @param eventHistoryQuery 事件史检索端口（ADR-0012）
@@ -141,7 +180,7 @@ public final class CoreAssembly {
       CrossCheckerOptions crossCheckerOptions,
       SignoffOptions signoffOptions,
       EventHistoryQuery eventHistoryQuery) {
-    return new org.cra.core.internal.ReviewPipeline(
+    return createOrchestrator(
         adapter,
         ledger,
         gateway,
@@ -149,10 +188,12 @@ public final class CoreAssembly {
         verifier,
         judge,
         runRoot,
-        options == null ? PipelineOptions.defaults() : options,
+        options,
         localRepoContext,
         crossCheckerOptions,
-        signoffOptions == null ? SignoffOptions.defaults() : signoffOptions,
-        eventHistoryQuery);
+        signoffOptions,
+        eventHistoryQuery,
+        SemanticContextOptions.disabled(),
+        null);
   }
 }

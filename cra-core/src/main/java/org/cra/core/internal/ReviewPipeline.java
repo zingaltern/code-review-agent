@@ -18,6 +18,7 @@ import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.event.EventHistoryQuery;
+import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.LedgerFindingMarker;
@@ -31,6 +32,7 @@ import org.cra.context.api.ContextAssembly;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.core.api.SignoffOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
@@ -43,9 +45,11 @@ import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PolicySections;
 import org.cra.core.internal.pipeline.ReviewStage;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
+import org.cra.core.internal.pipeline.SemanticContext;
 import org.cra.core.internal.pipeline.SignoffAdvisor;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 
@@ -78,6 +82,9 @@ public final class ReviewPipeline implements Orchestrator {
 
   /** 可疑账本标记的 Summary 告警阈值（05§1.3 规则 2：同一 PR ≥3 次疑似注入尝试）。 */
   private static final int LEDGER_SUSPECT_THRESHOLD = 3;
+
+  /** CrossChecker 变更史路径集上限（语义索引增强；jgit PathFilterGroup 规模上限，ADR-0014）。 */
+  private static final int CROSS_CHECK_PATH_CAP = 60;
 
   private final ReviewLedger ledger;
   private final ReviewStage reviewStage;
@@ -175,6 +182,8 @@ public final class ReviewPipeline implements Orchestrator {
         localRepoContext,
         crossCheckerOptions,
         signoffOptions,
+        null,
+        SemanticContextOptions.disabled(),
         null);
   }
 
@@ -196,6 +205,44 @@ public final class ReviewPipeline implements Orchestrator {
       CrossCheckerOptions crossCheckerOptions,
       SignoffOptions signoffOptions,
       EventHistoryQuery eventHistoryQuery) {
+    this(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        crossCheckerOptions,
+        signoffOptions,
+        eventHistoryQuery,
+        SemanticContextOptions.disabled(),
+        null);
+  }
+
+  /**
+   * M4e 形态构造（追加语义上下文：L2 跨文件切片；ADR-0014）。
+   *
+   * @param semanticContextOptions 语义上下文配置（null = 关闭，行为与开关引入前一致）
+   * @param symbolIndex 语义索引端口（null = 未装配；开启时按不可得声明）
+   */
+  public ReviewPipeline(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
+      EventHistoryQuery eventHistoryQuery,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex) {
     this.ledger = ledger;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
@@ -215,6 +262,8 @@ public final class ReviewPipeline implements Orchestrator {
             localRepoContext,
             effectiveCrossChecker,
             eventHistoryQuery,
+            semanticContextOptions,
+            symbolIndex,
             Clock.systemUTC());
     this.gatekeeper = new FindingGatekeeper(dataLoader, localRepoContext);
     this.citedResolver = new CitedEvidenceResolver(localRepoContext, eventHistoryQuery);
@@ -351,9 +400,19 @@ public final class ReviewPipeline implements Orchestrator {
           };
       String policySection =
           PolicySections.render(policy, PipelineDataLoader.hasReviewMdChange(diff));
-      // M4f-lite/full：CrossChecker 变更史 + 产品事件史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查询
+      // M4e（ADR-0014）：语义上下文（默认关闭；关闭时零副作用，brief 与开关引入前一致）
+      SemanticContext semanticContext = dataLoader.buildSemanticContext(request, depthPlan, trace);
+      // M4f-lite/full：CrossChecker 变更史 + 产品事件史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查询；
+      // 语义索引开启时路径集增强为"变更文件 + 定义/引用/import 关联文件"（ADR-0014 决策 8）
       CrossCheckHistory crossCheckHistory =
-          dataLoader.resolveCrossCheckHistory(request, diff, plan, depthPlan);
+          dataLoader.resolveCrossCheckHistory(
+              request,
+              diff,
+              plan,
+              depthPlan,
+              semanticContext.enabled()
+                  ? semanticContext.relatedPaths(allPlanFiles(plan), CROSS_CHECK_PATH_CAP)
+                  : java.util.Set.of());
       CrossCheckEvents crossCheckEvents =
           dataLoader.resolveCrossCheckEvents(request, diff, plan, depthPlan, crossCheckHistory);
       ReviewStage.StageOutcome outcome =
@@ -370,7 +429,8 @@ public final class ReviewPipeline implements Orchestrator {
               commitMessages,
               policySection,
               crossCheckHistory,
-              crossCheckEvents);
+              crossCheckEvents,
+              semanticContext);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
       trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
@@ -450,7 +510,8 @@ public final class ReviewPipeline implements Orchestrator {
                       reviewDiff,
                       javaFileIndex,
                       path ->
-                          dataLoader.contentOf(path, request.headSha(), request, contentCache)));
+                          dataLoader.contentOf(path, request.headSha(), request, contentCache)),
+              semanticContext);
       // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）
       List<String> testFileIndex =
           candidates.stream()
@@ -599,5 +660,12 @@ public final class ReviewPipeline implements Orchestrator {
     event.put("rules", signoff.rules().stream().map(hit -> hit.id()).toList());
     event.put("rules_version", rulesVersion);
     return event;
+  }
+
+  /** 全 PR 文件展平（语义上下文路径集与切片口径一致：plan 内全部变更文件）。 */
+  private static List<DiffFile> allPlanFiles(ChunkPlanner.Plan plan) {
+    List<DiffFile> files = new ArrayList<>();
+    plan.chunks().forEach(chunk -> files.addAll(chunk.files()));
+    return List.copyOf(files);
   }
 }

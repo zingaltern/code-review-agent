@@ -119,15 +119,16 @@ final class VerificationBatchAssembler {
       List<String> testFileIndex,
       String repo) {
     return buildBatch(
-        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, null);
+        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, null, "");
   }
 
   /**
-   * 组装验证批次输入（ADR-0015：bug 类候选附带确定性调用点索引）。
+   * 组装验证批次输入（M4e 语义上下文：L2 跨文件切片注入 Verifier brief；ADR-0014）。
    *
-   * <p>索引渲染 token 从 codeContext 预算中预留（不突破 03§6 verifier 输入预算）；不可得时如实声明。
+   * <p>切片与代码上下文同属不可信内容，占用同一 {@code codeContext} 槽；切片 token 从代码上下文预算中扣除， 保证验证 brief
+   * 不越单代理输入硬限（04§2.2、ADR-0014 决策 7）。
    *
-   * @param callSiteIndex 调用点索引（null = 不适用/未采集）
+   * @param crossFileContext L2 跨文件切片文本（{@code CrossFileSlices.text()}；未启用/不可得为空串）
    */
   static VerificationBatchInput buildBatch(
       String file,
@@ -139,20 +140,51 @@ final class VerificationBatchAssembler {
       CitedEvidenceResolver citedResolver,
       List<String> testFileIndex,
       String repo,
-      CallSiteIndex callSiteIndex) {
+      String crossFileContext) {
+    return buildBatch(
+        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, null, crossFileContext);
+  }
+
+  /**
+   * 组装验证批次输入（最终形态：ADR-0015 调用点索引 + ADR-0014 跨文件切片并存；预算合并预留）。
+   *
+   * <p>索引渲染 token 从 codeContext 预算中预留（不突破 03§6 verifier 输入预算）；不可得时如实声明。
+   *
+   * @param callSiteIndex 调用点索引（null = 不适用/未采集）
+   * @param crossFileContext L2 跨文件切片文本（未启用/不可得为空串）
+   */
+  static VerificationBatchInput buildBatch(
+      String file,
+      List<FindingAggregator.Scored> batch,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult diff,
+      AgentBudget budget,
+      CitedEvidenceResolver citedResolver,
+      List<String> testFileIndex,
+      String repo,
+      CallSiteIndex callSiteIndex,
+      String crossFileContext) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
     String findingsText = renderFindingsText(batch);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
+    String slices = crossFileContext == null ? "" : crossFileContext;
     long indexReserve = callSiteIndex == null ? 0 : CallSiteIndex.RENDER_TOKEN_CAP;
+    long sliceTokens = TokenMath.estimateTokens(slices);
     long reserved =
         TokenMath.estimateTokens(findingsText)
             + 1_200
             + TokenMath.estimateTokens(testIndex)
-            + indexReserve;
+            + indexReserve
+            + sliceTokens;
     long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
     String codeContext = renderCodeContext(file, batch, headFiles, diff, contextBudget);
     if (callSiteIndex != null) {
-      codeContext = codeContext + "\n" + callSiteIndex.render();
+      codeContext =
+          codeContext.isBlank() ? callSiteIndex.render() : codeContext + "\n" + callSiteIndex.render();
+    }
+    if (!slices.isBlank()) {
+      codeContext = codeContext.isBlank() ? slices : codeContext + "\n\n" + slices;
     }
     return new VerificationBatchInput(
         file,

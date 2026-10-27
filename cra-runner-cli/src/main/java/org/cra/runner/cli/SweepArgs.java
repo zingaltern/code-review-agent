@@ -165,7 +165,8 @@ final class SweepArgs {
             ReviewMode.ISSUE,
             SignoffConfig.defaults(),
             platform,
-            gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none());
+            gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
+            SemanticContextConfig.defaults());
     return new Parsed(config, since, maxPrs);
   }
 

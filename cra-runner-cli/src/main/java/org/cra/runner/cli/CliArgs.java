@@ -41,6 +41,8 @@ final class CliArgs {
     boolean crossCheckerSeen = false;
     boolean signoff = false;
     boolean signoffSeen = false;
+    boolean semanticContext = false;
+    boolean semanticContextSeen = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -79,6 +81,18 @@ final class CliArgs {
           signoff = false;
           signoffSeen = true;
         }
+        case "--semantic-context" -> {
+          semanticContext = true;
+          semanticContextSeen = true;
+        }
+        case "--semantic-context=true" -> {
+          semanticContext = true;
+          semanticContextSeen = true;
+        }
+        case "--semantic-context=false" -> {
+          semanticContext = false;
+          semanticContextSeen = true;
+        }
         case "--repo",
             "--pr",
             "--base",
@@ -108,6 +122,9 @@ final class CliArgs {
             "--spot-check-percent",
             "--crosschecker-modes",
             "--crosschecker-history-weeks",
+            "--semantic-context-max-files",
+            "--semantic-context-max-file-bytes",
+            "--semantic-context-slice-tokens",
             "--trusted-authors",
             "--pr-author",
             "--tests-status" -> {
@@ -250,6 +267,9 @@ final class CliArgs {
                 ? named.get("--crosschecker-history-weeks")
                 : env.get("CRA_CROSSCHECKER_HISTORY_WEEKS"),
             8);
+    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后仅 standard/deep 档生效
+    SemanticContextConfig semanticContextConfig =
+        semanticContextConfig(named, env, semanticContext, semanticContextSeen);
     int pushLookback =
         parseIntOption(
             "--lookback",
@@ -323,7 +343,40 @@ final class CliArgs {
         push ? org.cra.common.run.ReviewMode.COMMIT : org.cra.common.run.ReviewMode.PULL_REQUEST,
         signoffConfig,
         platform,
-        gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none());
+        gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
+        semanticContextConfig);
+  }
+
+  /**
+   * 语义上下文配置（M4e，ADR-0014）：flag/env 优先级 = 显式 flag &gt; 环境变量 &gt; 默认关闭。
+   *
+   * <p>上限默认 maxFiles=2000 / maxFileBytes=262144 / sliceTokens=4000；越界由 {@link
+   * SemanticContextConfig} 构造期拒绝（CraConfigException → 退出码 2，05§3）。
+   */
+  private static SemanticContextConfig semanticContextConfig(
+      Map<String, String> named, Map<String, String> env, boolean flagValue, boolean flagSeen) {
+    SemanticContextConfig defaults = SemanticContextConfig.defaults();
+    boolean enabled =
+        flagSeen
+            ? flagValue
+            : Boolean.parseBoolean(env.getOrDefault("CRA_SEMANTIC_CONTEXT_ENABLED", "false"));
+    String maxFilesValue =
+        optionValue(named, env, "--semantic-context-max-files", "CRA_SEMANTIC_CONTEXT_MAX_FILES");
+    String maxFileBytesValue =
+        optionValue(
+            named, env, "--semantic-context-max-file-bytes", "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES");
+    String sliceTokensValue =
+        optionValue(
+            named, env, "--semantic-context-slice-tokens", "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS");
+    int maxFiles =
+        parseIntOption("--semantic-context-max-files", maxFilesValue, defaults.maxFiles());
+    long maxFileBytes =
+        parseLongOption(
+            "--semantic-context-max-file-bytes", maxFileBytesValue, defaults.maxFileBytes());
+    long sliceTokens =
+        parseLongOption(
+            "--semantic-context-slice-tokens", sliceTokensValue, defaults.sliceTokens());
+    return new SemanticContextConfig(enabled, maxFiles, maxFileBytes, sliceTokens);
   }
 
   /** 逗号分隔列表（空/空白项丢弃；用于 trusted-authors）。 */
@@ -433,6 +486,28 @@ final class CliArgs {
     }
     try {
       int parsed = Integer.parseInt(value);
+      if (parsed <= 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为正整数: " + value);
+    }
+  }
+
+  /** flag 优先、环境变量次之（两者都缺省返回 null，由解析器取默认值）。 */
+  private static String optionValue(
+      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
+    String value = named.get(flag);
+    return value != null ? value : env.get(envKey);
+  }
+
+  private static long parseLongOption(String key, String value, long defaultValue) {
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      long parsed = Long.parseLong(value);
       if (parsed <= 0) {
         throw new NumberFormatException();
       }
