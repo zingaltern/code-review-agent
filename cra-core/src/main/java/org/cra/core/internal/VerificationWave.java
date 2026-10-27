@@ -85,8 +85,7 @@ final class VerificationWave {
       CitedEvidenceResolver citedResolver,
       BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer,
       SemanticContext semanticContext) {
-    this.semanticContext =
-        semanticContext == null ? SemanticContext.disabled() : semanticContext;
+    this.semanticContext = semanticContext == null ? SemanticContext.disabled() : semanticContext;
     this.verifier = verifier;
     this.agentRunner = agentRunner;
     this.trace = trace;

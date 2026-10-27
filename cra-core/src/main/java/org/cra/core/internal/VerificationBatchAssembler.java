@@ -142,7 +142,17 @@ final class VerificationBatchAssembler {
       String repo,
       String crossFileContext) {
     return buildBatch(
-        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, null, crossFileContext);
+        file,
+        batch,
+        policy,
+        headFiles,
+        diff,
+        budget,
+        citedResolver,
+        testFileIndex,
+        repo,
+        null,
+        crossFileContext);
   }
 
   /**
@@ -181,7 +191,9 @@ final class VerificationBatchAssembler {
     String codeContext = renderCodeContext(file, batch, headFiles, diff, contextBudget);
     if (callSiteIndex != null) {
       codeContext =
-          codeContext.isBlank() ? callSiteIndex.render() : codeContext + "\n" + callSiteIndex.render();
+          codeContext.isBlank()
+              ? callSiteIndex.render()
+              : codeContext + "\n" + callSiteIndex.render();
     }
     if (!slices.isBlank()) {
       codeContext = codeContext.isBlank() ? slices : codeContext + "\n\n" + slices;
