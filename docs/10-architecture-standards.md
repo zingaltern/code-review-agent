@@ -76,7 +76,7 @@ org.cra.<module>/
 | cra-core | Orchestrator 入口（输入 `ReviewRequest`、输出 `ReviewResult`，02§5） | `planner` / `fanout` / `verify` / `aggregate` / `publish` / `convergence`（02§1 ①–⑦） |
 | cra-runner-cli | 免二分：依赖图终点，无人依赖它 | `Main` + `config`（05§5 绑定）+ `assembly`（装配）+ `command`（参数与退出码，05§3） |
 | cra-eval | 数据集格式与报告类型（06§3） | runner 与负向不变量判定器（08§5 场景 6） |
-| cra-server（M4b） | 免二分：第二组合根/依赖图终点，无人依赖它 | `ServerMain` + `config`（env 绑定/Spring beans）+ `webhook`（验签/解析/入站）+ `queue`（有界/背压）+ `pipeline`（core 执行器/任务处理器）+ `delivery`（PG 幂等）+ `attest`（报告签发）+ `store`（DDL 迁移）+ `web`（健康/过滤器）+ `history`（M4f-full 骨架） |
+| cra-server（M4b） | 免二分：第二组合根/依赖图终点，无人依赖它 | `ServerMain` + `config`（env 绑定/Spring beans）+ `webhook`（验签/解析/入站）+ `queue`（有界/背压）+ `pipeline`（core 执行器/任务处理器）+ `delivery`（PG 幂等）+ `attest`（报告签发）+ `store`（DDL 迁移）+ `web`（健康/过滤器）+ `history`（M4f-full 事件源/采集器/PG 存储/调度） |
 
 **组合根约束【强制】**：M0–M3 全部对象图在 `cra-runner-cli` 的 Main 装配；M4b 起 `cra-server` 是第二组合根——Spring `@Configuration`/`@Bean` 只允许出现在这两个壳模块，其余模块是纯 Java 库。组合根只调各模块 api 装配工厂，从不 import `internal`。
 

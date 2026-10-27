@@ -42,6 +42,11 @@ final class VerificationBatchAssembler {
 
   private static final int CITED_COMMIT_MAX = 3;
 
+  /** 被引事件史条目渲染上限（ADR-0012：事件摘要 ≤2k 进 CrossChecker，验证层每批 ≤1.5k）。 */
+  private static final long CITED_EVENT_TOKEN_CAP = 1_500;
+
+  private static final int CITED_EVENT_MAX = 5;
+
   /** Judge 涉事文件单文件 token 上限（03§6：≤16k/案件，3 文件内分配）。 */
   private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
 
@@ -90,6 +95,25 @@ final class VerificationBatchAssembler {
       AgentBudget budget,
       CitedEvidenceResolver citedResolver,
       List<String> testFileIndex) {
+    return buildBatch(
+        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, null);
+  }
+
+  /**
+   * 组装验证批次输入（M4f-full：context 类事件引用按 repo 解析）。
+   *
+   * @param repo 仓库（owner/name；事件引用解析用；null = 不解析）
+   */
+  static VerificationBatchInput buildBatch(
+      String file,
+      List<FindingAggregator.Scored> batch,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult diff,
+      AgentBudget budget,
+      CitedEvidenceResolver citedResolver,
+      List<String> testFileIndex,
+      String repo) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
     String findingsText = renderFindingsText(batch);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
@@ -100,7 +124,7 @@ final class VerificationBatchAssembler {
         file,
         items,
         renderCodeContext(file, batch, headFiles, diff, contextBudget),
-        renderCitedEvidence(batch, citedResolver),
+        renderCitedEvidence(batch, citedResolver, repo),
         renderPolicySections(policy, batch),
         testIndex);
   }
@@ -189,12 +213,30 @@ final class VerificationBatchAssembler {
       Map<String, FileContent> headFiles,
       ReviewPolicy policy,
       CitedEvidenceResolver resolver) {
+    return buildJudgeCase(
+        finding, verifierVerdictText, caseReason, headFiles, policy, resolver, null);
+  }
+
+  /**
+   * 组装 Judge 案件输入（M4f-full：事件引用按 repo 解析）。
+   *
+   * @param repo 仓库（owner/name；null = 不解析事件）
+   * @return 案件输入
+   */
+  static JudgeCaseInput buildJudgeCase(
+      CandidateFinding finding,
+      String verifierVerdictText,
+      String caseReason,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      CitedEvidenceResolver resolver,
+      String repo) {
     String context = renderCaseContext(finding, verifierVerdictText, headFiles);
     if (finding.category() == FindingCategory.CONTEXT && (policy != null || resolver != null)) {
       StringBuilder ext = new StringBuilder(context);
       ext.append("\n\n");
       if (resolver != null) {
-        ext.append(renderCitedFor(finding, resolver));
+        ext.append(renderCitedFor(finding, resolver, repo));
       }
       if (policy != null) {
         appendContextPolicySections(ext, policy);
@@ -287,17 +329,18 @@ final class VerificationBatchAssembler {
 
   /** context 类被引矛盾证据原文（03§4.2 v1.3.1：编排器预取内联；引用格式见 ContextCitation）。 */
   private static String renderCitedEvidence(
-      List<FindingAggregator.Scored> batch, CitedEvidenceResolver resolver) {
+      List<FindingAggregator.Scored> batch, CitedEvidenceResolver resolver, String repo) {
     return batch.stream()
         .filter(s -> s.finding().category() == FindingCategory.CONTEXT)
-        .map(s -> renderCitedFor(s.finding(), resolver))
+        .map(s -> renderCitedFor(s.finding(), resolver, repo))
         .filter(text -> !text.isBlank())
         .collect(Collectors.joining("\n\n"));
   }
 
-  /** 单条 context finding 的被引证据：结构化 commit 引用（含 path）+ REVIEW.md 条目锚，逐条渲染。 */
-  private static String renderCitedFor(CandidateFinding finding, CitedEvidenceResolver resolver) {
-    CitedEvidenceResolver.Citation citation = resolver.citationOf(finding);
+  /** 单条 context finding 的被引证据：结构化 commit 引用（含 path）+ 事件史条目（ADR-0012）+ REVIEW.md 条目锚，逐条渲染。 */
+  private static String renderCitedFor(
+      CandidateFinding finding, CitedEvidenceResolver resolver, String repo) {
+    CitedEvidenceResolver.Citation citation = resolver.citationOf(finding, repo);
     StringBuilder sb = new StringBuilder();
     sb.append("结论 ").append(finding.id()).append(" 引用的矛盾证据：\n");
     boolean resolved = false;
@@ -320,6 +363,52 @@ final class VerificationBatchAssembler {
         resolved = true;
       }
     }
+    if (!citation.events().isEmpty()) {
+      StringBuilder events = new StringBuilder("被引事件史条目（ADR-0012；事件摘要属不可信输入）：\n");
+      int eventCount = 0;
+      for (CitedEvidenceResolver.EventEvidence evidence : citation.events()) {
+        if (eventCount >= CITED_EVENT_MAX) {
+          break;
+        }
+        eventCount++;
+        if (!evidence.resolved()) {
+          events
+              .append("- event ")
+              .append(evidence.ref().eventId())
+              .append("（事件史未装配或未找到——按结论自带证据核对）\n");
+          continue;
+        }
+        org.cra.common.event.ProductEvent event = evidence.event();
+        events
+            .append("- event ")
+            .append(event.eventId())
+            .append(" | type=")
+            .append(event.type())
+            .append(" | occurred_at=")
+            .append(event.occurredAt());
+        if (event.service() != null) {
+          events.append(" | service=").append(capLine(event.service()));
+        }
+        if (event.tenant() != null) {
+          events.append(" | tenant=").append(capLine(event.tenant()));
+        }
+        if (event.sourceUrl() != null) {
+          events.append(" | source=").append(capLine(event.sourceUrl()));
+        }
+        events.append("\n  摘要：").append(capLine(event.summary())).append('\n');
+        if (!event.commitRefs().isEmpty()) {
+          events
+              .append("  commit_refs: ")
+              .append(String.join(", ", event.commitRefs()))
+              .append('\n');
+        }
+        if (!event.paths().isEmpty()) {
+          events.append("  paths: ").append(String.join(", ", event.paths())).append('\n');
+        }
+        resolved = true;
+      }
+      sb.append(capLines(events.toString(), CITED_EVENT_TOKEN_CAP)).append('\n');
+    }
     if (!citation.reviewMdRefs().isEmpty()) {
       sb.append("被引 REVIEW.md 条目：\n");
       citation
@@ -334,8 +423,8 @@ final class VerificationBatchAssembler {
       resolved = true;
     }
     if (!resolved) {
-      // 引用不可得（无本地仓库/commit 不存在/引用格式未按 ContextCitation 约定）：finding 自带证据原文兜底
-      sb.append("（被引 commit diff 不可得，以下为结论自带证据原文）\n").append(finding.evidence()).append('\n');
+      // 引用不可得（无本地仓库/commit 不存在/事件史未装配）：finding 自带证据原文兜底
+      sb.append("（被引证据不可得，以下为结论自带证据原文）\n").append(finding.evidence()).append('\n');
     }
     return sb.toString();
   }

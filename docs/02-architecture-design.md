@@ -172,7 +172,7 @@ GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / pu
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
-**M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集只留接口与调度骨架（M4f-full 实现）。
+**M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集已在 M4f-full 落地（JSONL→PG→CrossChecker，ADR-0012，默认关闭）。
 
 ## 6. 横切关注点
 

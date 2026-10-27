@@ -12,6 +12,7 @@ import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
+import org.springframework.scheduling.support.CronExpression;
 
 /**
  * cra-server 运行配置（05§5 部署级配置的服务形态子集；密钥只从环境变量读，05§6）。
@@ -44,8 +45,15 @@ import org.springframework.core.env.Environment;
  * @param crossCheckerEnabled CrossChecker 总开关（默认 false，05§5）
  * @param crossCheckerModes CrossChecker 模式串（assumption,sniff）
  * @param crossCheckerHistoryWeeks 变更史回溯周数
- * @param eventHistoryEnabled 事件史采集定时任务开关（M4f-full 骨架，默认 false）
+ * @param eventHistoryEnabled 事件史采集定时任务开关（M4f-full，默认 false）
  * @param eventHistoryCron 事件史采集 cron（Spring 六段式）
+ * @param eventHistorySource 事件源（本地 JSONL 路径 / file: URI / http(s): URL；M4f-full）
+ * @param eventHistoryLookbackDays 单次采集窗口（天）
+ * @param eventHistoryOverlapHours 与上次水位的重叠小时数（迟到事件）
+ * @param eventHistoryMaxAttempts 读取/入库最大尝试次数（含首次）
+ * @param eventHistoryRetryBackoffMillis 重试退避基数（毫秒）
+ * @param eventHistoryMaxBytes 事件源单次读取字节上限
+ * @param eventHistoryMaxEvents 单次入库事件上限
  * @param runTotalTokens run 级 token 预算（02§4.4，默认 500k）
  */
 public record ServerConfig(
@@ -76,6 +84,13 @@ public record ServerConfig(
     int crossCheckerHistoryWeeks,
     boolean eventHistoryEnabled,
     String eventHistoryCron,
+    String eventHistorySource,
+    int eventHistoryLookbackDays,
+    int eventHistoryOverlapHours,
+    int eventHistoryMaxAttempts,
+    long eventHistoryRetryBackoffMillis,
+    long eventHistoryMaxBytes,
+    int eventHistoryMaxEvents,
     long runTotalTokens) {
 
   public ServerConfig {
@@ -104,6 +119,45 @@ public record ServerConfig(
     reviewDepth = depth;
     if (runTotalTokens <= 0) {
       throw new CraConfigException("CRA_SERVER_RUN_TOTAL_TOKENS 必须为正: " + runTotalTokens);
+    }
+    if (eventHistoryLookbackDays <= 0 || eventHistoryLookbackDays > 365) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS 必须在 1..365: " + eventHistoryLookbackDays);
+    }
+    if (eventHistoryOverlapHours < 0 || eventHistoryOverlapHours > 720) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_OVERLAP_HOURS 必须在 0..720: " + eventHistoryOverlapHours);
+    }
+    if (eventHistoryMaxAttempts <= 0 || eventHistoryMaxAttempts > 10) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_MAX_ATTEMPTS 必须在 1..10: " + eventHistoryMaxAttempts);
+    }
+    if (eventHistoryRetryBackoffMillis < 0 || eventHistoryRetryBackoffMillis > 60_000) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS 必须在 0..60000: "
+              + eventHistoryRetryBackoffMillis);
+    }
+    if (eventHistoryMaxBytes <= 0 || eventHistoryMaxBytes > 1_073_741_824L) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_MAX_BYTES 必须在 1..1073741824: " + eventHistoryMaxBytes);
+    }
+    if (eventHistoryMaxEvents <= 0 || eventHistoryMaxEvents > 100_000) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS 必须在 1..100000: " + eventHistoryMaxEvents);
+    }
+    eventHistorySource = eventHistorySource == null ? "" : eventHistorySource.strip();
+    if (eventHistoryEnabled && eventHistorySource.isBlank()) {
+      throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_SOURCE 未设置（事件史采集开启时必须提供 JSONL 来源）");
+    }
+    if (eventHistoryCron == null || eventHistoryCron.isBlank()) {
+      throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_CRON 不能为空");
+    }
+    eventHistoryCron = eventHistoryCron.strip();
+    try {
+      CronExpression.parse(eventHistoryCron);
+    } catch (IllegalArgumentException e) {
+      throw new CraConfigException(
+          "CRA_SERVER_EVENT_HISTORY_CRON 非法: " + eventHistoryCron + "（" + e.getMessage() + "）");
     }
   }
 
@@ -142,6 +196,13 @@ public record ServerConfig(
         intValue(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", 8),
         bool(env, "CRA_SERVER_EVENT_HISTORY_ENABLED", false),
         env.getProperty("CRA_SERVER_EVENT_HISTORY_CRON", "0 0 3 * * *"),
+        env.getProperty("CRA_SERVER_EVENT_HISTORY_SOURCE", ""),
+        intValue(env, "CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS", 7),
+        intValue(env, "CRA_SERVER_EVENT_HISTORY_OVERLAP_HOURS", 24),
+        intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_ATTEMPTS", 3),
+        longValue(env, "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS", 500),
+        longValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_BYTES", 67_108_864L),
+        intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS", 5_000),
         longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", 500_000L));
   }
 

@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.6（2026-10-27，M4f-full：§1.6 产品事件史 JSONL/PG/检索/引用，§5 配置；ADR-0012）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：GitLab 适配器端点差异/账本映射/待验证项落 ADR-0011 与 docs/deployment-gitlab.md；SPI 签名不变）
 > 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
@@ -176,6 +177,45 @@ brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 CI 形态无本地库（账本=GitHub）；本地/服务形态：`review_run`、`finding`、`verdict`、`published_comment`、`prompt_template_version` 表，`ReviewLedger` SPI 统一抽象（cra-store）。已落地：M1 建 review_run/finding；M2 T2.11 建 `prompt_template_version`（repo/pr_number/run_id/template_name/template_version，随 run 落库，05§1.2 prompt_template_versions 的持久化形态）；verdict/published_comment 随验证层/处置采集数据面落地。
 
 **M4b 服务形态（2026-10-26，ADR-0008）**：`cra-store` 新增 `PostgresLedger`（`StoreAssembly.createPostgresLedger`），五表全部建表（`db/postgres/ledger.sql`，手写幂等 DDL）；读写语义与 SQLite 形态一致——完成标记只认 DONE|DEGRADED、commit 匹配大小写不敏感、同 finding_id 重登记幂等（`ON CONFLICT ... DO UPDATE`）。`verdict`/`published_comment` 当前只有表与迁移，读取方随验证层/处置采集数据面接入（不建无读取方的投机 SPI 方法）。server 自有表 `webhook_delivery`（delivery 幂等键）、`report_attestation`（签发审计）、`schema_migration` 由 `db/postgres/server.sql` 创建。
+
+### 1.6 产品事件史（M4f-full，ADR-0012）
+
+服务端自有数据面，默认关闭；第一版数据源 = owner 维护的 JSONL（本地文件 / `file:` URI / 对象存储 `http(s)` 预签名 URL），Jira/Confluence 等连接器是后续 `EventHistorySource` 实现。
+
+**JSONL 行格式**（每行一个对象；未知字段忽略）：
+
+```json
+{"event_id":"INC-42","repo":"owner/repo","service":"billing","tenant":"acme",
+ "occurred_at":"2026-08-14T03:00:00Z","type":"incident",
+ "summary":"企业长会话窗口改为 8h 后，30 分钟会话续期假设失效",
+ "source_url":"https://tracker/INC-42",
+ "commit_refs":["abc1234"],"paths":["src/billing/**"]}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `event_id` | 是 | 源系统内唯一（`INC-42` / `TICKET-7` / UUID） |
+| `repo` | 是 | `owner/name`；统一小写存储与查询 |
+| `service` / `tenant` | 否 | 服务与租户 |
+| `occurred_at` | 是 | ISO-8601（支持偏移）；增量窗口与水位依据 |
+| `type` | 是 | `ticket｜incident｜postmortem｜change｜other` |
+| `summary` | 是 | 唯一进 brief 的正文（≤240 字符）；`raw_json` 只入库 |
+| `source_url` | 否 | 人工核对链接 |
+| `commit_refs` | 否 | 小写十六进制 4–64 位；与查询 commit 前缀互配 |
+| `paths` | 否 | 仓库相对文件路径或目录前缀（`/**`、`/*` 规范化为前缀） |
+| `raw_json` | 否 | 原始记录（缺省 = 整行对象）；只入库，不注入 brief |
+| `collected_at` | 否 | 缺省由采集器写入 |
+
+**PG 表**（`db/postgres/server.sql`，迁移版本 `server-0002`）：
+
+- `product_event(event_id, repo, service, tenant, occurred_at, type, summary, source_url, commit_refs JSONB, paths JSONB, raw_json JSONB, collected_at)`，主键 `(repo, event_id)`；索引 `(repo, occurred_at DESC)` + `commit_refs`/`paths` GIN；
+- `event_collection_checkpoint(source_id, watermark, updated_at)`：水位只前进。
+
+**幂等/增量语义**：幂等键 `(repo, event_id)`，同键覆盖不新增行；采集窗口 = `max(请求窗口, 水位 − overlapHours)`；来源读取/入库有上限重试，耗尽后 `executed=false` + note；行级解析失败不推进水位（下次重试）；单次入库有上限，超出按发生时间升序截断，水位只推进到已入库部分。
+
+**检索端口**（`EventHistoryQuery`，11§2）：按 repo / paths / commitRefs / keywords / [since, until] 检索，最多 200 条；CrossChecker 每次取 20 条、与变更史共享 4k 材料预算。**引用格式** `event <event_id>`（`ContextCitation` 唯一解析实现）：验证层按 `(repo, event_id)` 预取事件条目注入 verifier/judge brief。
+
+**诚实边界**：只覆盖已文档化入库的工单/事故复盘；tribal knowledge 不可见（01§3.4）；路径关联依赖事件源声明，召回无结构性保证；事件摘要属不可信输入（UNTRUSTED 定界）；CLI 评测组合根未装配该端口，L2/L3 不验证事件史路径（04§2.4）。
 
 ## 2. GitPlatformAdapter SPI（v1.1 修订）
 
@@ -442,7 +482,17 @@ cra:
     crosschecker:
       enabled: false             # M4f-lite 起可开
       mode: [assumption, sniff]  # 模式 A/B 开关（03§3.1）
-      history-weeks: 8           # 上下游变更史回溯窗口
+      history-weeks: 8           # 上下游变更史/事件史回溯窗口（M4f-full 共用）
+    event-history:               # M4f-full（ADR-0012）：默认关闭；开启时 source 必填（fail closed）
+      enabled: false
+      cron: "0 0 3 * * *"        # Spring 六段式；组装期 CronExpression 校验
+      source: ""                 # 本地路径 / file: URI / http(s) 预签名 URL（JSONL）
+      lookback-days: 7
+      overlap-hours: 24          # 与上次水位的重叠（迟到事件；幂等键防重复）
+      max-attempts: 3            # 读取/入库最大尝试次数（含首次）
+      retry-backoff-ms: 500      # 第 n 次重试等待 n × 基数
+      max-bytes: 67108864        # 单次读取上限（64MB）
+      max-events: 5000           # 单次入库上限（超出按发生时间升序截断）
     signoff:                     # M4a（07§5）：只输出建议，不审批——agent 永远不是 approver
       enabled: true              # false = Summary 不出签字段（评审其余行为不变）
       trusted-authors: []        # 低风险 0 人签前提之一（login，大小写不敏感）

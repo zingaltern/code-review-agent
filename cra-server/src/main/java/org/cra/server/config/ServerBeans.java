@@ -7,6 +7,7 @@ import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
+import org.cra.common.event.EventHistoryStore;
 import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
@@ -26,9 +27,13 @@ import org.cra.server.attest.PostgresAttestationStore;
 import org.cra.server.attest.PostgresKnownCommitChecker;
 import org.cra.server.delivery.DeliveryStore;
 import org.cra.server.delivery.PostgresDeliveryStore;
+import org.cra.server.history.EventCollectionSettings;
 import org.cra.server.history.EventHistoryCollectionJob;
 import org.cra.server.history.EventHistoryCollector;
+import org.cra.server.history.IncrementalEventHistoryCollector;
+import org.cra.server.history.JsonlEventHistorySource;
 import org.cra.server.history.NoopEventHistoryCollector;
+import org.cra.server.history.PostgresEventHistoryStore;
 import org.cra.server.pipeline.CoreReviewExecutor;
 import org.cra.server.pipeline.ReviewExecutor;
 import org.cra.server.pipeline.ReviewJobHandler;
@@ -303,6 +308,7 @@ public class ServerBeans {
    * @param localRepoContext 本地仓库上下文
    * @param pipelineOptions 编排参数
    * @param crossCheckerOptions CrossChecker 配置
+   * @param eventHistoryStore 事件史查询端口（CrossChecker 的 context 类外部证据面，M4f-full）
    * @param config 服务配置
    * @return ReviewExecutor
    */
@@ -317,6 +323,7 @@ public class ServerBeans {
       LocalRepoContext localRepoContext,
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
+      EventHistoryStore eventHistoryStore,
       ServerConfig config) {
     return new CoreReviewExecutor(
         dataSource,
@@ -328,6 +335,7 @@ public class ServerBeans {
         localRepoContext,
         pipelineOptions,
         crossCheckerOptions,
+        eventHistoryStore,
         config);
   }
 
@@ -368,13 +376,42 @@ public class ServerBeans {
   }
 
   /**
-   * 事件史采集端口（M4b 占位实现）。
+   * 事件史存储（M4f-full，ADR-0012）：与账本共用 PG 连接池。
    *
+   * @param dataSource PG 连接池
+   * @return EventHistoryStore
+   */
+  @Bean
+  public EventHistoryStore eventHistoryStore(DataSource dataSource) {
+    return new PostgresEventHistoryStore(dataSource);
+  }
+
+  /**
+   * 事件史采集端口（M4f-full 真实采集；关闭时装配 Noop——日志明确写"未启用"，不伪装采集）。
+   *
+   * @param config 服务配置
+   * @param store 事件史存储
    * @return collector
    */
   @Bean
-  public EventHistoryCollector eventHistoryCollector() {
-    return new NoopEventHistoryCollector();
+  public EventHistoryCollector eventHistoryCollector(ServerConfig config, EventHistoryStore store) {
+    if (!config.eventHistoryEnabled()) {
+      return new NoopEventHistoryCollector();
+    }
+    EventCollectionSettings settings =
+        new EventCollectionSettings(
+            config.eventHistoryLookbackDays(),
+            config.eventHistoryOverlapHours(),
+            config.eventHistoryMaxAttempts(),
+            config.eventHistoryRetryBackoffMillis(),
+            config.eventHistoryMaxEvents());
+    return new IncrementalEventHistoryCollector(
+        new JsonlEventHistorySource(
+            config.eventHistorySource(),
+            config.eventHistoryMaxBytes(),
+            java.time.Clock.systemUTC()),
+        store,
+        settings);
   }
 
   /**
@@ -387,7 +424,8 @@ public class ServerBeans {
   @Bean
   public EventHistoryCollectionJob eventHistoryCollectionJob(
       ServerConfig config, EventHistoryCollector collector) {
-    return new EventHistoryCollectionJob(config.eventHistoryEnabled(), collector);
+    return new EventHistoryCollectionJob(
+        config.eventHistoryEnabled(), collector, config.eventHistoryLookbackDays());
   }
 
   /**

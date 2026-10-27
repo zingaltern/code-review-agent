@@ -1,5 +1,6 @@
 # 11 · 扩展性契约
 
+> 文档版本：v1.4（2026-10-27，M4f-full：产品事件源 `EventHistorySource` + 事件检索/存储 `EventHistoryQuery`/`EventHistoryStore` 两行登记，ADR-0012；§7 M4f-full 转为已登记并实现）
 > 文档版本：v1.3（2026-10-27，M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；Gerrit 与语义索引未做）
 > 文档版本：v1.2（2026-10-26，M4b：账本 PG 形态落地 + 报告签名信封登记；M4c/M4d：载体扩展登记——Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行补 commit-comment 与 issue 载体及键控方法，§7 对应两项转为"已登记并实现"）
 > v1.1（2026-10-25，v1.0 入库后协调修订：§3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制，消除同批文档间的定义冲突）
@@ -31,6 +32,8 @@
 | 报告签名信封 | `ReportSignature`（cra-common，04§2.4、ADR-0008/0009） | 演进（格式约定） | `cra-server` 签发（`/api/v1/reports/attest`，需 `X-CRA-Repo`），`cra-eval verify --signature --repo` 验签 | 行式信封 `cra-report-hmac-sha256-v2`（key_id/report_sha256/repo/commit/tier/issued_at/run_id/signature）；HMAC-SHA256 覆盖版本行至 run_id 行（不含 signature 行）；repo 绑定 owner/name；v1 信封不再接受，格式变更【强制】bump 版本并写 ADR |
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |
 | Prompt 模板 | classpath 资源 + 版本记录（04§4） | 演进 | `cra-agents/src/main/resources/prompts/` 目录树（04§4） | 新模板落对应子目录，mustache 占位符 + 引用 shared 三件套 + UNTRUSTED 定界（04§3.3）；`prompt_template_versions` 与 run 关联（05§1.2）；改动必过评测回归（06§1.2、04§2.4） |
+| 产品事件源 | `EventHistorySource`（05§1.6、ADR-0012） | 演进 | `JsonlEventHistorySource`：本地文件 / `file:` URI / 对象存储 `http(s)` 预签名 URL（JSONL，不含云 SDK）；Jira/Confluence/服务台等未接 | 两方法：`id()`（水位键）+ `read(since)`（返回 `ReadResult`：事件 + 行级失败 + 行数）；不可得语义 = 抛 `IOException`（采集器有上限重试，耗尽后 `executed=false` + 声明）；接入走 §6 checklist 的"端点核查/增量语义/失败声明"三项 |
+| 事件检索/存储 | `EventHistoryQuery` / `EventHistoryStore`（`cra-common`，05§1.6、ADR-0012） | 稳定 | `PostgresEventHistoryStore`（M4f-full；`product_event` + 水位表）；`EventHistoryQuery.empty()` 供 CLI/无数据部署 | 读：`search(EventQuery)` + `find(repo,eventId)`；写：`upsertAll`（幂等键 `(repo,event_id)`）+ `checkpoint/saveCheckpoint`；不可得语义 = 运行时异常 → CrossChecker 降级 `available=false` + 覆盖声明（不得当作"已检查无矛盾"）；接入走 §6 checklist |
 | LLM 模型路由 | `application.yml` 三档配置（05§5） | 演进（配置级） | standard / strong / light + fallback-chain + per-model RPM（05§5） | **无代码改动**：配置增条目即可；换模型家族属"模型改动"，触发 L2 评测回归（04§2.4） |
 | 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 30 + clean 20 + 对抗 16（含 context 6；M1 基线为 bad 12 + clean 8 + 对抗 10），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
 | ContextAssembler 切片策略 | L0–L5 分层与裁剪（04§1） | **内部，暂不开放** | cra-context（02§3） | 不开放原因：切片启发式与 04§2 预算算术、Summary 覆盖声明强耦合（04§1 裁剪优先级）——外部定制切片会绕过成本核算与覆盖声明 |
@@ -126,9 +129,9 @@ grep "context" 应命中并核对：
 | M4d 夜间存量评审 | 已登记并实现（§2 载体扩展） | 产出 issue 而非 PR comment（07§5、06§4）：`postIssueReview` + `fetchIssueBotComments`/`listBotIssues`；评审流水线与账本复用，仅触发与发布形态变化（05§2.5） |
 | M4e GitLab / Gerrit 适配 | 启用既有扩展点 | **GitLab 第一半已落地（2026-10-27）**：`cra-git-gitlab` 走 §6 checklist 1–7 步，ADR-0011 + `docs/deployment-gitlab.md` 边界表；Gerrit 未做。同项的"语义索引 / 跨文件上下文"属 ContextAssembler 内部（§2）；CLI/server 平台选择与真实写操作留第二半 |
 | M4f-lite CrossChecker | 启用既有扩展点 + 纯配置 | 新角色走 §5 checklist；数据前提 = T1.4 REVIEW.md 新段落解析（07§5）；开关 = `crosschecker.enabled`（05§5），默认关闭不动 Standard 基线算术（04§2.2） |
-| M4f-full 事件史管道 | 需新增扩展点 | 产品事件史采集是独立数据面（依赖 M4b 定时任务，07§5），不在任何现有扩展点内 |
+| M4f-full 事件史管道 | 已登记并实现（§2 产品事件源 / 事件检索存储两行） | 产品事件史是独立数据面（依赖 M4b 定时任务，07§5）：JSONL 源 → 采集器 → PG → `EventHistoryQuery` → CrossChecker/验证层引用；ADR-0012。Jira/Confluence/服务台等连接器留作 `EventHistorySource` 实现，不在第一版 |
 
-读法【强制】：标"需新增扩展点"的项动工前必须先修订 §2 总表登记（§1 第 1 条）——M4c/M4d 已于 2026-10-26 登记并实现（载体方法入 §2 Git 平台适配 / 账本取数端口两行），剩余未登记者为 M4f-full；"启用既有"与"纯配置"项不得顺手改内部接缝——改了即触发 §3 演进变更程序。
+读法【强制】：标"需新增扩展点"的项动工前必须先修订 §2 总表登记（§1 第 1 条）——M4c/M4d 已于 2026-10-26 登记并实现（载体方法入 §2 Git 平台适配 / 账本取数端口两行）；M4f-full 已于 2026-10-27 登记并实现（§2 产品事件源 / 事件检索存储两行，ADR-0012）；"启用既有"与"纯配置"项不得顺手改内部接缝——改了即触发 §3 演进变更程序。
 
 ## 8. 反模式
 
@@ -155,3 +158,4 @@ grep "context" 应命中并核对：
 | v1.1 | 2026-10-25 | §3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制 |
 | v1.2 | 2026-10-26 | M4c/M4d 载体扩展登记（Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行）；§7 两项转为"已登记并实现" |
 | v1.3 | 2026-10-27 | M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；§7 M4e 更新为 GitLab 已落地、Gerrit 未做 |
+| v1.4 | 2026-10-27 | M4f-full：新增产品事件源 `EventHistorySource` 与事件检索/存储 `EventHistoryQuery`/`EventHistoryStore` 两行（ADR-0012）；§7 M4f-full 转为已登记并实现；Jira/Confluence 等连接器列为后续实现 |

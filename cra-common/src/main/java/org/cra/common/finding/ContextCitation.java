@@ -18,6 +18,7 @@ import java.util.regex.Pattern;
  * <pre>
  * 矛盾来源：
  * - commit &lt;7-40 位小写 hex sha&gt; path &lt;该 commit 内文件路径&gt; — 说明（可选）
+ * - event &lt;event_id&gt; — 说明（可选；M4f-full，事件史条目）
  * - REVIEW.md Known incidents: &lt;条目原文或前缀&gt;
  * - REVIEW.md Product context: &lt;条目原文或前缀&gt;
  * - REVIEW.md Sniff tests: &lt;条目原文或前缀&gt;
@@ -28,6 +29,7 @@ import java.util.regex.Pattern;
  * <ol>
  *   <li>结构化 commit 引用优先：{@code commit <sha> path <path>}（path 可省，省略时调用方以 finding.file 兜底）；
  *   <li>无结构化引用时退回裸 hex 引用（M2 兼容语义：{@code \b[0-9a-f]{7,40}\b}，每处按 finding.file 解析）；
+ *   <li>事件引用：{@code event <event_id>}（行首或列表项；M4f-full 事件史，验证层按事件 id 预取条目）；
  *   <li>REVIEW.md 条目锚：{@code REVIEW.md <段名>: <条目>}，段名 ∈ Known incidents / Product context / Sniff
  *       tests； 条目省略 = 整段（验证层注入整段条目）。
  * </ol>
@@ -50,6 +52,15 @@ public final class ContextCitation {
 
   private static final Pattern BARE_SHA = Pattern.compile("\\b[0-9a-f]{7,40}\\b");
 
+  /** 事件引用（行首或列表项；id 字符集与 ProductEvent.EVENT_ID_PATTERN 一致）。 */
+  private static final Pattern EVENT_REF =
+      Pattern.compile(
+          "(?im)^\\s*(?:[-*]\\s*)?event\\s*[:：=]?\\s*([A-Za-z0-9][A-Za-z0-9._:#/-]{0,199})"
+              + "(?![A-Za-z0-9._:#/-])");
+
+  /** 矛盾来源块标题（事件引用只在块内解析，避免正文里 "event loop" 之类误命中）。 */
+  private static final String CITATION_HEADER = "矛盾来源";
+
   private static final Pattern REVIEW_MD_REF =
       Pattern.compile(
           "(?i)REVIEW\\.md\\s*(?:§|#)?\\s*(known incidents|product context|sniff tests)"
@@ -70,6 +81,9 @@ public final class ContextCitation {
       return path == null || path.isBlank() ? defaultPath : path;
     }
   }
+
+  /** 被引事件史条目（ADR-0012：{@code event <event_id>}）。 */
+  public record EventRef(String eventId) {}
 
   /** 被引 REVIEW.md 条目（entry 为空 = 整段）。 */
   public record ReviewMdRef(String section, String entry) {
@@ -144,6 +158,30 @@ public final class ContextCitation {
       String entry = matcher.group(2) == null ? "" : matcher.group(2).strip();
       if (seen.add(section + "|" + entry)) {
         refs.add(new ReviewMdRef(section, entry));
+      }
+    }
+    return List.copyOf(refs);
+  }
+
+  /**
+   * 解析事件史引用（{@code event <event_id>}；有「矛盾来源」块时只在块内解析，避免正文误命中）。
+   *
+   * @param text 待解析文本
+   * @return 被引事件列表（去重保序）
+   */
+  public static List<EventRef> eventRefs(String text) {
+    if (text == null || text.isBlank()) {
+      return List.of();
+    }
+    int header = text.indexOf(CITATION_HEADER);
+    String scope = header >= 0 ? text.substring(header) : text;
+    List<EventRef> refs = new ArrayList<>();
+    Set<String> seen = new LinkedHashSet<>();
+    Matcher matcher = EVENT_REF.matcher(scope);
+    while (matcher.find()) {
+      String eventId = matcher.group(1);
+      if (seen.add(eventId)) {
+        refs.add(new EventRef(eventId));
       }
     }
     return List.copyOf(refs);
