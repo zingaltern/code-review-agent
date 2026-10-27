@@ -16,6 +16,7 @@ import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
+import org.cra.core.internal.pipeline.CallSiteIndex;
 import org.cra.core.internal.pipeline.FindingAggregator;
 
 /**
@@ -51,6 +52,9 @@ final class VerificationBatchAssembler {
   private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
 
   private static final int JUDGE_MAX_FILES = 3;
+
+  /** Judge 案件调用点索引渲染上限（ADR-0014：16k 案件预算内的预留）。 */
+  private static final long JUDGE_CALL_SITE_TOKEN_CAP = 500;
 
   private VerificationBatchAssembler() {}
 
@@ -114,16 +118,46 @@ final class VerificationBatchAssembler {
       CitedEvidenceResolver citedResolver,
       List<String> testFileIndex,
       String repo) {
+    return buildBatch(
+        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, null);
+  }
+
+  /**
+   * 组装验证批次输入（ADR-0014：bug 类候选附带确定性调用点索引）。
+   *
+   * <p>索引渲染 token 从 codeContext 预算中预留（不突破 03§6 verifier 输入预算）；不可得时如实声明。
+   *
+   * @param callSiteIndex 调用点索引（null = 不适用/未采集）
+   */
+  static VerificationBatchInput buildBatch(
+      String file,
+      List<FindingAggregator.Scored> batch,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult diff,
+      AgentBudget budget,
+      CitedEvidenceResolver citedResolver,
+      List<String> testFileIndex,
+      String repo,
+      CallSiteIndex callSiteIndex) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
     String findingsText = renderFindingsText(batch);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
+    long indexReserve = callSiteIndex == null ? 0 : CallSiteIndex.RENDER_TOKEN_CAP;
     long reserved =
-        TokenMath.estimateTokens(findingsText) + 1_200 + TokenMath.estimateTokens(testIndex);
+        TokenMath.estimateTokens(findingsText)
+            + 1_200
+            + TokenMath.estimateTokens(testIndex)
+            + indexReserve;
     long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
+    String codeContext = renderCodeContext(file, batch, headFiles, diff, contextBudget);
+    if (callSiteIndex != null) {
+      codeContext = codeContext + "\n" + callSiteIndex.render();
+    }
     return new VerificationBatchInput(
         file,
         items,
-        renderCodeContext(file, batch, headFiles, diff, contextBudget),
+        codeContext,
         renderCitedEvidence(batch, citedResolver, repo),
         renderPolicySections(policy, batch),
         testIndex);
@@ -231,7 +265,29 @@ final class VerificationBatchAssembler {
       ReviewPolicy policy,
       CitedEvidenceResolver resolver,
       String repo) {
+    return buildJudgeCase(
+        finding, verifierVerdictText, caseReason, headFiles, policy, resolver, repo, null);
+  }
+
+  /**
+   * 组装 Judge 案件输入（ADR-0014：bug 类案件附带调用点索引，≤500 token）。
+   *
+   * @param callSiteIndex 调用点索引（null = 不适用/未采集）
+   * @return 案件输入
+   */
+  static JudgeCaseInput buildJudgeCase(
+      CandidateFinding finding,
+      String verifierVerdictText,
+      String caseReason,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      CitedEvidenceResolver resolver,
+      String repo,
+      CallSiteIndex callSiteIndex) {
     String context = renderCaseContext(finding, verifierVerdictText, headFiles);
+    if (finding.category() == FindingCategory.BUG && callSiteIndex != null) {
+      context = context + "\n" + callSiteIndex.render(JUDGE_CALL_SITE_TOKEN_CAP);
+    }
     if (finding.category() == FindingCategory.CONTEXT && (policy != null || resolver != null)) {
       StringBuilder ext = new StringBuilder(context);
       ext.append("\n\n");

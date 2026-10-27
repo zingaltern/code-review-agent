@@ -528,11 +528,16 @@ class VerificationPromotionTest {
   }
 
   private static String verdictJson(String id, String verdict, String rationale, String followup) {
+    String refutation =
+        "REFUTED".equals(verdict)
+            ? ",\"refutation\":{\"kind\":\"GUARD_EXISTS\",\"anchor\":\"src/Foo.java:3\","
+                + "\"quote\":\"return items.get(items.size() - 1);\",\"reason\":\"脚本桩反证\"}"
+            : "";
     return followup == null
-        ? "{\"verdicts\":[{\"finding_id\":\"%s\",\"verdict\":\"%s\",\"rationale\":\"%s\"}]}"
-            .formatted(id, verdict, rationale)
-        : "{\"verdicts\":[{\"finding_id\":\"%s\",\"verdict\":\"%s\",\"rationale\":\"%s\",\"followup_file\":\"%s\"}]}"
-            .formatted(id, verdict, rationale, followup);
+        ? "{\"verdicts\":[{\"finding_id\":\"%s\",\"verdict\":\"%s\",\"rationale\":\"%s\"%s}]}"
+            .formatted(id, verdict, rationale, refutation)
+        : "{\"verdicts\":[{\"finding_id\":\"%s\",\"verdict\":\"%s\",\"rationale\":\"%s\",\"followup_file\":\"%s\"%s}]}"
+            .formatted(id, verdict, rationale, followup, refutation);
   }
 
   /** UNTRUSTED 定界标记镜像（04§3.3 规定原文，不依赖实现常量）。 */

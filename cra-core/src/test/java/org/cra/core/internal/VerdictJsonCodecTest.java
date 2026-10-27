@@ -75,4 +75,48 @@ class VerdictJsonCodecTest {
     assertThat(VerdictJsonCodec.parse("{\"other\":1}").errors()).isNotEmpty();
     assertThat(VerdictJsonCodec.parse("not json").errors()).isNotEmpty();
   }
+
+  @Test
+  void parsesStructuredRefutationForRefutedVerdict() {
+    // ADR-0014：bug 类 REFUTED 的结构化反证（kind/anchor/quote/reason）
+    VerdictJsonCodec.ParseResult result =
+        VerdictJsonCodec.parse(
+            """
+            {"verdicts":[{"finding_id":"f_1","verdict":"REFUTED","rationale":"L3 已有防护",
+              "refutation":{"kind":"GUARD_EXISTS","anchor":"src/Foo.java:3",
+                "quote":"if (x == null) return;","reason":"上游空值早退"}}]}""");
+    assertThat(result.errors()).isEmpty();
+    VerdictJsonCodec.Refutation refutation = result.verdicts().get("f_1").refutation();
+    assertThat(refutation).isNotNull();
+    assertThat(refutation.kind()).isEqualTo(VerdictJsonCodec.RefutationKind.GUARD_EXISTS);
+    assertThat(refutation.anchor()).isEqualTo("src/Foo.java:3");
+    assertThat(refutation.quote()).isEqualTo("if (x == null) return;");
+    assertThat(refutation.usable()).isTrue();
+  }
+
+  @Test
+  void malformedRefutationDoesNotFailBatchButIsMarked() {
+    // 结构不合法不判 schema 错（避免一个附加字段拖垮整批），交机械校验按缺失降级
+    VerdictJsonCodec.ParseResult result =
+        VerdictJsonCodec.parse(
+            """
+            {"verdicts":[{"finding_id":"f_1","verdict":"REFUTED","rationale":"x",
+              "refutation":{"kind":"NOT_A_KIND","anchor":"src/Foo.java:1"}}]}""");
+    assertThat(result.errors()).isEmpty();
+    VerdictJsonCodec.Refutation refutation = result.verdicts().get("f_1").refutation();
+    assertThat(refutation).isNotNull();
+    assertThat(refutation.usable()).isFalse();
+    assertThat(refutation.malformed()).isTrue();
+  }
+
+  @Test
+  void refutationAbsentIsAllowedAtParseLevel() {
+    // 兼容旧输出：解析层不强制（bug 类的强制由 RefuteEvidenceGate 执行）
+    VerdictJsonCodec.ParseResult result =
+        VerdictJsonCodec.parse(
+            """
+            {"verdicts":[{"finding_id":"f_1","verdict":"REFUTED","rationale":"x"}]}""");
+    assertThat(result.errors()).isEmpty();
+    assertThat(result.verdicts().get("f_1").refutation()).isNull();
+  }
 }

@@ -81,7 +81,10 @@ final class ScriptedGateway implements LlmGateway {
             }
             sb.append("{\"finding_id\":\"")
                 .append(ids.get(i))
-                .append("\",\"verdict\":\"REFUTED\",\"rationale\":\"L3 已有防护，触发条件不可达\"}");
+                .append("\",\"verdict\":\"REFUTED\",\"rationale\":\"L3 已有防护，触发条件不可达\",")
+                .append(
+                    "\"refutation\":{\"kind\":\"GUARD_EXISTS\",\"anchor\":\"src/Foo.java:3\","
+                        + "\"quote\":\"return items.get(items.size() - 1);\",\"reason\":\"脚本桩反证\"}}");
           }
           sb.append("]}");
           return sb.toString();
