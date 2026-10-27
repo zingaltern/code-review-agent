@@ -153,6 +153,16 @@ public final class VerifyCommand {
     } else {
       lines.add("签名 commit 绑定: 一致");
     }
+    String expectedRepo = args.repo() == null ? "" : args.repo().strip();
+    if (!expectedRepo.isEmpty()) {
+      if (!expectedRepo.equalsIgnoreCase(envelope.repo())) {
+        failures.add("签名信封 repo 与 --repo 不一致（信封 " + envelope.repo() + "，期望 " + expectedRepo + "）");
+      } else {
+        lines.add("签名 repo 绑定: 一致（" + envelope.repo() + "）");
+      }
+    } else {
+      lines.add("签名 repo 绑定: 信封 " + envelope.repo() + "（未提供 --repo，不做期望值比对）");
+    }
     String effectiveTier = gate.tier() == null ? "" : gate.tier();
     if (envelope.tier().isEmpty()) {
       failures.add("签名信封缺 tier 绑定（04§2.4）");

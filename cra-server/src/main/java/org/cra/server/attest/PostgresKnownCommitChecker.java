@@ -10,8 +10,7 @@ import org.cra.common.exception.CraLedgerException;
 /**
  * PostgreSQL 已知 commit 检查（review_run 完成标记，DONE|DEGRADED，02§4.1）。
  *
- * <p>当前按 commit 全局判定（不按 repo 限定）——单租户部署假设；多租户需在报告/端点增加 repo 绑定并收紧查询（见 docs/deployment-server.md
- * 已知限制）。
+ * <p>按 (repo, commit) 判定：报告必须携带 repo，避免多租户下 A 仓库的 commit 签名被 B 仓库复用（2026-10-27 owner 决策 4A）。
  */
 public final class PostgresKnownCommitChecker implements KnownCommitChecker {
 
@@ -28,16 +27,17 @@ public final class PostgresKnownCommitChecker implements KnownCommitChecker {
   }
 
   @Override
-  public boolean exists(String commitSha) {
-    if (commitSha == null || commitSha.isBlank()) {
+  public boolean exists(String repo, String commitSha) {
+    if (repo == null || repo.isBlank() || commitSha == null || commitSha.isBlank()) {
       return false;
     }
     String sql =
-        "SELECT 1 FROM review_run WHERE UPPER(commit_sha) = UPPER(?)"
+        "SELECT 1 FROM review_run WHERE repo = ? AND UPPER(commit_sha) = UPPER(?)"
             + " AND status IN ('DONE','DEGRADED') LIMIT 1";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, commitSha.strip());
+      ps.setString(1, repo.strip());
+      ps.setString(2, commitSha.strip());
       try (ResultSet rs = ps.executeQuery()) {
         return rs.next();
       }

@@ -20,6 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_webhook_delivery_status
 CREATE TABLE IF NOT EXISTS report_attestation (
   attestation_id TEXT PRIMARY KEY,
   report_sha256 TEXT NOT NULL,
+  repo TEXT NOT NULL DEFAULT '',
   commit_sha TEXT,
   tier TEXT,
   key_id TEXT NOT NULL,
@@ -28,8 +29,13 @@ CREATE TABLE IF NOT EXISTS report_attestation (
   signature TEXT NOT NULL
 );
 
+ALTER TABLE report_attestation ADD COLUMN IF NOT EXISTS repo TEXT NOT NULL DEFAULT '';
+
 CREATE INDEX IF NOT EXISTS idx_report_attestation_commit
   ON report_attestation (commit_sha);
+
+CREATE INDEX IF NOT EXISTS idx_report_attestation_repo
+  ON report_attestation (repo, commit_sha);
 
 CREATE TABLE IF NOT EXISTS schema_migration (
   version TEXT PRIMARY KEY,

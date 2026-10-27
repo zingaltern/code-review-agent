@@ -135,8 +135,13 @@ class ServerHttpIntegrationTest {
                 envelope,
                 ReportSignature.sha256(report.getBytes(StandardCharsets.UTF_8))))
         .isTrue();
+    assertThat(envelope.repo()).isEqualTo("owner/repo");
     assertThat(envelope.commit()).isEqualTo(HEAD);
-    assertThat(count("SELECT count(*) FROM report_attestation WHERE commit_sha = ?", HEAD))
+    assertThat(
+            count(
+                "SELECT count(*) FROM report_attestation WHERE repo = ? AND commit_sha = ?",
+                "owner/repo",
+                HEAD))
         .isEqualTo(1);
 
     ResponseEntity<String> noToken =
@@ -145,6 +150,13 @@ class ServerHttpIntegrationTest {
             new HttpEntity<>(report, jsonContentType()),
             String.class);
     assertThat(noToken.getStatusCode().value()).isEqualTo(401);
+
+    HttpHeaders noRepo = jsonContentType();
+    noRepo.setBearerAuth(API_TOKEN);
+    ResponseEntity<String> missingRepo =
+        rest.postForEntity(
+            url("/api/v1/reports/attest"), new HttpEntity<>(report, noRepo), String.class);
+    assertThat(missingRepo.getStatusCode().value()).isEqualTo(409);
 
     ResponseEntity<String> unknownCommit = postAttest(report.replace(HEAD, "unknown-commit"));
     assertThat(unknownCommit.getStatusCode().value()).isEqualTo(409);
@@ -211,6 +223,7 @@ class ServerHttpIntegrationTest {
   private ResponseEntity<String> postAttest(String report) {
     HttpHeaders headers = jsonContentType();
     headers.setBearerAuth(API_TOKEN);
+    headers.add("X-CRA-Repo", "owner/repo");
     return rest.postForEntity(
         url("/api/v1/reports/attest"), new HttpEntity<>(report, headers), String.class);
   }
