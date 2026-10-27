@@ -45,6 +45,8 @@ public final class HealthController {
         Map.of(
             "status",
             "UP",
+            "platform",
+            config.platform(),
             "queue",
             reviewQueue.stats(),
             "event_history_enabled",

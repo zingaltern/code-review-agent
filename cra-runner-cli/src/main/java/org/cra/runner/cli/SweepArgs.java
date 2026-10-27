@@ -40,7 +40,10 @@ final class SweepArgs {
             "--max-prs",
             "--depth",
             "--token",
+            "--platform",
             "--github-api",
+            "--gitlab-base-url",
+            "--gitlab-project",
             "--run-root",
             "--workspace",
             "--crosschecker-modes",
@@ -54,17 +57,47 @@ final class SweepArgs {
         default -> throw new CraConfigException("未知参数: " + arg);
       }
     }
-    String repo = named.getOrDefault("--repo", env.get("GITHUB_REPOSITORY"));
+    String platform = PlatformArgs.platform(named, env);
+    boolean gitlab = PlatformArgs.GITLAB.equals(platform);
+    String repo = named.get("--repo");
+    if (gitlab) {
+      String project =
+          PlatformArgs.firstNonBlank(
+              named.get("--gitlab-project"),
+              env.get("CRA_GITLAB_PROJECT"),
+              env.get("CI_PROJECT_PATH"),
+              repo);
+      if (project != null) {
+        repo = project;
+      }
+    } else if (repo == null || repo.isBlank()) {
+      repo = env.get("GITHUB_REPOSITORY");
+    }
     if (repo == null || repo.isBlank()) {
-      throw new CraConfigException("缺参数: --repo（或 GITHUB_REPOSITORY）");
+      throw new CraConfigException(
+          gitlab
+              ? "缺参数: --gitlab-project / CRA_GITLAB_PROJECT / CI_PROJECT_PATH（group/project）"
+              : "缺参数: --repo（或 GITHUB_REPOSITORY）");
     }
-    String[] ownerRepo = repo.split("/");
-    if (ownerRepo.length != 2) {
-      throw new CraConfigException("--repo 形如 owner/name: " + repo);
+    String[] ownerRepo = PlatformArgs.splitRepo(repo, gitlab);
+    String token;
+    if (gitlab) {
+      if (named.containsKey("--token")) {
+        throw new CraConfigException(
+            "GitLab token 只从 CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE 读取（--token 仅 GitHub）");
+      }
+      token = PlatformArgs.gitlabToken(env);
+    } else {
+      token = named.get("--token");
+      if (token == null || token.isBlank()) {
+        token = env.get("GITHUB_TOKEN");
+      }
     }
-    String token = named.getOrDefault("--token", env.get("GITHUB_TOKEN"));
     if (token == null || token.isBlank()) {
-      throw new CraConfigException("缺参数: --token（或 GITHUB_TOKEN）");
+      throw new CraConfigException(
+          gitlab
+              ? "CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件）"
+              : "缺参数: --token（或 GITHUB_TOKEN）");
     }
     String llmApiKey = env.get("CRA_LLM_API_KEY");
     String llmBaseUrl = env.get("CRA_LLM_BASE_URL");
@@ -130,7 +163,9 @@ final class SweepArgs {
             blankToNull(temperature),
             CraConfig.DEFAULT_PUSH_LOOKBACK,
             ReviewMode.ISSUE,
-            SignoffConfig.defaults());
+            SignoffConfig.defaults(),
+            platform,
+            gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none());
     return new Parsed(config, since, maxPrs);
   }
 

@@ -87,7 +87,10 @@ final class CliArgs {
             "--head",
             "--depth",
             "--token",
+            "--platform",
             "--github-api",
+            "--gitlab-base-url",
+            "--gitlab-project",
             "--run-root",
             "--workspace",
             "--large-diff-lines",
@@ -119,16 +122,27 @@ final class CliArgs {
     // dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）
     boolean dryRun = (local && !dryRunArgSeen) || dryRunFlag;
 
+    // 平台选择（M4e 第二半，ADR-0012）：默认 github 保持兼容；本地 pre-PR 形态与平台无关
+    String platform = PlatformArgs.platform(named, env);
+    boolean gitlab = PlatformArgs.GITLAB.equals(platform);
+
     String repo = named.get("--repo");
-    if (repo == null || repo.isBlank()) {
+    if (gitlab) {
+      String project =
+          PlatformArgs.firstNonBlank(
+              named.get("--gitlab-project"),
+              env.get("CRA_GITLAB_PROJECT"),
+              env.get("CI_PROJECT_PATH"),
+              repo);
+      if (project != null) {
+        repo = project;
+      }
+    } else if (repo == null || repo.isBlank()) {
       repo = env.get("GITHUB_REPOSITORY");
     }
     String[] ownerRepo = null;
     if (repo != null && !repo.isBlank()) {
-      ownerRepo = repo.split("/");
-      if (ownerRepo.length != 2) {
-        throw new CraConfigException("--repo 形如 owner/name: " + repo);
-      }
+      ownerRepo = PlatformArgs.splitRepo(repo, gitlab);
     }
     int pr;
     String base;
@@ -145,37 +159,58 @@ final class CliArgs {
       String explicitBase = blankToNull(named.get("--base"));
       base = explicitBase != null ? explicitBase : blankToNull(named.get("--baseline"));
     } else {
+      String prEnv = gitlab ? env.get("CI_MERGE_REQUEST_IID") : env.get("PR_NUMBER");
       pr =
-          local
-              ? parseIntOrDefault(named.get("--pr"), 0)
-              : parsePr(required(named, "--pr", env.get("PR_NUMBER")));
+          local ? parseIntOrDefault(named.get("--pr"), 0) : parsePr(required(named, "--pr", prEnv));
       base =
           named.containsKey("--base") || !local
-              ? required(named, "--base", env.get("BASE_SHA"))
+              ? required(
+                  named,
+                  "--base",
+                  gitlab ? env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA") : env.get("BASE_SHA"))
               : "main";
     }
     // 本地模式 head 可省（= HEAD）；CI 必填
     String head = named.get("--head");
     if (head == null || head.isBlank()) {
-      head = local ? null : required(named, "--head", env.get("HEAD_SHA"));
+      head =
+          local
+              ? null
+              : required(named, "--head", gitlab ? env.get("CI_COMMIT_SHA") : env.get("HEAD_SHA"));
     }
     String depth = named.getOrDefault("--depth", "standard");
     if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
       throw new CraConfigException("depth 非法: " + depth + "（quick|standard|deep）");
     }
-    String token = named.get("--token");
-    if (token == null || token.isBlank()) {
-      token = env.get("GITHUB_TOKEN");
+    String token;
+    if (gitlab) {
+      if (named.containsKey("--token")) {
+        throw new CraConfigException(
+            "GitLab token 只从 CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE 读取（--token 仅 GitHub）");
+      }
+      token = PlatformArgs.gitlabToken(env);
+    } else {
+      token = named.get("--token");
+      if (token == null || token.isBlank()) {
+        token = env.get("GITHUB_TOKEN");
+      }
     }
     if (!local) {
-      if (token == null || token.isBlank()) {
+      if (gitlab && (token == null || token.isBlank())) {
+        throw new CraConfigException("CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件；05§6）");
+      }
+      if (!gitlab && (token == null || token.isBlank())) {
         throw new CraConfigException("缺参数: --token（或 GITHUB_TOKEN）");
       }
       if (ownerRepo == null) {
-        throw new CraConfigException("缺参数: --repo（或 GITHUB_REPOSITORY）");
+        throw new CraConfigException(
+            gitlab
+                ? "缺参数: --gitlab-project / CRA_GITLAB_PROJECT / CI_PROJECT_PATH（group/project）"
+                : "缺参数: --repo（或 GITHUB_REPOSITORY）");
       }
       if (head == null) {
-        throw new CraConfigException("缺参数: --head（或 HEAD_SHA）");
+        throw new CraConfigException(
+            gitlab ? "缺参数: --head（或 CI_COMMIT_SHA）" : "缺参数: --head（或 HEAD_SHA）");
       }
     }
     String llmApiKey = env.get("CRA_LLM_API_KEY");
@@ -286,7 +321,9 @@ final class CliArgs {
         blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))),
         pushLookback,
         push ? org.cra.common.run.ReviewMode.COMMIT : org.cra.common.run.ReviewMode.PULL_REQUEST,
-        signoffConfig);
+        signoffConfig,
+        platform,
+        gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none());
   }
 
   /** 逗号分隔列表（空/空白项丢弃；用于 trusted-authors）。 */

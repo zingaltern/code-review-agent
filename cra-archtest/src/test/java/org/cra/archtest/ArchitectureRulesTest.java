@@ -52,10 +52,13 @@ class ArchitectureRulesTest {
           Map.entry("agents", Set.of()),
           Map.entry("store", Set.of()),
           Map.entry("core", Set.of("llm", "git", "context", "agents", "store")),
-          Map.entry("cli", Set.of("llm", "git", "git-gh", "context", "agents", "store", "core")),
+          Map.entry(
+              "cli",
+              Set.of("llm", "git", "git-gh", "git-gl", "context", "agents", "store", "core")),
           Map.entry("eval", Set.of("git", "git-gh", "store")),
           Map.entry(
-              "server", Set.of("llm", "git", "git-gh", "context", "agents", "store", "core")));
+              "server",
+              Set.of("llm", "git", "git-gh", "git-gl", "context", "agents", "store", "core")));
 
   /** 含 internal 包、适用 R3 的模块（10§3：common/cli/server 免二分；archtest 无主代码）。 */
   private static final List<String> MODULES_WITH_INTERNAL =

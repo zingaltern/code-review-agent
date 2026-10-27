@@ -13,8 +13,6 @@ import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
 import org.cra.core.api.Orchestrator;
-import org.cra.git.github.api.GitHubAssembly;
-import org.cra.git.github.api.GitHubComponents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
@@ -50,8 +48,7 @@ final class SweepCommand {
     CraConfig config = parsed.config();
     Instant since = Instant.now().minus(SweepScope.parseSince(parsed.since()));
     try {
-      GitHubComponents components =
-          GitHubAssembly.createComponents(config.githubApi(), config.githubToken());
+      PlatformComponents components = PlatformComponents.create(config);
       RepoRef repo = new RepoRef(config.repoOwner(), config.repoName());
       List<PullRequestRef> allPulls = components.commentSource().listPullRequests(repo, since);
       List<PullRequestRef> pulls = allPulls.stream().limit(parsed.maxPrs()).toList();
@@ -141,7 +138,7 @@ final class SweepCommand {
   }
 
   private boolean publishRollup(
-      GitHubComponents components,
+      PlatformComponents components,
       RepoRef repo,
       SweepArgs.Parsed parsed,
       int windowTotal,

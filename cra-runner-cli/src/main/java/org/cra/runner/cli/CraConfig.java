@@ -47,6 +47,8 @@ import org.cra.common.run.ReviewMode;
  * @param reviewMode 发布形态（M4c --push = COMMIT；M4d sweep = ISSUE；默认 PULL_REQUEST，05§2.2）
  * @param pushLookback push 模式沿首父链回溯查找"上一完成 commit"的最大步数（--lookback，默认 20，05§2.4）
  * @param signoff 签字建议配置（05§5 agents.signoff；M4a；默认开启、作者/测试状态未知）
+ * @param platform Git 平台（`github`|`gitlab`；M4e 第二半，--platform / CRA_GIT_PLATFORM，默认 github）
+ * @param gitlab GitLab 连接设置（仅 platform=gitlab 时生效；密钥只从环境/文件读，05§6）
  */
 public record CraConfig(
     String repoOwner,
@@ -85,10 +87,26 @@ public record CraConfig(
     String llmTemperature,
     int pushLookback,
     ReviewMode reviewMode,
-    SignoffConfig signoff) {
+    SignoffConfig signoff,
+    String platform,
+    GitLabSettings gitlab) {
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
+    platform =
+        platform == null || platform.isBlank()
+            ? "github"
+            : platform.strip().toLowerCase(java.util.Locale.ROOT);
+    if (!"github".equals(platform) && !"gitlab".equals(platform)) {
+      throw new org.cra.common.exception.CraConfigException(
+          "platform 非法: " + platform + "（github|gitlab）");
+    }
+    gitlab = gitlab == null ? GitLabSettings.none() : gitlab;
+  }
+
+  /** 是否 GitLab 平台（M4e 第二半）。 */
+  public boolean isGitlab() {
+    return "gitlab".equals(platform);
   }
 
   /**
@@ -201,7 +219,9 @@ public record CraConfig(
         llmTemperature,
         DEFAULT_PUSH_LOOKBACK,
         ReviewMode.PULL_REQUEST,
-        SignoffConfig.defaults());
+        SignoffConfig.defaults(),
+        "github",
+        GitLabSettings.none());
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -309,7 +329,9 @@ public record CraConfig(
         null,
         DEFAULT_PUSH_LOOKBACK,
         ReviewMode.PULL_REQUEST,
-        SignoffConfig.defaults());
+        SignoffConfig.defaults(),
+        "github",
+        GitLabSettings.none());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -352,7 +374,9 @@ public record CraConfig(
         llmTemperature(),
         pushLookback(),
         reviewMode(),
-        signoff());
+        signoff(),
+        platform(),
+        gitlab());
   }
 
   /**
@@ -399,6 +423,8 @@ public record CraConfig(
         llmTemperature(),
         pushLookback(),
         reviewMode(),
-        signoff());
+        signoff(),
+        platform(),
+        gitlab());
   }
 }

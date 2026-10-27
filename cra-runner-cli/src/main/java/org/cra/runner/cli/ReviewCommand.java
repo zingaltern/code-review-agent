@@ -50,7 +50,8 @@ final class ReviewCommand {
                 effective.signoff().context(),
                 effective.reviewMode());
         LOG.info(
-            "cra review start: repo={}/{} mode={} pr={} base={} head={}",
+            "cra review start: platform={} repo={}/{} mode={} pr={} base={} head={}",
+            effective.platform(),
             effective.repoOwner(),
             effective.repoName(),
             effective.reviewMode(),

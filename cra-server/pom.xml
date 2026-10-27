@@ -30,6 +30,11 @@
       <groupId>org.cra</groupId>
       <artifactId>cra-git-github</artifactId>
     </dependency>
+    <!-- M4e 第二半（ADR-0012）：CRA_SERVER_PLATFORM=gitlab 时装配 GitLab 适配器 -->
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git-gitlab</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.cra</groupId>
       <artifactId>cra-context</artifactId>

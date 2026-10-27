@@ -1,5 +1,8 @@
 package org.cra.server.config;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -19,7 +22,12 @@ import org.springframework.core.env.Environment;
  * <p>组装期硬校验：webhook 密钥 / API token / 签名密钥缺失即拒绝启动（fail closed）。评审参数沿用 05§5 默认值，仅暴露 run 级预算与深度档位；LLM
  * 三档路由与 CrossChecker 开关与 CLI 同语义。
  *
- * @param webhookSecret GitHub webhook HMAC 密钥（X-Hub-Signature-256）
+ * @param webhookSecret webhook 密钥（GitHub：X-Hub-Signature-256 HMAC；GitLab：X-Gitlab-Token secret
+ *     token）
+ * @param platform Git 平台（`github`|`gitlab`；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0012）
+ * @param gitlabBaseUrl GitLab API 根（含 /api/v4；CRA_GITLAB_BASE_URL）
+ * @param gitlabToken GitLab access token（CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE；gitlab 模式必填）
+ * @param gitlabBotUsername `/user` 不可读时的 bot 身份回退（CRA_GITLAB_BOT_USERNAME，ADR-0011 决策 3）
  * @param apiToken 服务 API token（Bearer，保护 /api/v1/**）
  * @param signingKey 报告签名 HMAC 密钥（仅服务端与 CI 持有）
  * @param signingKeyId 签名密钥标识（轮换用）
@@ -50,6 +58,10 @@ import org.springframework.core.env.Environment;
  */
 public record ServerConfig(
     String webhookSecret,
+    String platform,
+    String gitlabBaseUrl,
+    String gitlabToken,
+    String gitlabBotUsername,
     String apiToken,
     String signingKey,
     String signingKeyId,
@@ -80,6 +92,15 @@ public record ServerConfig(
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
+    platform = platform == null ? "" : platform.strip();
+    if (!"github".equals(platform) && !"gitlab".equals(platform)) {
+      throw new CraConfigException(
+          "CRA_SERVER_PLATFORM 非法: " + platform + "（github|gitlab，小写；默认 github）");
+    }
+    if ("gitlab".equals(platform)) {
+      requireText(gitlabToken, "CRA_GITLAB_TOKEN");
+      gitlabBaseUrl = normalizeGitLabApiBase(gitlabBaseUrl);
+    }
     requireText(apiToken, "CRA_SERVER_API_TOKEN");
     requireText(signingKey, "CRA_SERVER_SIGNING_KEY");
     requireText(signingKeyId, "CRA_SERVER_SIGNING_KEY_ID");
@@ -116,6 +137,12 @@ public record ServerConfig(
   public static ServerConfig from(Environment env) {
     return new ServerConfig(
         env.getProperty("CRA_SERVER_WEBHOOK_SECRET", ""),
+        env.getProperty("CRA_SERVER_PLATFORM", "github"),
+        env.getProperty("CRA_GITLAB_BASE_URL", "https://gitlab.com/api/v4"),
+        firstNonBlank(
+            env.getProperty("CRA_GITLAB_TOKEN"),
+            readTokenFile(env.getProperty("CRA_GITLAB_TOKEN_FILE"))),
+        blankToNull(env.getProperty("CRA_GITLAB_BOT_USERNAME")),
         env.getProperty("CRA_SERVER_API_TOKEN", ""),
         env.getProperty("CRA_SERVER_SIGNING_KEY", ""),
         env.getProperty("CRA_SERVER_SIGNING_KEY_ID", "cra-server-v1"),
@@ -143,6 +170,34 @@ public record ServerConfig(
         bool(env, "CRA_SERVER_EVENT_HISTORY_ENABLED", false),
         env.getProperty("CRA_SERVER_EVENT_HISTORY_CRON", "0 0 3 * * *"),
         longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", 500_000L));
+  }
+
+  /**
+   * 是否 GitLab 平台（M4e 第二半）。
+   *
+   * @return true = GitLab
+   */
+  public boolean isGitlab() {
+    return "gitlab".equals(platform);
+  }
+
+  /**
+   * API 根归一：接受实例根或已含 `/api/v4` 的地址（与 CLI 同语义）。
+   *
+   * @param raw 用户输入
+   * @return 以 `/api/v4` 结尾且无尾随 `/` 的 API 根
+   */
+  static String normalizeGitLabApiBase(String raw) {
+    String value = raw == null || raw.isBlank() ? "https://gitlab.com/api/v4" : raw.strip();
+    String base = value.replaceAll("/+$", "");
+    if (base.endsWith("/api/v4")) {
+      return base;
+    }
+    int marker = base.indexOf("/api/v4/");
+    if (marker >= 0) {
+      return base.substring(0, marker + "/api/v4".length());
+    }
+    return base + "/api/v4";
   }
 
   /**
@@ -250,6 +305,24 @@ public record ServerConfig(
 
   private static String firstNonBlank(String first, String second) {
     return first != null && !first.isBlank() ? first : second;
+  }
+
+  /**
+   * 密钥文件读取（容器/K8s secret mount）：只返回去空白内容，失败信息不含内容。
+   *
+   * @param path 文件路径（可空）
+   * @return token 或 null
+   */
+  private static String readTokenFile(String path) {
+    if (path == null || path.isBlank()) {
+      return null;
+    }
+    try {
+      String value = Files.readString(Path.of(path.strip()), StandardCharsets.UTF_8);
+      return value.isBlank() ? null : value.strip();
+    } catch (IOException | java.nio.file.InvalidPathException e) {
+      throw new CraConfigException("CRA_GITLAB_TOKEN_FILE 读取失败: " + path);
+    }
   }
 
   private static String blankToNull(String value) {
