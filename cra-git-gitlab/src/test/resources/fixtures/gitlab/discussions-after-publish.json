@@ -1,0 +1,37 @@
+[
+  {
+    "id": "d-inline-1",
+    "individual_note": false,
+    "notes": [
+      {
+        "id": 8001,
+        "system": false,
+        "author": { "username": "cra-bot" },
+        "position": {
+          "base_sha": "basesha1",
+          "head_sha": "abc1234",
+          "start_sha": "startsha1",
+          "position_type": "text",
+          "old_path": "src/main/java/Foo.java",
+          "new_path": "src/main/java/Foo.java",
+          "new_line": 2
+        },
+        "body": "__INLINE_BODY__",
+        "created_at": "2026-10-27T00:00:00Z"
+      }
+    ]
+  },
+  {
+    "id": "d-summary-1",
+    "individual_note": true,
+    "notes": [
+      {
+        "id": 9500,
+        "system": false,
+        "author": { "username": "cra-bot" },
+        "body": "__SUMMARY_BODY__",
+        "created_at": "2026-10-27T00:01:00Z"
+      }
+    ]
+  }
+]

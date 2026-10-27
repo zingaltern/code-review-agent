@@ -28,6 +28,7 @@ class ArchitectureRulesTest {
           Map.entry("llm", "org.cra.llm"),
           Map.entry("git", "org.cra.git"),
           Map.entry("git-gh", "org.cra.git.github"),
+          Map.entry("git-gl", "org.cra.git.gitlab"),
           Map.entry("context", "org.cra.context"),
           Map.entry("agents", "org.cra.agents"),
           Map.entry("store", "org.cra.store"),
@@ -36,12 +37,17 @@ class ArchitectureRulesTest {
           Map.entry("eval", "org.cra.eval"),
           Map.entry("server", "org.cra.server"));
 
+  /** Git 平台实现包（11§4 第 4 条：实现互不依赖；SPI 行选择器须排除全部实现）。 */
+  private static final List<String> IMPLEMENTATION_PACKAGES =
+      List.of("org.cra.git.github", "org.cra.git.gitlab");
+
   /** 10§2 矩阵：行 → 允许依赖的列（common 与自身恒允许，不列；M4b 起 cra-server 行生效）。 */
   private static final Map<String, Set<String>> MATRIX_ALLOWED =
       Map.ofEntries(
           Map.entry("llm", Set.of()),
           Map.entry("git", Set.of()),
           Map.entry("git-gh", Set.of("git")),
+          Map.entry("git-gl", Set.of("git")),
           Map.entry("context", Set.of()),
           Map.entry("agents", Set.of()),
           Map.entry("store", Set.of()),
@@ -53,7 +59,7 @@ class ArchitectureRulesTest {
 
   /** 含 internal 包、适用 R3 的模块（10§3：common/cli/server 免二分；archtest 无主代码）。 */
   private static final List<String> MODULES_WITH_INTERNAL =
-      List.of("llm", "git", "git-gh", "context", "agents", "store", "core", "eval");
+      List.of("llm", "git", "git-gh", "git-gl", "context", "agents", "store", "core", "eval");
 
   @Test
   void r1LayeredDependencies() {
@@ -122,19 +128,38 @@ class ArchitectureRulesTest {
 
   @Test
   void r4SpiModuleKnowsNoImplementation() {
-    // org.cra.git..（SPI）不得依赖 org.cra.git.github..（实现）；行选择器须排除 github 自身，
-    // 否则 github 内部依赖被误判。org.cra.common.. 不依赖任何其他模块（矩阵底座纯度）。
-    ArchRule spiRule =
+    // org.cra.git..（SPI）不得依赖任何平台实现（github / gitlab）；行选择器须排除实现自身，
+    // 否则实现内部依赖被误判。org.cra.common.. 不依赖任何其他模块（矩阵底座纯度）。
+    for (String impl : IMPLEMENTATION_PACKAGES) {
+      ArchRule spiRule =
+          noClasses()
+              .that()
+              .resideInAPackage("org.cra.git..")
+              .and()
+              .resideOutsideOfPackages(
+                  IMPLEMENTATION_PACKAGES.stream().map(p -> p + "..").toArray(String[]::new))
+              .should()
+              .dependOnClassesThat()
+              .resideInAPackage(impl + "..")
+              .because("10§5 R4：SPI 模块不知实现");
+      spiRule.check(importedClasses());
+    }
+    // 实现模块互不依赖（11§4 第 4 条）：github ↛ gitlab，gitlab ↛ github
+    for (String from : IMPLEMENTATION_PACKAGES) {
+      for (String to : IMPLEMENTATION_PACKAGES) {
+        if (from.equals(to)) {
+          continue;
+        }
         noClasses()
             .that()
-            .resideInAPackage("org.cra.git..")
-            .and()
-            .resideOutsideOfPackage("org.cra.git.github..")
+            .resideInAPackage(from + "..")
             .should()
             .dependOnClassesThat()
-            .resideInAPackage("org.cra.git.github..")
-            .because("10§5 R4：SPI 模块不知实现");
-    spiRule.check(importedClasses());
+            .resideInAPackage(to + "..")
+            .because("11§4 第 4 条：实现模块互不依赖（" + from + " → " + to + "）")
+            .check(importedClasses());
+      }
+    }
     for (String module : MODULE_PACKAGE.keySet()) {
       if (module.equals("common")) {
         continue;
@@ -211,7 +236,8 @@ class ArchitectureRulesTest {
               .that()
               .resideInAPackage("org.cra.git..")
               .and()
-              .resideOutsideOfPackage("org.cra.git.github..")
+              .resideOutsideOfPackages(
+                  IMPLEMENTATION_PACKAGES.stream().map(p -> p + "..").toArray(String[]::new))
               .should()
               .dependOnClassesThat()
               .resideInAPackage(target)

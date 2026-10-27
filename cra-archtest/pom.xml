@@ -37,6 +37,11 @@
     </dependency>
     <dependency>
       <groupId>org.cra</groupId>
+      <artifactId>cra-git-gitlab</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
       <artifactId>cra-context</artifactId>
       <scope>test</scope>
     </dependency>
