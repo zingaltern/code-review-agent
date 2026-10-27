@@ -15,7 +15,7 @@ import org.cra.common.git.DiffHunk;
 import org.cra.common.git.DiffResult;
 import org.junit.jupiter.api.Test;
 
-/** 确定性调用点索引（ADR-0014 §2.2）：符号抽取、同目录有界扫描、不可得降级、渲染预算。 */
+/** 确定性调用点索引（ADR-0015 §2.2）：符号抽取、同目录有界扫描、不可得降级、渲染预算。 */
 class CallSiteIndexTest {
 
   private static final String FILE = "src/main/java/com/demo/util/TextBuffer.java";

@@ -69,7 +69,7 @@ final class FindingPromoter {
   }
 
   /**
-   * 验证结论 → 发布决策（ADR-0014：bug 类 Judge 案件附带调用点索引）。
+   * 验证结论 → 发布决策（ADR-0015：bug 类 Judge 案件附带调用点索引）。
    *
    * @param callSiteIndexByFinding finding id → 调用点索引（验证波产出；空 = 不注入）
    * @return 晋升结果

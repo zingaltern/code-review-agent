@@ -31,7 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
 
 /**
- * 验证层反证纪律端到端（ADR-0014）：脚本化 LLM fixture 复现 JacksonCore-8 形态—— 复审员把"结论把变更定位在 X 而非 Y"（引述/锚点不符）当作推翻 →
+ * 验证层反证纪律端到端（ADR-0015）：脚本化 LLM fixture 复现 JacksonCore-8 形态—— 复审员把"结论把变更定位在 X 而非 Y"（引述/锚点不符）当作推翻 →
  * 机械校验降级 INSUFFICIENT → Judge 按失败模式本身裁决 CONFIRMED → 发布。同时覆盖：
  *
  * <ul>

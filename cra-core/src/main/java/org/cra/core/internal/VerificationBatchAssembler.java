@@ -53,7 +53,7 @@ final class VerificationBatchAssembler {
 
   private static final int JUDGE_MAX_FILES = 3;
 
-  /** Judge 案件调用点索引渲染上限（ADR-0014：16k 案件预算内的预留）。 */
+  /** Judge 案件调用点索引渲染上限（ADR-0015：16k 案件预算内的预留）。 */
   private static final long JUDGE_CALL_SITE_TOKEN_CAP = 500;
 
   private VerificationBatchAssembler() {}
@@ -123,7 +123,7 @@ final class VerificationBatchAssembler {
   }
 
   /**
-   * 组装验证批次输入（ADR-0014：bug 类候选附带确定性调用点索引）。
+   * 组装验证批次输入（ADR-0015：bug 类候选附带确定性调用点索引）。
    *
    * <p>索引渲染 token 从 codeContext 预算中预留（不突破 03§6 verifier 输入预算）；不可得时如实声明。
    *
@@ -270,7 +270,7 @@ final class VerificationBatchAssembler {
   }
 
   /**
-   * 组装 Judge 案件输入（ADR-0014：bug 类案件附带调用点索引，≤500 token）。
+   * 组装 Judge 案件输入（ADR-0015：bug 类案件附带调用点索引，≤500 token）。
    *
    * @param callSiteIndex 调用点索引（null = 不适用/未采集）
    * @return 案件输入

@@ -198,9 +198,9 @@
 - **PR #17（M4e 第二半）**：CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab` + `/webhooks/gitlab` 接线（ADR-0013）；verify/L1 绿、L2 跳过；真实 GitLab 读路径已验证、写操作待 owner token；Gerrit/语义索引未做；squash 合并 `c364323`。
 - **门禁/文档**：08§5 场景编号与总数已统一（1–29）；11§2 登记报告签名、载体扩展与事件源/检索存储；M4 功能线合入后 main 无未合并分支。
 
-### 验证层反证纪律记录（ADR-0014，2026-10-28）
+### 验证层反证纪律记录（ADR-0015，2026-10-28）
 
-- **触发与取证**：官方 L3 bad 71/90（WL 0.6937）已知红；稳定性实验（run 40536199041/40536205522）表明主因不是温度。复核 trace 原文：JacksonCore-8 在 run 40536205522 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray，但 diff 实际修改的是 getTextBuffer"的**引述/锚点不符**——反证可核查，但没有否定失败模式；同一 D4J 缺陷（#182）在 run 40342221542 以正确命名发布并命中。审计文档中"调用方不会把 null 当 char[] 用"的概括与 trace 不符，以 trace 为准（ADR-0014 §1.1）。
+- **触发与取证**：官方 L3 bad 71/90（WL 0.6937）已知红；稳定性实验（run 40536199041/40536205522）表明主因不是温度。复核 trace 原文：JacksonCore-8 在 run 40536205522 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray，但 diff 实际修改的是 getTextBuffer"的**引述/锚点不符**——反证可核查，但没有否定失败模式；同一 D4J 缺陷（#182）在 run 40342221542 以正确命名发布并命中。审计文档中"调用方不会把 null 当 char[] 用"的概括与 trace 不符，以 trace 为准（ADR-0015 §1.1）。
 - **落地**：bug 类 REFUTED 必须携带 `refutation{kind,anchor,quote,reason}`；`RefuteEvidenceGate` 在缺字段/`kind=CITATION_MISMATCH`/quote 无法在简报可见上下文逐字定位/quote 过短时把判定降级为 INSUFFICIENT_EVIDENCE 交 Judge（trace `refute_evidence_check`）；bug 类 brief 增确定性调用点索引（同目录有界扫描，≤700 token 从 codeContext 预留，不可得如实声明）；judge 提示词增反证审查规则。**未改**阈值（0.70/0.35/0.80）、expected/数据集、CrossChecker 默认值。
 - **测试**：`RefuteEvidenceGateTest`（无反证不得 REFUTED 的四类降级 + 合法反证保留）、`CallSiteIndexTest`（注入/降级/渲染预算）、`VerdictJsonCodecTest`（refutation 解析）、`VerifierAntiRefutePipelineTest`（JacksonCore-8 形态：引述不符 REFUTED → 降级 → Judge CONFIRMED → 发布；改前 PromotionEngine 直接 REJECT；verifier 输入 ≤12k）。`mvn -B -ntp verify` 2109 tests 全绿（1:51，含 PG 集成）。
 - **有界对比**（8 个翻转 case × k=3 × temperature=0.2 × standard × tier=l3，同一子集参数）：

@@ -17,7 +17,7 @@ import org.cra.common.git.DiffResult;
 import org.cra.core.internal.pipeline.FindingAggregator.Scored;
 
 /**
- * bug 类候选的确定性调用点索引（ADR-0014 §2.2）：核心组装期完成，无 LLM。
+ * bug 类候选的确定性调用点索引（ADR-0015 §2.2）：核心组装期完成，无 LLM。
  *
  * <p>符号抽取 = bug 类 finding 的自由文本（evidence → title → failureMode）中出现的标识符 ∩ 该文件全文（不可得时退回 diff
  * 补丁）中出现的标识符（去停用词），按出现顺序取 ≤3 个。 扫描范围 = head 侧 {@code listFiles("**&#47;*.java")} 返回的、与批次文件同目录的候选文件
@@ -36,7 +36,7 @@ public final class CallSiteIndex {
   /** 条目上限。 */
   static final int MAX_ENTRIES = 30;
 
-  /** 渲染 token 上限（ADR-0014：从 codeContext 预算内预留）。 */
+  /** 渲染 token 上限（ADR-0015：从 codeContext 预算内预留）。 */
   public static final long RENDER_TOKEN_CAP = 700;
 
   /** 过滤掉的通用词（Java 关键字/常见类型名/字面量，无鉴别力）。 */

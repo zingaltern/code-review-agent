@@ -8,7 +8,7 @@ import org.cra.core.internal.VerdictJsonCodec.RefutationKind;
 import org.cra.core.internal.VerdictJsonCodec.VerifierVerdict;
 import org.junit.jupiter.api.Test;
 
-/** REFUTED 反证机械校验（ADR-0014 §2.1）：「无反证 → 不得 REFUTED（应 INSUFFICIENT）」的核心单测。 */
+/** REFUTED 反证机械校验（ADR-0015 §2.1）：「无反证 → 不得 REFUTED（应 INSUFFICIENT）」的核心单测。 */
 class RefuteEvidenceGateTest {
 
   private static final String CONTEXT =

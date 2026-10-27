@@ -425,7 +425,7 @@ public final class ReviewPipeline implements Orchestrator {
       List<FindingAggregator.Scored> candidates = gateOutcome.candidates();
       int skippedDuplicate = gateOutcome.skippedDuplicate();
 
-      // v1.4（ADR-0014）：bug 类候选的确定性调用点索引——一次仓库树列举，逐批次有界扫描
+      // v1.4（ADR-0015）：bug 类候选的确定性调用点索引——一次仓库树列举，逐批次有界扫描
       List<String> javaFileIndex =
           candidates.stream()
                   .anyMatch(

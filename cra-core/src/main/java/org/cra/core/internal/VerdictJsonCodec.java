@@ -10,7 +10,7 @@ import java.util.Map;
  * prompts/verifier/balanced-review.md：{"verdicts":[{finding_id, verdict, rationale, followup_file?,
  * refutation?}]}。
  *
- * <p>v1.4（ADR-0014）：bug 类 REFUTED 必须携带 {@code refutation} 对象（kind/anchor/quote）， 机械校验（{@link
+ * <p>v1.4（ADR-0015）：bug 类 REFUTED 必须携带 {@code refutation} 对象（kind/anchor/quote）， 机械校验（{@link
  * RefuteEvidenceGate}）据此决定是否降级为 INSUFFICIENT_EVIDENCE。
  */
 public final class VerdictJsonCodec {
@@ -25,7 +25,7 @@ public final class VerdictJsonCodec {
     UNAVAILABLE
   }
 
-  /** 反证类型（ADR-0014 §2.1）：只有前两类 + CONTRACT_SAFE 构成"对失败模式的否定"； CITATION_MISMATCH 仅表示结论引述不准，不构成推翻。 */
+  /** 反证类型（ADR-0015 §2.1）：只有前两类 + CONTRACT_SAFE 构成"对失败模式的否定"； CITATION_MISMATCH 仅表示结论引述不准，不构成推翻。 */
   public enum RefutationKind {
     /** 触发条件不可达 */
     UNREACHABLE,
@@ -38,7 +38,7 @@ public final class VerdictJsonCodec {
   }
 
   /**
-   * 结构化反证（ADR-0014）。
+   * 结构化反证（ADR-0015）。
    *
    * @param kind 反证类型（未知值按缺失处理）
    * @param anchor 反证位置（path:line，自由格式但须非空）

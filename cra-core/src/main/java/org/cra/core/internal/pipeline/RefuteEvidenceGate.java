@@ -7,7 +7,7 @@ import org.cra.core.internal.VerdictJsonCodec.Refutation;
 import org.cra.core.internal.VerdictJsonCodec.VerifierVerdict;
 
 /**
- * REFUTED 反证机械校验（ADR-0014 §2.1）：bug 类候选的 REFUTED 必须携带可核查反证， 否则降级为 INSUFFICIENT_EVIDENCE 交 Judge 仲裁。
+ * REFUTED 反证机械校验（ADR-0015 §2.1）：bug 类候选的 REFUTED 必须携带可核查反证， 否则降级为 INSUFFICIENT_EVIDENCE 交 Judge 仲裁。
  *
  * <p>校验只做"证据形态"判断（确定性、可重放），不做语义裁决：
  *

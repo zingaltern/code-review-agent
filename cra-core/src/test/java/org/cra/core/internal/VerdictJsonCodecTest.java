@@ -78,7 +78,7 @@ class VerdictJsonCodecTest {
 
   @Test
   void parsesStructuredRefutationForRefutedVerdict() {
-    // ADR-0014：bug 类 REFUTED 的结构化反证（kind/anchor/quote/reason）
+    // ADR-0015：bug 类 REFUTED 的结构化反证（kind/anchor/quote/reason）
     VerdictJsonCodec.ParseResult result =
         VerdictJsonCodec.parse(
             """
