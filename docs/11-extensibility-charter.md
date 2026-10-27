@@ -1,6 +1,6 @@
 # 11 · 扩展性契约
 
-> 文档版本：v1.5（2026-10-27，M4e 第二半 + M4f-full：两行补 CLI/server 平台选择（ADR-0013）；新增事件源/事件检索/存储登记（ADR-0012）；真实写操作 pending）
+> 文档版本：v1.4（2026-10-27，M4e 第二半 + M4f-full：两行补 CLI/server 平台选择（ADR-0013）；新增事件源/事件检索/存储登记（ADR-0012）；真实写操作 pending）
 > 文档版本：v1.3（2026-10-27，M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；Gerrit 与语义索引未做）
 > 文档版本：v1.2（2026-10-26，M4b：账本 PG 形态落地 + 报告签名信封登记；M4c/M4d：载体扩展登记——Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行补 commit-comment 与 issue 载体及键控方法，§7 对应两项转为"已登记并实现"）
 > v1.1（2026-10-25，v1.0 入库后协调修订：§3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制，消除同批文档间的定义冲突）
