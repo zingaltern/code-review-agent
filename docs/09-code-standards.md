@@ -1,5 +1,6 @@
 # 09 · 代码编写规范
 
+> 文档版本：v1.1（2026-10-27，M4e 第一半：包名示例补 cra-git-gitlab → org.cra.git.gitlab）
 > 文档版本：v1.0（2026-10-25，开发前规范包）
 > 前置阅读：`02-architecture-design.md` §3/§4、`03-multi-agent-design.md` §1、`05-data-and-integration.md` §1
 > 定位：**Java 代码的唯一编写规范**——格式、命名、异常、日志、并发、依赖、注释。分支/提交/PR 规范以 `00§3–5` 为准（本文不重复）；模块边界与分层以 02 为准，本文只管"代码怎么写"。适用对象：人类 owner 与全部 AI 开发 agent。
@@ -47,7 +48,7 @@
 
 ## 3. 命名约定
 
-包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-runner-cli → org.cra.runner.cli`、`cra-archtest → org.cra.archtest`（v1 基线补登，第五轮缺陷②））；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
+包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-git-gitlab → org.cra.git.gitlab`（M4e，ADR-0009）、`cra-runner-cli → org.cra.runner.cli`、`cra-archtest → org.cra.archtest`（v1 基线补登，第五轮缺陷②））；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
 
 类名后缀语义表【强制】——新类型取名先查此表，与既有类型对齐：
 
@@ -56,7 +57,7 @@
 | `*Agent` | 子代理**执行器**：LLM 循环 + 结构化输出的 SubAgent 实现 | ReviewerAgent / VerifierAgent / JudgeAgent（03§1） |
 | `*Reviewer` / `*Verifier` | 评审/验证**角色**：AgentRole 值、prompt 模板名、角色配置类；执行器仍叫 `*Agent` | SecurityReviewer、ConventionReviewer（03§2/§3）；角色标识符用 kebab-case（`bug-hunter/dataflow`，05§1.1） |
 | `*Gateway` | 外部服务统一出口：路由/限流/重试/降级/核算的**唯一**接触面 | LlmGateway（02§3） |
-| `*Adapter` | 外部平台 SPI 及其实现 | GitPlatformAdapter（05§2）、cra-git-github 内实现类 |
+| `*Adapter` | 外部平台 SPI 及其实现 | GitPlatformAdapter（05§2）、cra-git-github / cra-git-gitlab 内实现类 |
 | `*Ledger` | 账本抽象与各形态实现 | ReviewLedger（02§5） |
 | `*Assembler` | 上下文组装 | ContextAssembler（02§3） |
 | `*Planner` | 评审计划生成（产出 `ReviewPlan`） | Planner（02§3） |
