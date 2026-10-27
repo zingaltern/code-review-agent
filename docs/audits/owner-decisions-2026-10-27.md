@@ -11,7 +11,7 @@
 | 4 | M4b 报告签发未按 repo 限定 | **A：按 repo 限定** | 已实现并合并：报告签名 v2 + `X-CRA-Repo` + `(repo, commit)` 查询（PR #14 / ADR-0009） |
 | 5 | 评测门禁代码改动不触发 L2 | **A：纳入 L2 触发范围** | 已实现并合并（PR #9）：`VerifyCommand/ReportHasher/GateEvaluator/GatePolicy/AggregateEngine` |
 | 6 | 文档与实现不一致 | **A：做文档一致性清理** | **已完成**：PR #8 合并 `b17c580`（含 4A/5A 口径与 README 限制） |
-| 7 | M4e / M4f-full 未完成 | 按提示词继续开发 | **M4e GitLab 两半已合并**：PR #13 `f7fa5f9`（适配器，ADR-0011）+ PR #17 `c364323`（CLI/server 平台选择与 GitLab webhook，ADR-0013）；真实 GitLab 写操作仍待 owner token；**M4f-full 已合并**：PR #18 `b418c0b`（事件史 JSONL→PG→CrossChecker，ADR-0012，默认关闭；Jira/Confluence 等外部源未接）；Gerrit、语义索引/跨文件上下文仍未做 |
+| 7 | M4e / M4f-full 未完成 | 按提示词继续开发 | **M4e GitLab 两半已合并**：PR #13 `f7fa5f9`（适配器，ADR-0011）+ PR #17 `c364323`（CLI/server 平台选择与 GitLab webhook，ADR-0013）；真实 GitLab 写操作仍待 owner token；**M4f-full 已合并**：PR #18 `b418c0b`（事件史 JSONL→PG→CrossChecker，ADR-0012，默认关闭；Jira/Confluence 等外部源未接）；Gerrit 未做；**语义索引/跨文件上下文第一版已合并**：PR #22 `477f6bd`（ADR-0014，默认关闭；L2 56/60=0.933） |
 | 8 | CrossChecker 默认关闭 | **B：保持默认关闭** | `CRA_CROSSCHECKER_ENABLED=false`；开启约 +20k token/次；按仓库/路径按需开启 |
 | 9 | L3 翻转 case 的 expected 是否过严 | **B：审计，只修正确有错误者** | 审计报告 docs/audits/l3-flip-audit-2026-10-27.md（PR #12）：A=1（Mockito-3 锚点）、B=4（验证层误拒）、C/D=3（无候选/类别口径）；本审计未改数据/阈值 |
 | 10 | L2/L3 模型与温度不统一 | **A：标准化** | opencode-go `deepseek-v4.1-flash` + **temperature 0.2 维持**；本地 `deepseek-chat` L2 报告标记非标准。**稳定性实验完成（2026-10-27）**：8 个翻转 case × k=3，0.0 与 0.2 聚合检出同为 19/24；0.0 多 2 次预算击穿、0.2 零发布观测更少（3/24 vs 5/24）；维持 0.2，详见 `docs/audits/l3-stability-2026-10-27.md` |
@@ -40,4 +40,9 @@
 
 - **PR #18（M4f-full）**：合并 `b418c0b`；L2 52/60 = 0.867（WL 0.7583）、clean 0.93、零发布 0/30、100/100；事件史默认关闭，只接 JSONL；Jira/Confluence/ServiceNow/Slack/PagerDuty/GitHub Issues 作为事件源均未接。
 - **PR #17（M4e 第二半）**：合并 `c364323`；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab` + `/webhooks/gitlab` 接线完成；verify（含 PG）/L1 绿，L2 按规则跳过；真实 GitLab **读**路径已对公共项目验证，**真实写操作仍 pending（无 owner token）**；Gerrit、语义索引未做。
-- **完成度口径**：按 11 个功能项，10 项完整（M0–M3、M4a/b/c/d、M4f-lite、M4f-full），M4e 仍为部分完成（GitLab 完成，Gerrit/语义索引未做）。
+- **完成度口径**：按 11 个功能项，10 项完整（M0–M3、M4a/b/c/d、M4f-lite、M4f-full），M4e 仍为部分完成（GitLab、语义索引第一版完成；Gerrit、真实 GitLab 写操作未做）。
+
+## 验收状态更新（2026-10-27 语义索引）
+
+- **PR #22（M4e 语义索引/跨文件上下文第一版）**：合并 `477f6bd`；`SymbolIndex`（jgit head 树、Java-only、默认关闭）+ L2 跨文件切片（BH-dataflow/Security/Verifier，≤4k，从 L1 预算扣除）；`mvn verify`/L1 绿。
+- **L2**：owner 批准后经 `eval.yml` 执行（run 40554850710，head `df7e095`）：bad 56/60 = 0.933（Wilson 下界 0.8407）、clean 0.68、零发布 1/30、100/100 完成；报告绑定 `df7e095`，以最后提交 `6ab6301` 落库。
