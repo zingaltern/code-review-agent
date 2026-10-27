@@ -28,11 +28,11 @@
 | 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法）；**M4c/M4d 账本读侧**（commit comment / issue）；**M4e 第一半 `cra-git-gitlab`** 同步实现 PR/commit/issue 三类账本（ADR-0011） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；**载体账本扩展（05§1.3）**：`fetchCommitBotComments` / `fetchIssueBotComments` / `listBotIssues` 三个 `default` 方法——前两者默认显式拒绝（静默空账本会导致重复发布），`listBotIssues` 默认空列表（不可得语义）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
 | 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1）；**M4c：`firstParentChain`**（default 空列表 = 不可得，push 基线解析据此要求显式 `--base`） |
 | 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态，M4b 已落地），按部署形态选择（02§5）；**M4c/M4d 键控扩展**：`ReviewKey`（repo + 形态 + (pr\|commit)）| 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植**；键控方法以 default 加入（05§1.3 v1.4），无 PR 载体粒度 = 载体评论级 |
-| 报告签名信封 | `ReportSignature`（cra-common，04§2.4、ADR-0008） | 演进（格式约定） | `cra-server` 签发（`/api/v1/reports/attest`），`cra-eval verify --signature` 验签 | 行式信封 `cra-report-hmac-sha256-v1`（key_id/report_sha256/commit/tier/issued_at/run_id/signature）；HMAC-SHA256 覆盖版本行至 run_id 行（不含 signature 行）；格式变更【强制】bump 版本并写 ADR |
+| 报告签名信封 | `ReportSignature`（cra-common，04§2.4、ADR-0008/0009） | 演进（格式约定） | `cra-server` 签发（`/api/v1/reports/attest`，需 `X-CRA-Repo`），`cra-eval verify --signature --repo` 验签 | 行式信封 `cra-report-hmac-sha256-v2`（key_id/report_sha256/repo/commit/tier/issued_at/run_id/signature）；HMAC-SHA256 覆盖版本行至 run_id 行（不含 signature 行）；repo 绑定 owner/name；v1 信封不再接受，格式变更【强制】bump 版本并写 ADR |
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |
 | Prompt 模板 | classpath 资源 + 版本记录（04§4） | 演进 | `cra-agents/src/main/resources/prompts/` 目录树（04§4） | 新模板落对应子目录，mustache 占位符 + 引用 shared 三件套 + UNTRUSTED 定界（04§3.3）；`prompt_template_versions` 与 run 关联（05§1.2）；改动必过评测回归（06§1.2、04§2.4） |
 | LLM 模型路由 | `application.yml` 三档配置（05§5） | 演进（配置级） | standard / strong / light + fallback-chain + per-model RPM（05§5） | **无代码改动**：配置增条目即可；换模型家族属"模型改动"，触发 L2 评测回归（04§2.4） |
-| 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 12 + clean 8 + 对抗 10（M1 基线），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
+| 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 30 + clean 20 + 对抗 16（含 context 6；M1 基线为 bad 12 + clean 8 + 对抗 10），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
 | ContextAssembler 切片策略 | L0–L5 分层与裁剪（04§1） | **内部，暂不开放** | cra-context（02§3） | 不开放原因：切片启发式与 04§2 预算算术、Summary 覆盖声明强耦合（04§1 裁剪优先级）——外部定制切片会绕过成本核算与覆盖声明 |
 | 编排 pipeline 步骤 | Orchestrator ①–⑦（02§1） | **内部，暂不开放** | cra-core（02§3） | 不开放原因：步骤顺序承载幂等 / 收敛 / 降级语义（02§4）——可插拔步骤抽象会诱导绕过账本闸与预算闸 |
 
@@ -79,7 +79,7 @@
 
 - [ ] 1.【强制】定义 `AgentRole` 与输出 category：**新 category 必须同步 05§1.1 枚举**。先例：`context` 漏进枚举导致 CrossChecker 全部输出被 schema 校验拒收、M4f-lite 验收不可能通过（01§8 四轮缺陷①——同类病第三犯）；
 - [ ] 2.【强制】brief 模板落 `prompts/reviewer/<role>.md`（classpath 资源，04§4 目录），引用 shared 三件套（output-contract / evidence-rules / untrusted-delimiter，04§4）；模板即代码，改动走 PR + 评测回归（04§4）；
-- [ ] 3.【强制】预算行进 03§6 速查表 + 04§2.2 补增量算术。先例：CrossChecker 无预算行无算术，违反 07§6.4 自立的纪律（01§8 四轮缺陷③）；且其增量 ≈20k 已把 Standard 推到 70% 降档线附近（04§2.2）——新角色必须核算对 run 级 500k 预算的挤占（02§4.4）；
+- [ ] 3.【强制】预算行进 03§6 速查表 + 04§2.2 补增量算术。先例：CrossChecker 无预算行无算术，违反 07§6.4 自立的纪律（01§8 四轮缺陷③）；且其增量 ≈22k（预算上限）/ ≈18.6k（实测输入）已把 Standard 推到 70% 降档线附近（04§2.2，2026-10-27 口径）——新角色必须核算对 run 级 500k 预算的挤占（02§4.4）；
 - [ ] 4.【强制】触发条件进 03§3 角色表，并核对深度档位联动（02§4.3：quick / standard / deep 哪档触发、实例数）与 05§5 配置项（新角色默认关闭，先例：`crosschecker.enabled: false`）；
 - [ ] 5.【强制】判定 verifier / judge brief 是否需按 category 分型组装（03§4.2）：新角色的证据类型若与代码类不同而不分型 → 验证层必然 INSUFFICIENT → 拒杀（context 类教训，01§8 四轮缺陷②）；
 - [ ] 6.【建议】评估对抗集是否需新类别用例（先例：06§1.2 第 4 类 context 用例）——新角色的召回应有门禁度量归属，不靠单一 fixture 自证（03§3.1 局限声明的教训）；

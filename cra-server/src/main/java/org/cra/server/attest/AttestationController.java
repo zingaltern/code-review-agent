@@ -5,12 +5,14 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
  * 报告签发端点（04§2.4 M4b）：POST /api/v1/reports/attest，原始报告 JSON → 行式签名信封（text/plain）。
  *
- * <p>受 {@code ApiTokenFilter} 保护（Bearer token）；仅服务端持有 HMAC 密钥，CI 侧用同一密钥（secret）验签。
+ * <p>受 {@code ApiTokenFilter} 保护（Bearer token）；仅服务端持有 HMAC 密钥，CI 侧用同一密钥（secret）验签。 报告归属仓库由 {@code
+ * X-CRA-Repo: owner/name} 头传入，v2 签名信封绑定 repo（owner 决策 4A）。
  */
 @RestController
 public final class AttestationController {
@@ -34,9 +36,11 @@ public final class AttestationController {
       path = "/api/v1/reports/attest",
       consumes = MediaType.APPLICATION_JSON_VALUE,
       produces = MediaType.TEXT_PLAIN_VALUE)
-  public ResponseEntity<String> attest(@RequestBody byte[] body) {
+  public ResponseEntity<String> attest(
+      @RequestBody byte[] body,
+      @RequestHeader(value = "X-CRA-Repo", required = false) String repo) {
     try {
-      AttestationService.Result result = attestationService.attest(body, "api-token");
+      AttestationService.Result result = attestationService.attest(body, repo, "api-token");
       return ResponseEntity.ok()
           .header("X-CRA-Attestation-Id", result.attestationId())
           .header("X-CRA-Key-Id", result.keyId())

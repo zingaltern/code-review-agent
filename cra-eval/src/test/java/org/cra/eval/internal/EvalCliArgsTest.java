@@ -230,13 +230,16 @@ class EvalCliArgsTest {
                   "--tier",
                   "l2",
                   "--expect-commit",
-                  "abc1234"
+                  "abc1234",
+                  "--repo",
+                  "owner/repo"
                 },
                 Map.of());
     assertThat(args.report()).isEqualTo(Path.of("l2.json"));
     assertThat(args.sha256File()).isEqualTo(Path.of("l2.json.sha256"));
     assertThat(args.tier()).isEqualTo("l2");
     assertThat(args.expectCommit()).isEqualTo("abc1234");
+    assertThat(args.repo()).isEqualTo("owner/repo");
     assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"verify", "--report", "x"}, Map.of()))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--sha256");

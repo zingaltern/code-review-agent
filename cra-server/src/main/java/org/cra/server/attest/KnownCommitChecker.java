@@ -4,10 +4,11 @@ package org.cra.server.attest;
 public interface KnownCommitChecker {
 
   /**
-   * 该 commit 是否已有完成的评审 run（DONE|DEGRADED）。
+   * 该 repo 的该 commit 是否已有完成的评审 run（DONE|DEGRADED）。
    *
+   * @param repo 仓库（owner/name）
    * @param commitSha head sha
    * @return true = 已知
    */
-  boolean exists(String commitSha);
+  boolean exists(String repo, String commitSha);
 }

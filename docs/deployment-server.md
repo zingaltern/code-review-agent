@@ -133,11 +133,13 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 |---|---|---|
 | 冲突 PR | `pull_request` workflow 不触发（GitHub 平台行为），服务端收不到事件 | 02§5 触发边界表 |
 | draft PR | 忽略；`ready_for_review` 时评审 | 02§5、05§4 |
+| 同 head 重跑（SKIPPED） | 不写 `review_run`：该表只持久化 DONE/DEGRADED 完成标记；跳过只体现在日志与 `/healthz` 的 `completed` 计数 | 05§1.3、05§1.5、本次验收 |
+| 被忽略的 webhook 事件 | 返回 200，但当前实现没有专用日志行（draft/非 PR 均如此）；排障以 GitHub delivery 状态与 HTTP 响应体为准 | 本次验收 |
 | fork PR | webhook 可到，但 GitHub token 权限受限；回帖可能失败 | 02§5 |
 | 服务端无 checkout | `LocalRepoContext.localRepoRoot()` 为空：pre-existing 检测降级为不标注 + Summary 声明 | 05§2.1 |
 | 多仓库 | 每个仓库一个 PG 账本实例（按 owner/name 键控），orchestrator 按仓库缓存；仓库数增长 = 常驻线程池增长，需按部署规模评估 | ADR-0008 |
 | 多副本 | delivery 幂等由 PG 唯一键兜底，但同一仓库的 orchestrator 缓存/队列是进程内的；同 head 重跑由 core commit 闸兜底 | ADR-0008 |
-| 签发 commit 判定范围 | `CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT` 只按 commit 在全局 `review_run` 中查 DONE\|DEGRADED，**不按 repo 限定**——当前单租户假设；多租户部署需在报告/端点增加 repo 绑定并收紧查询 | ADR-0008、05§1.5 |
+| 签发 commit 判定范围 | v2 起按 `(repo, commit)` 查 `review_run`；`X-CRA-Repo: owner/name` 必填（`CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT=true` 时）。v1 全局签发路径已移除，旧签名需重签 | ADR-0009、05§1.5 |
 | 过期 Summary 收尾 | PG 账本不落评论原文（与 SQLite 同语义）：`ReviewLedger.comment()` 为空 → 新 run 不 PATCH 旧 Summary 的 `[已被 run_xxx 取代]` 前缀；旧 Summary 仍可见 | 05§1.5、05§2.2 与本地形态一致 |
 | 事件史采集 | M4b 只有接口与调度骨架，采集器为 Noop，日志明确写“未实现” | 07§5 M4b、M4f-full |
 
@@ -149,3 +151,32 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 - [ ] `stop_grace_period` > Spring grace + 队列排水；
 - [ ] `/healthz` 的 `rejected`/`queued` 有监控告警（持续背压 = 容量或 LLM 限流问题）；
 - [ ] PG 备份覆盖 `review_run`/`finding`/`webhook_delivery`（账本是幂等与收敛的事实源）。
+
+## 9. 真实 GitHub 端到端验收（M4b，2026-10-27）
+
+环境：私有 scratch 仓库 `zingaltern/cra-acceptance-20261027`；`docker compose` 起 PostgreSQL 16 + `cra-server`（运行时镜像复用本机 `d24e221` 构建的 exec jar）；公网入口为 cloudflared 临时 quick tunnel；GitHub 侧为真实 webhook（id `703809632`，仅 `pull_request` 事件）。服务档位 `quick`（降低验收成本；webhook/幂等/队列/账本/签发路径与档位无关）。LLM 为 OpenAI 兼容端点，密钥只经环境变量注入。
+
+| 验收断言 | 实测结果 | 证据 |
+|---|---|---|
+| PR `opened` → 202 → 评审 DONE 落 PG | 通过 | delivery `2dfb0da0-d1f0-11f1-87a0-5dc4ccb36e8f`；`run_20261027102140-6f6f0d`，PR #1 head `3f9ae86`，status `DONE`、findings 0 |
+| PR `synchronize` → 202 → DONE 落 PG | 通过 | delivery `529ad0f0-d1f0-11f1-91dd-3a9f05e2082f`；`run_20261027102234-513252`，head `faee7cb`，DONE、findings 1 |
+| 同 delivery 重投 → duplicate | 通过 | 公网 URL 重放同一 `X-GitHub-Delivery: 2dfb0da0-…` + 合法 HMAC → `200 {"status":"duplicate"}`，未新增 run |
+| 新 delivery 同 head → SKIPPED | 通过 | close→reopen 产生 delivery `66108170-d1f0-11f1-92d7-89eb98f49328`（202）；日志 `run_20261027102307-d25ad0 status=SKIPPED`；`review_run` 不落行（见 §7） |
+| draft PR → 200 ignored | 通过 | PR #2 delivery `d3d56590-d1f0-11f1-9122-bcb327eca8d6` 返回 200；签名重放返回 `200 {"status":"ignored","event":"pull_request"}` |
+| 非 PR 事件 → 200 ignored | 通过 | 签名 `ping` → `200 {"status":"ignored","event":"ping"}` |
+| 错签 → 401 | 通过 | `X-Hub-Signature-256=sha256:000…` → 401 `{"status":"unauthorized"}` |
+| 非法 payload → 400 | 通过 | 合法 HMAC + `{not-json` → 400 `{"status":"bad_payload"}` |
+| 报告签发 → verify 通过 | 通过 | `POST /api/v1/reports/attest` 200；`cra-eval verify --signature` exit 0（key `accept-key-20261027`） |
+| 篡改报告 → 退出码 5 | 通过 | 仅改 `generated_at`：门禁仍绿，签名校验失败，exit 5 |
+| 优雅停机排水 | 通过 | `drained=true queued=0 inFlight=0 accepted=3 completed=3 failed=0 rejected=0` |
+
+PG 账本实测（`review_run`）：`run_20261027102140-6f6f0d` / `3f9ae86` / DONE / 0；`run_20261027102234-513252` / `faee7cb` / DONE / 1。`healthz` 在验收期间 `accepted=3/completed=3`（opened、synchronize、reopened[SKIPPED]），`failed=0`。
+
+**观察与边界（如实记录）**：
+
+1. `review_run` 是完成标记表，只写 DONE/DEGRADED；同 head 重跑的 SKIPPED 不会新增 PG 行。排障需看日志与 `/healthz`，这不是本次验收的代码回归（§7 已登记）。
+2. 被忽略的 webhook 事件只返回 200，当前没有专用日志行；GitHub delivery 状态与端点响应体是主要证据。
+3. GitHub 的 webhook redelivery API 需要 `admin:repo_hook`；本次使用的 `gh` token 无该 scope，因此“同 delivery 重投”用**同一 GUID + 合法 HMAC 对公网 URL 重放**完成，不是本地模拟。生产若需 UI/API 重投，应授予该 scope 或使用仓库管理员操作。
+4. 报告签发验收使用了一份 L2 形状报告并把 `commit` 改为服务端已评审的 head；服务端签发、`verify` 通过、篡改 exit 5。这正好印证 ADR-0008 的诚实边界：签名证明“持有密钥者签发了该摘要”，不证明报告内容由服务端执行生成。
+5. 临时 cloudflared tunnel 与个人 PAT 仅用于本次验收；生产应使用稳定 HTTPS 入口、专用 bot 身份/最小权限 token，并轮换 webhook secret。验收评论因此显示为 `zingaltern`（M4b PR 评论）或 `github-actions[bot]`（M4c/M4d workflow）。
+6. scratch 仓库为私有临时仓库，验收后保留作链接证据（可随时删除）；其中 webhook 仍指向已失效的临时 tunnel，不影响生产。

@@ -335,7 +335,8 @@ M4a 签字建议输入（05§5 `agents.signoff`）：`--pr-author`（缺省 `CRA
 ### 3.1 cra-eval 评测命令契约（T3.1/T3.3 落地，2026-10-25）
 
 ```bash
-# 评测运行（本地/CI 通用）。--set l2 = bad 12 + clean 8（04§2.4 的 L2 口径），
+# 评测运行（本地/CI 通用）。--set l2 = bad 30 + clean 20（60/40 观测；04§2.4 的 L2 口径，
+# M1 基线为 bad 12 + clean 8），
 # --tier 缺省 auto：k≥3 或 depth=standard → l3，k≥2 → l2，否则 l1。
 cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
   --commit "$(git rev-parse HEAD)" --fail-on-red \
