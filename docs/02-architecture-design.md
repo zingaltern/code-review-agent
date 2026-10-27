@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：新增 cra-git-gitlab（ADR-0011），GitLab 触发边界表见 docs/deployment-gitlab.md）
 > 文档版本：v1.4（2026-10-26，M4b 服务化：cra-server 第二组合根 + PG 账本 + 报告签名，ADR-0008；M4c/M4d：账本载体扩展为 PR 评论 / commit comment / issue 三形态，触发边界表补 push 与夜间定时两行）
 > 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
@@ -78,7 +79,7 @@ code-review-agent/
 ├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
 │   ├── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
-│   └── cra-git-gitlab/    # GitLab 实现（M4e 第一半，ADR-0011；不依赖 github）
+│   └── cra-git-gitlab/    # GitLab 实现（M4e，ADR-0011/0013；不依赖 github；CLI/server 可按平台选择）
 ├── cra-context/           # ContextAssembler：diff 解析、窗口/全文策略、切片、预算裁剪
 ├── cra-agents/            # 子代理定义：角色 prompt 模板、工具白名单、输出 schema
 ├── cra-core/              # Orchestrator：Planner/Fan-out/Verify/Aggregate/Publish/Convergence
@@ -168,11 +169,13 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 | draft PR | 照常触发（浪费成本与噪声） | workflow 加 `draft == false` 条件 + `ready_for_review` 类型触发（05§4） |
 | fork PR | `GITHUB_TOKEN` secrets 不可用（pull_request_target 语义另论） | 当前个人仓库无碍；多协作者时代再引入 App token，写入限制声明 |
 
-GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / push / 夜间定时）见 `docs/deployment-gitlab.md` §5（ADR-0011：GitLab 文档未声明冲突会阻断 MR pipeline，待真实实例确认）。
+GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / push / 夜间定时）见 `docs/deployment-gitlab.md` §5（ADR-0011：GitLab 文档未声明冲突会阻断 MR pipeline，待真实实例确认）。服务端 GitLab webhook 的事件映射（open/reopen/update-with-oldrev → 评审；merge/close/审批/仅元数据/draft → 200 ignored + reason）见同文档 §8。
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
 **M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集已在 M4f-full 落地（JSONL→PG→CrossChecker，ADR-0012，默认关闭）。
+
+**M4e 第二半注记（2026-10-27，ADR-0013）**：CLI 与 server 都按平台选择装配——CLI `--platform github|gitlab` / `CRA_GIT_PLATFORM`（GitLab 用 `--gitlab-project` + `CRA_GITLAB_TOKEN`，账本键仍 repo+pr/commit）；server `CRA_SERVER_PLATFORM=github|gitlab`，GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 → MR 事件子集 → 同一 PG delivery 幂等 → 队列）。未选中平台的端点不注册；非 MR/draft/merge/close/审批/元数据更新显式 200 ignored 并声明 reason。真实 GitLab 写操作尚无 owner token（读路径已验证），边界与待验证项见 `docs/deployment-gitlab.md` §9/§12。
 
 ## 6. 横切关注点
 

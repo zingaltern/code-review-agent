@@ -1,5 +1,6 @@
 # 08 · 测试策略与验证方案
 
+> 文档版本：v1.3（2026-10-27，M4e 第二半：平台选择/接线测试与 GitLab webhook HTTP+PG 集成，场景 27）
 > 文档版本：v1.2（2026-10-27，M4e 第一半：cra-git-gitlab 账本解析器/端点契约测试与 fixture 幂等重放）
 > 文档版本：v1.2（2026-10-27，M4f-full：测试场景 27/28——事件史采集幂等/增量/重试与 CrossChecker 事件矛盾 fixture，ADR-0012）
 > 文档版本：v1.1（2026-10-26，M4b：PG 测试 Testcontainers/service 容器 + cra-server 接线冒烟例外，ADR-0008；M4c/M4d 测试场景 20/21：push commit comment 载体与夜间 issue 载体幂等）
@@ -124,10 +125,11 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | 24 | delivery 幂等：同 delivery 两次只入队一次（第二次 200 duplicate）；不同 delivery 同 head → core commit 闸 SKIPPED、`review_run` 不新增 | 单测 + PG 集成 | 02§4.1；ADR-0008 |
 | 25 | PG 账本契约：与 SQLite 共享 `ReviewLedgerContractTest`（完成标记/幂等/大小写/跨实例持久化）；五表存在；`ON CONFLICT` 重复登记幂等 | 契约测试（CI service 容器或 Testcontainers） | 05§1.5；08§3.3；ADR-0008 |
 | 26 | 报告签名：服务端签发 → `cra-eval verify --signature` 通过；篡改报告/信封 → 退出码 5；未知 commit → 409；无 Bearer → 401 | 单测 + HTTP 集成 + CLI 黑盒 | 04§2.4；ADR-0008 |
-| 27 | 事件史采集（M4f-full）：同 JSONL 重复跑零重复（`inserted=0`、行数不变）；增量窗口/重叠水位生效；来源/入库失败有上限重试并如实 `executed=false`；行级解析失败不推进水位；无事件优雅跳过 | 单测（内存源/存储）+ PG 集成（`CRA_TEST_PG_URL`）+ 调度重复跑 | ADR-0012；05§1.6 |
-| 28 | CrossChecker 事件矛盾（M4f-full）：事件史按路径/commit/关键词命中并进入 brief；finding 引用 `event <id>`；verifier/judge brief 预取事件条目；category=context 经既有验证晋升为 confirmed 并发布 | 脚本化 LLM fixture（`CrossCheckPipelineTest`；单测不调真实 LLM）+ PG 检索契约 | ADR-0012；03§3.1/§4.2；08§3.1 |
+| 27 | GitLab 平台接线（M4e 第二半）：`--platform gitlab` → GitLab adapter + CommentSource → 发布后同 commit 重放命中 DONE、零重复（WireMock）；server `CRA_SERVER_PLATFORM=gitlab` → `/webhooks/gitlab` open/update-with-oldrev 202、同 UUID duplicate 200、merge/draft/非 MR 200 ignored + reason、错 token 401、非法 payload 400、GitHub 端点 404 | 单测 + WireMock + HTTP+PG 集成 | 07§5 M4e；ADR-0013；deployment-gitlab §7/§8/§12 |
+| 28 | 事件史采集（M4f-full）：同 JSONL 重复跑零重复（`inserted=0`、行数不变）；增量窗口/重叠水位生效；来源/入库失败有上限重试并如实 `executed=false`；行级解析失败不推进水位；无事件优雅跳过 | 单测（内存源/存储）+ PG 集成（`CRA_TEST_PG_URL`）+ 调度重复跑 | ADR-0012；05§1.6 |
+| 29 | CrossChecker 事件矛盾（M4f-full）：事件史按路径/commit/关键词命中并进入 brief；finding 引用 `event <id>`；verifier/judge brief 预取事件条目；category=context 经既有验证晋升为 confirmed 并发布 | 脚本化 LLM fixture（`CrossCheckPipelineTest`；单测不调真实 LLM）+ PG 检索契约 | ADR-0012；03§3.1/§4.2；08§3.1 |
 
-**【强制】** 上表 1–28 是对应里程碑 CI/验收的最低测试集：验收执行时逐条引用本表编号作为证据（PR 描述粘贴输出，00§5）。
+**【强制】** 上表 1–29 是对应里程碑 CI/验收的最低测试集：验收执行时逐条引用本表编号作为证据（PR 描述粘贴输出，00§5）。
 
 ## 6. 性能与延迟验证
 

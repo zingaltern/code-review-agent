@@ -1,6 +1,6 @@
 # ADR-0011 GitLab 平台适配（M4e 第一半：新实现模块，不改 SPI 签名）
 
-- 状态：accepted（2026-10-27，M4e 第一半实现随本 ADR 落地；Gerrit 与语义索引不在本 ADR 范围）
+- 状态：accepted（2026-10-27，M4e 第一半实现随本 ADR 落地；Gerrit 与语义索引不在本 ADR 范围；CLI/server 平台选择由后续 ADR-0013 完成接线，真实写操作 pending）
 - 背景：11§2 已把 Git 平台适配登记为稳定扩展点，05§2.1 的 `GitPlatformAdapter` 与 `CommentSource` 只约束 common POJO。GitLab 与 GitHub 在 diff 端点、评论载体、锚定参数、分页与限流上均不同；照抄 GitHub 实现会产出"看起来能跑、锚定全错"的适配器。本 ADR 先钉死平台事实与差异，再落 `cra-git-gitlab`（11§6 checklist 第 3 步）。
 - 决策：
   1. **新模块 `cra-git-gitlab`（包 `org.cra.git.gitlab`），不依赖 `cra-git-github`**。实现 `GitPlatformAdapter` 四方法 + `listFiles` / `fetchDispositionSignals`，以及 `CommentSource` 的 PR / commit / issue 三类账本方法（11§4 第 4 条：实现模块互不依赖）。组合根可按部署选择装配；本半未改 CLI/server 的平台选择。
@@ -43,7 +43,7 @@
   - 真实 GitLab 写操作（发 review / commit comment / issue）尚无 owner token，未在本机验证；fixture 端到端以 WireMock 录制回放覆盖"发布 → 账本命中 → 同 commit 重放零重复"；
   - 账本标记依赖 note/description 原文保留 `<!-- cra:... -->`；GitLab 的 Markdown 渲染/净化是否影响 API 原文需真实实例确认（fixture 假定保留），列入部署文档待验证项；
   - 合成 commit comment id 与 GitLab 平台无对应关系，编辑/删除 commit comment 的后续能力需要另找端点或改载体；
-  - CLI/server 的平台选择与 GitLab CI job 示例留到 M4e 第二半（需 owner token 与真实实例联调）。
+  - CLI/server 的平台选择已由 ADR-0013（M4e 第二半）完成接线；GitLab CI job 实跑与真实写操作仍 pending（无 owner token），读路径已对 gitlab.com 公共项目验证。
 - 替代方案：
   - 复用 `cra-git-github` 的 HTTP 层（违反 11§4 第 4 条，且两平台错误语义不同——400 vs 422、position 三元组、无 review 对象）；
   - 把 `LedgerMarkerParser` 提到 `cra-common` 共享（更 DRY，但新增跨模块公开类型，按 10§6 需独立 ADR；格式冻结下复制成本可控）；

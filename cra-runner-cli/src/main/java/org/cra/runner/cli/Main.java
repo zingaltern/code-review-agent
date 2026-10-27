@@ -13,6 +13,10 @@ import org.slf4j.LoggerFactory;
  * cra review --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
  *   --base "$BASE_SHA" --head "$HEAD_SHA" --depth standard --token "$GITHUB_TOKEN" [--dry-run] [--security-block]
  *
+ * # CI 模式（GitLab，11§6 / ADR-0013）
+ * cra review --platform gitlab --gitlab-project "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID" \
+ *   --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" [--depth standard]
+ *
  * # 本地 pre-PR 模式（T2.10：默认实跑 mvn -B -ntp verify + 本地评审，SQLite 账本，默认 dry-run）
  * cra review --local [--base main] [--depth standard] [--exec "mvn -B -ntp verify"]
  *            [--ledger-db ~/.cra/ledger.db] [--dry-run=false] [--model-strong M] [--fallback-chain standard,light]
@@ -52,9 +56,11 @@ public final class Main {
       return new ReviewCommand().execute(config);
     } catch (org.cra.common.exception.CraConfigException e) {
       LOG.error(
-          "参数/配置错误: {}；用法: cra review [--local|--push] --repo owner/name --pr N --base SHA --head SHA "
+          "参数/配置错误: {}；用法: cra review [--local|--push] [--platform github|gitlab] --repo owner/name "
+              + "--pr N --base SHA --head SHA "
               + "[--depth quick|standard|deep] [--token T] [--dry-run] [--security-block] "
-              + "[--exec CMD] [--ledger-db PATH]；或 cra sweep --repo owner/name --since 30d --max-prs 10",
+              + "[--exec CMD] [--ledger-db PATH]；GitLab: --gitlab-project group/project + CRA_GITLAB_TOKEN；"
+              + "或 cra sweep --repo owner/name --since 30d --max-prs 10",
           e.getMessage());
       return 2;
     }

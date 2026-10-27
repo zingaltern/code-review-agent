@@ -15,7 +15,7 @@ import org.cra.git.api.GitAssembly;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
 import org.cra.git.github.api.GitHubAssembly;
-import org.cra.git.github.api.GitHubComponents;
+import org.cra.git.gitlab.api.GitLabAssembly;
 import org.cra.llm.api.LlmAssembly;
 import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmGatewayConfig;
@@ -70,25 +70,19 @@ public class ServerBeans {
   }
 
   /**
-   * GitHub 组件（adapter + CommentSource）。
+   * Git 平台适配器（M4e 第二半，ADR-0013：按 CRA_SERVER_PLATFORM 装配 GitHub 或 GitLab；两者模块互不依赖）。
    *
    * @param config 服务配置
-   * @return GitHubComponents
-   */
-  @Bean
-  public GitHubComponents gitHubComponents(ServerConfig config) {
-    return GitHubAssembly.createComponents(config.githubApiBase(), config.githubToken());
-  }
-
-  /**
-   * Git 平台适配器。
-   *
-   * @param components GitHub 组件
    * @return adapter
    */
   @Bean
-  public GitPlatformAdapter gitPlatformAdapter(GitHubComponents components) {
-    return components.adapter();
+  public GitPlatformAdapter gitPlatformAdapter(ServerConfig config) {
+    if (config.isGitlab()) {
+      return GitLabAssembly.createComponents(
+              config.gitlabBaseUrl(), config.gitlabToken(), config.gitlabBotUsername())
+          .adapter();
+    }
+    return GitHubAssembly.createComponents(config.githubApiBase(), config.githubToken()).adapter();
   }
 
   /**
@@ -365,14 +359,26 @@ public class ServerBeans {
   }
 
   /**
-   * webhook 签名校验器。
+   * webhook 验签器（平台对应：GitHub HMAC 或 GitLab secret token，ADR-0013）。
+   *
+   * @param config 服务配置
+   * @return 验签器（非当前平台的分支不会被使用）
+   */
+  @Bean
+  public WebhookSignatureVerifier webhookSignatureVerifier(ServerConfig config) {
+    return new WebhookSignatureVerifier(config.webhookSecret());
+  }
+
+  /**
+   * GitLab `X-Gitlab-Token` 验签器（仅 GitLab 模式）。
    *
    * @param config 服务配置
    * @return verifier
    */
   @Bean
-  public WebhookSignatureVerifier webhookSignatureVerifier(ServerConfig config) {
-    return new WebhookSignatureVerifier(config.webhookSecret());
+  public org.cra.server.webhook.GitLabWebhookTokenVerifier gitLabWebhookTokenVerifier(
+      ServerConfig config) {
+    return new org.cra.server.webhook.GitLabWebhookTokenVerifier(config.webhookSecret());
   }
 
   /**
