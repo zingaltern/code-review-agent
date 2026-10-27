@@ -31,7 +31,7 @@
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |
 | Prompt 模板 | classpath 资源 + 版本记录（04§4） | 演进 | `cra-agents/src/main/resources/prompts/` 目录树（04§4） | 新模板落对应子目录，mustache 占位符 + 引用 shared 三件套 + UNTRUSTED 定界（04§3.3）；`prompt_template_versions` 与 run 关联（05§1.2）；改动必过评测回归（06§1.2、04§2.4） |
 | LLM 模型路由 | `application.yml` 三档配置（05§5） | 演进（配置级） | standard / strong / light + fallback-chain + per-model RPM（05§5） | **无代码改动**：配置增条目即可；换模型家族属"模型改动"，触发 L2 评测回归（04§2.4） |
-| 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 12 + clean 8 + 对抗 10（M1 基线），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
+| 评测数据集格式 | 06§3 fixture 规格 | 演进 | bad 30 + clean 20 + 对抗 16（含 context 6；M1 基线为 bad 12 + clean 8 + 对抗 10），badcase 持续回流（06§3） | 每用例 = `{repo_snapshot.tgz, diff.patch, expected_findings.json, meta.json}`，加载器 / 断言器（位置 ±5 行 + 类别 + 断言关键词）兼容（06§3）；格式变更【强制】bump 版本字段并保证旧集可加载——06§1.2 的聚合口径与门禁趋势依赖历史数据集可比 |
 | ContextAssembler 切片策略 | L0–L5 分层与裁剪（04§1） | **内部，暂不开放** | cra-context（02§3） | 不开放原因：切片启发式与 04§2 预算算术、Summary 覆盖声明强耦合（04§1 裁剪优先级）——外部定制切片会绕过成本核算与覆盖声明 |
 | 编排 pipeline 步骤 | Orchestrator ①–⑦（02§1） | **内部，暂不开放** | cra-core（02§3） | 不开放原因：步骤顺序承载幂等 / 收敛 / 降级语义（02§4）——可插拔步骤抽象会诱导绕过账本闸与预算闸 |
 
@@ -78,7 +78,7 @@
 
 - [ ] 1.【强制】定义 `AgentRole` 与输出 category：**新 category 必须同步 05§1.1 枚举**。先例：`context` 漏进枚举导致 CrossChecker 全部输出被 schema 校验拒收、M4f-lite 验收不可能通过（01§8 四轮缺陷①——同类病第三犯）；
 - [ ] 2.【强制】brief 模板落 `prompts/reviewer/<role>.md`（classpath 资源，04§4 目录），引用 shared 三件套（output-contract / evidence-rules / untrusted-delimiter，04§4）；模板即代码，改动走 PR + 评测回归（04§4）；
-- [ ] 3.【强制】预算行进 03§6 速查表 + 04§2.2 补增量算术。先例：CrossChecker 无预算行无算术，违反 07§6.4 自立的纪律（01§8 四轮缺陷③）；且其增量 ≈20k 已把 Standard 推到 70% 降档线附近（04§2.2）——新角色必须核算对 run 级 500k 预算的挤占（02§4.4）；
+- [ ] 3.【强制】预算行进 03§6 速查表 + 04§2.2 补增量算术。先例：CrossChecker 无预算行无算术，违反 07§6.4 自立的纪律（01§8 四轮缺陷③）；且其增量 ≈22k（预算上限）/ ≈18.6k（实测输入）已把 Standard 推到 70% 降档线附近（04§2.2，2026-10-27 口径）——新角色必须核算对 run 级 500k 预算的挤占（02§4.4）；
 - [ ] 4.【强制】触发条件进 03§3 角色表，并核对深度档位联动（02§4.3：quick / standard / deep 哪档触发、实例数）与 05§5 配置项（新角色默认关闭，先例：`crosschecker.enabled: false`）；
 - [ ] 5.【强制】判定 verifier / judge brief 是否需按 category 分型组装（03§4.2）：新角色的证据类型若与代码类不同而不分型 → 验证层必然 INSUFFICIENT → 拒杀（context 类教训，01§8 四轮缺陷②）；
 - [ ] 6.【建议】评估对抗集是否需新类别用例（先例：06§1.2 第 4 类 context 用例）——新角色的召回应有门禁度量归属，不靠单一 fixture 自证（03§3.1 局限声明的教训）；

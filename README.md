@@ -173,8 +173,12 @@ Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 we
 - fork PR 无法读取 secrets；多协作者场景需要引入 App token。
 - 服务形态无本地 checkout：pre-existing 检测降级为不标注 + Summary 声明（05§2.1）；其余边界见 [docs/deployment-server.md](docs/deployment-server.md)。
 - draft PR 会被 workflow 过滤，不进入评审。
-- CrossChecker 默认关闭，且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决见 [docs/07](docs/07-roadmap.md)。
+- CrossChecker 默认关闭（`CRA_CROSSCHECKER_ENABLED=false`），且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决与闭环记录见 [docs/07](docs/07-roadmap.md)。
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。
+- **M4e / M4f-full 未实现**：GitLab/Gerrit 适配、语义索引/跨文件上下文（M4e）与产品事件史采集管道（M4f-full）仅登记在路线图；M4b 内的事件史采集只有接口 + `@Scheduled` 骨架（Noop）。
+- **M4b/M4c/M4d 未对真实 GitHub API 端到端验证**：验收基于 fixture 靶场与本地 GitHub/LLM stub；M4b 的 webhook 为本地复现、docker-compose 端到端未复跑（作者记录已入档），见 [docs/07](docs/07-roadmap.md)。
+- **M4b 签发为单租户假设**：`CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT` 只按 commit 在全局 `review_run` 中查 DONE|DEGRADED，不按 repo 限定——多租户部署需在报告/端点增加 repo 绑定并收紧查询（[docs/deployment-server.md](docs/deployment-server.md) §7）。
+- **最近一次官方 L3 全量（2026-10-27，198 观测，run 40416120356）bad 召回 71/90 = 78.9%（Wilson 下界 0.6937 < 0.70）为红**；clean 0.55、幻觉 0.933、注入 0、context 18/18、零发布样本级 1/30 均绿。阈值未动，归因为验证层采样方差，待 owner 裁决——记录见 [docs/07](docs/07-roadmap.md)「M4 收口记录」。
 
 ## 开发与自检
 
