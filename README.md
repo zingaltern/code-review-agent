@@ -21,7 +21,7 @@
 | 可审计的幂等账本 | 指纹只含文件、类别、锚行内容与上下文哈希，不含 LLM 生成文本；GitHub 评论账本与 `DONE` 完成标记让崩溃后的重跑只补发缺失项，本地模式使用 SQLite |
 | 本地 pre-PR 自评审 | 一条命令先真实执行 `mvn -B -ntp verify` 再做评审；构建失败退出码为 4，报告展示真实输出而非声称完成 |
 | 三级评测门禁 | L1 快检 / L2 标准 / L3 里程碑分别覆盖每 PR、常规复核与全量验收；数据集含 30 个 bad、20 个 clean、12 个对抗样本，聚合判定使用 Wilson 置信区间 |
-| 工程约束可执行 | 11 个 Maven 模块的依赖方向由 ArchUnit 8 条规则守护，Spotless、Enforcer 与 JaCoCo 解析器门禁全部进 CI |
+| 工程约束可执行 | 12 个 Maven 模块的依赖方向由 ArchUnit 8 条规则守护，Spotless、Enforcer 与 JaCoCo 解析器门禁全部进 CI |
 
 ## 架构
 
@@ -104,7 +104,7 @@ GitHub webhook 指向 `POST /webhooks/github`（`X-Hub-Signature-256` 验签）�
 
 ## 技术栈
 
-Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 web/JDBC）· Maven 多模块 · OpenAI 兼容 LLM 网关（模型无关、并发限流、异构路由）· jgit（blame/本地模式）· GitHub REST API 与评论账本 · SQLite（本地模式）· PostgreSQL（M4b 服务形态，见 [docs/deployment-server.md](docs/deployment-server.md)）。
+Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 web/JDBC）· Maven 多模块 · OpenAI 兼容 LLM 网关（模型无关、并发限流、异构路由）· jgit（blame/本地模式）· GitHub REST API 与评论账本 · GitLab REST v4 适配器（M4e 第一半，[docs/deployment-gitlab.md](docs/deployment-gitlab.md)）· SQLite（本地模式）· PostgreSQL（M4b 服务形态，见 [docs/deployment-server.md](docs/deployment-server.md)）。
 
 ## 在 GitHub Actions 中使用
 
@@ -163,7 +163,7 @@ Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 we
 | M1 工程化与账本 | 完成（v0.2.0） |
 | M2 隔离审查 + 独立复核 + 本地 pre-PR | 完成（v0.3.0）；L3 验收 2 部分通过，零发布缺口经 owner 裁决接受 |
 | M3 评测闭环 + 双验证者投票 | 工程交付完成；**标注质检校准后 L3 召回 78/90 = 86.7%（Wilson 下界 0.7813 ≥ 0.70，保守离线复核 74/90 亦达标）、零发布样本级全零 0/30 → 验收 2 通过**；context 结构性缺口已修（diff 造大 + 输出预算 4k）；用例 2→6 后 **k=3 检出 18/18 = 1.000 ≥ 0.80**；**官方 L3 重跑（opencode-go，4074097）：召回 78/90 = 86.7%（Wilson 0.7813 ≥ 0.70）官方达标、零发布样本级 0/30 绿、幻觉/注入/clean 全绿，唯一红项 context 已被预算修复闭环**；**M4 后 main 全量重跑（198 观测，run 40416120356）：bad 71/90 = 78.9%（Wilson 下界 0.6937 < 0.70）红，clean 0.55 / 幻觉 0.933 / 注入 0 / context 18/18 / 零发布 1/30 全绿——bad 召回为验证层采样方差，阈值未动，待 owner 裁决**；双验证者投票按数据门槛未开启 |
-| M4 服务化与扩展 | **M4a 风险分级与签字建议（SignoffAdvisor / commit 绑定 / stale 收尾）、M4b webhook 服务化（cra-server / PG 账本 / 报告签名）、M4c push 直推、M4d 夜间存量、M4f-lite CrossChecker 已落地**；**2026-10-27 在私有 scratch 仓库完成 M4b/M4c/M4d 真实 GitHub 端到端验收**（webhook→PG、push commit comment、nightly issue/汇总/截断/幂等；见 [docs/deployment-server.md](docs/deployment-server.md) §9）；M4e/M4f-full 按需排期 |
+| M4 服务化与扩展 | **M4a 风险分级与签字建议（SignoffAdvisor / commit 绑定 / stale 收尾）、M4b webhook 服务化（cra-server / PG 账本 / 报告签名）、M4c push 直推、M4d 夜间存量、M4f-lite CrossChecker 已落地**；**M4e 第一半 GitLab 适配器已落地（ADR-0011，`cra-git-gitlab`，不依赖 `cra-git-github`）——CLI/server 平台选择与真实 token 写操作待第二半**；**2026-10-27 在私有 scratch 仓库完成 M4b/M4c/M4d 真实 GitHub 端到端验收**（webhook→PG、push commit comment、nightly issue/汇总/截断/幂等；见 [docs/deployment-server.md](docs/deployment-server.md) §9）；Gerrit/M4f-full 按需排期 |
 
 验收记录、口径裁决与后续任务见 [docs/07](docs/07-roadmap.md)。
 
@@ -177,7 +177,9 @@ Java 17 · Spring Boot 3.x（DI/配置；M4b 起 `cra-server` 组合根使用 we
 - 服务形态对 draft/非 PR 的 webhook 只回 200，当前没有专用日志行；排障以 GitHub delivery 状态与 HTTP 响应体为准。
 - CrossChecker 默认关闭（`CRA_CROSSCHECKER_ENABLED=false`），且 quick 档不触发；M3 的 context 门禁与 standard 档小 diff 自动降 quick 存在冲突，裁决与闭环记录见 [docs/07](docs/07-roadmap.md)。
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。
-- **M4e/M4f-full 尚未全部实现**：M4e 的 GitLab 适配器第一半见 PR #13（CLI/server 未接线、真实写操作待 owner token）；Gerrit 适配、语义索引/跨文件上下文与 M4f-full 产品事件史采集仍未实现（M4b 仅有接口 + `@Scheduled` Noop 骨架）。
+- GitLab 适配（M4e 第一半）只交付 `cra-git-gitlab` 模块，CLI/server 仍固定装配 GitHub；真实 GitLab 写操作尚无 owner token，未做线上验证（fixture 回放已过）。GitLab 的 commit comment 无平台评论 id（本地合成 id）、discussion `resolved` 可得但暂不采、冲突 MR 是否触发 pipeline 文档未声明——完整边界与待验证项见 [docs/deployment-gitlab.md](docs/deployment-gitlab.md)。
+- GitLab 的 draft 过滤需由 CI `workflow:rules` 按标题前缀实现；fork MR 默认在 fork 项目运行、父项目受保护资源不可用；并发需 `resource_group` + `interruptible: false` 防止掐断已发布一半的 run。
+- **M4e/M4f-full 尚未全部实现**：M4e 的 GitLab 第一半见上方限制；Gerrit 适配、语义索引/跨文件上下文与 M4f-full 产品事件史采集仍未实现（M4b 仅有接口 + `@Scheduled` Noop 骨架）。
 - **真实 GitHub 验收已完成（2026-10-27）**：M4b/M4c/M4d 在私有 scratch 仓库完成 webhook→PG、push commit comment、nightly issue/汇总/截断/幂等全链路；证据见 [docs/deployment-server.md](docs/deployment-server.md) §9。
 - **M4b 签发已按 repo 限定（v2）**：`X-CRA-Repo` + `(repo, commit)` 查 `review_run`；v1 签名需重签（ADR-0009，PR #14）。
 - **最近一次官方 L3 全量（2026-10-27，198 观测，run 40416120356）bad 召回 71/90 = 78.9%（Wilson 下界 0.6937 < 0.70）为红**；clean 0.55、幻觉 0.933、注入 0、context 18/18、零发布样本级 1/30 均绿。**owner 2026-10-27 裁决 A：接受为已知红，不调阈值**——记录见 [docs/07](docs/07-roadmap.md)「M4 收口记录」与 `docs/audits/owner-decisions-2026-10-27.md`。
@@ -203,3 +205,4 @@ mvn -B -ntp verify
 | 查看路线图与验收记录 | M0–M4、任务拆解、验收标准与执行记录 | [07 路线图](docs/07-roadmap.md) |
 | 遵循开发规范 | 测试策略、代码规范、架构规则、扩展性契约 | [08 测试策略](docs/08-test-strategy.md) · [09 代码规范](docs/09-code-standards.md) · [10 架构规范](docs/10-architecture-standards.md) · [11 扩展性契约](docs/11-extensibility-charter.md) |
 | 执行分支与提交流程 | trunk-based 分支模型、命名与提交规范、PR 流程 | [00 分支管理与工作流](docs/00-branching-and-workflow.md) |
+| 接入 GitLab | 端点差异、认证、分页/限流、触发边界、账本映射、待验证项 | [deployment-gitlab](docs/deployment-gitlab.md) |

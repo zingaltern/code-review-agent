@@ -1,0 +1,12 @@
+{
+  "iid": 7,
+  "state": "opened",
+  "sha": "abc1234",
+  "target_branch": "main",
+  "source_branch": "feature",
+  "diff_refs": {
+    "base_sha": "basesha1",
+    "head_sha": "abc1234",
+    "start_sha": "startsha1"
+  }
+}

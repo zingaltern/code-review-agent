@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.5（2026-10-27，M4e 第一半：新增 cra-git-gitlab（ADR-0011），GitLab 触发边界表见 docs/deployment-gitlab.md）
 > 文档版本：v1.4（2026-10-26，M4b 服务化：cra-server 第二组合根 + PG 账本 + 报告签名，ADR-0008；M4c/M4d：账本载体扩展为 PR 评论 / commit comment / issue 三形态，触发边界表补 push 与夜间定时两行）
 > 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③⑤；规范包 08–11 入库时 §3 登记 cra-archtest）
@@ -76,7 +77,8 @@ code-review-agent/
 ├── cra-common/            # 纯公共契约：Finding/RunStatus 等数据模型 + 无依赖文本/校验辅助
 ├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
-│   └── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
+│   ├── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
+│   └── cra-git-gitlab/    # GitLab 实现（M4e 第一半，ADR-0011；不依赖 github）
 ├── cra-context/           # ContextAssembler：diff 解析、窗口/全文策略、切片、预算裁剪
 ├── cra-agents/            # 子代理定义：角色 prompt 模板、工具白名单、输出 schema
 ├── cra-core/              # Orchestrator：Planner/Fan-out/Verify/Aggregate/Publish/Convergence
@@ -87,7 +89,7 @@ code-review-agent/
 └── cra-server/            # (M4b) webhook 常驻服务、有界队列、多仓库、报告签发（第二组合根）
 ```
 
-依赖方向：`cra-runner-cli → cra-core → {cra-agents, cra-context, cra-llm, cra-git, cra-store, cra-common}`；`cra-server` 是第二组合根，依赖集与 cli 同构（除 cli/eval/server）；所有模块 → `cra-common`。
+依赖方向：`cra-runner-cli → cra-core → {cra-agents, cra-context, cra-llm, cra-git, cra-store, cra-common}`；`cra-server` 是第二组合根，依赖集与 cli 同构（除 cli/eval/server）；所有模块 → `cra-common`；平台实现 `cra-git-github` / `cra-git-gitlab` 只依赖 `cra-git` + `cra-common`，彼此不依赖（11§4 第 4 条）。
 
 **对照原项目**：`openai-code-review-sdk` 的职责拆进 `cra-core + cra-agents + cra-git-github + cra-llm`；`openai-code-review-test` 的角色由 `cra-eval` + 自举 workflow 承担。
 
@@ -165,6 +167,8 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 | 冲突 PR（mergeable=conflicting） | `pull_request` workflow **不触发**（merge ref 无法创建，官方行为）——最需要反馈的 PR 会静默无评审 | 无法在触发层解决；owner 解决冲突后的 synchronize 会正常触发；限制写入 README 与部署文档 |
 | draft PR | 照常触发（浪费成本与噪声） | workflow 加 `draft == false` 条件 + `ready_for_review` 类型触发（05§4） |
 | fork PR | `GITHUB_TOKEN` secrets 不可用（pull_request_target 语义另论） | 当前个人仓库无碍；多协作者时代再引入 App token，写入限制声明 |
+
+GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / push / 夜间定时）见 `docs/deployment-gitlab.md` §5（ADR-0011：GitLab 文档未声明冲突会阻断 MR pipeline，待真实实例确认）。
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 

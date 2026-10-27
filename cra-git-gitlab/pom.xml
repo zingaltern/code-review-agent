@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.cra</groupId>
+    <artifactId>code-review-agent</artifactId>
+    <version>0.1.0</version>
+  </parent>
+
+  <artifactId>cra-git-gitlab</artifactId>
+  <name>cra-git-gitlab</name>
+  <description>GitLab 实现（M4e，ADR-0011）：compare diff / repository files / MR discussions / notes / commit comments / issues / 账本标记解析；不依赖 cra-git-github</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-git</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+    </dependency>
+    <!-- fixture 端到端复用非平台特异 CommentSource 账本（08§5 场景 5/17 的 GitLab 侧）；
+         test scope，不进运行时依赖图，10§2 矩阵只约束 compile 依赖 -->
+    <dependency>
+      <groupId>org.cra</groupId>
+      <artifactId>cra-store</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <version>${wiremock.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>check-ledger-parser</id>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <!-- 08§7：账本标记解析器 100% 分支覆盖（静默故障类，白名单唯一强制项） -->
+              <includes>
+                <include>org/cra/git/gitlab/internal/ledger/LedgerMarkerParser*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>1.00</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <haltOnFailure>true</haltOnFailure>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

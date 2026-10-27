@@ -1,5 +1,6 @@
 # 08 · 测试策略与验证方案
 
+> 文档版本：v1.2（2026-10-27，M4e 第一半：cra-git-gitlab 账本解析器/端点契约测试与 fixture 幂等重放）
 > 文档版本：v1.1（2026-10-26，M4b：PG 测试 Testcontainers/service 容器 + cra-server 接线冒烟例外，ADR-0008；M4c/M4d 测试场景 20/21：push commit comment 载体与夜间 issue 载体幂等）
 > 文档版本：v1.0（2026-10-25，开发前规范包）
 > 定位：02§6 横切关注点中"测试策略"一句（编排逻辑单测；子代理 LLM 录制回放；端到端 fixture 仓库 + dry-run 断言；不可信输入注入用例进对抗集）的**工程化展开**——规定工程测试怎么写、怎么跑、怎么进 CI。不推翻原表述，只细化。
@@ -27,7 +28,7 @@
 
 - `cra-common`：schema 校验（05§1.1 枚举含 context）单测——解析拒收是行为，必须锁住；
 - `cra-llm`：重试/降级链/并发信号量/RPM 限流的**非网络逻辑**单测；HTTP 行为在集成层；
-- `cra-git-github`：账本解析器、锚定校验（07§6 纪律 2"隔离机制必须有直接单测"）；
+- `cra-git-github` / `cra-git-gitlab`：账本解析器（两份独立实现均 100% 分支覆盖）、锚定校验/锚定三元组（07§6 纪律 2"隔离机制必须有直接单测"）；GitLab 端点为 WireMock 录制回放契约测试 + fixture 幂等重放；
 - `cra-core`：幂等闸、ConvergenceGuard、BudgetEnforcer——全部可纯函数化测试（输入 ReviewRequest/账本快照，输出决策）；
 - `cra-store`：SQLite 实现用 `@TempDir` 临时目录，每次测试新建库（无共享状态、天然并行安全）。
 

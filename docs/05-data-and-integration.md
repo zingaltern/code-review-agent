@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.5（2026-10-27，M4e 第一半：GitLab 适配器端点差异/账本映射/待验证项落 ADR-0011 与 docs/deployment-gitlab.md；SPI 签名不变）
 > 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
@@ -207,7 +208,8 @@ public interface CommentSource {                                               /
     DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber);   // 06§1.1 周报数据面（reply 标签 + Summary reaction）
 }
 // 消费方：cra-store 的 GitHub 评论账本实现（构造器注入，只依赖 common 类型）与 cra-eval report；
-// 提供方：cra-git-github（适配既有 adapter 方法）；装配：组合根（cra-runner-cli 与 eval 的 Main）。
+// 提供方：cra-git-github（适配既有 adapter 方法）与 cra-git-gitlab（M4e，ADR-0011）；
+// 装配：组合根（cra-runner-cli 与 eval 的 Main）。
 ```
 
 **v1.3.3 实现补充（T3.4，2026-10-26）**：`DispositionSignal` 增 `detail`（wrong|intentional|fixed / +1|-1）、
@@ -276,6 +278,8 @@ resolve 仍不采（GraphQL-only）。
 | 夜间扫描范围 | `GET /pulls?state=all&sort=updated&direction=desc` | 复用 T3.4 `listPullRequests`；v1.4 起返回 `base.sha`（diff 基线，§2.5） |
 
 **resolve 状态为 GraphQL-only**：REST v3 锁定下不采、不操作（06§1.1、02§5）。
+
+**GitLab 实现（M4e 第一半，ADR-0011）**：端点、认证、分页、限流、触发边界、账本映射与不可得信号的**主载体**是 `docs/deployment-gitlab.md`（11§6 要求的平台边界表落点）。本节 GitHub 端点清单不适用于 GitLab；SPI 签名与账本标记格式不变。
 
 ## 3. CLI 契约（cra-runner-cli）
 
