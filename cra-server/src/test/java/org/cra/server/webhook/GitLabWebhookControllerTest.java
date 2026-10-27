@@ -12,7 +12,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 
-/** GitLab webhook HTTP 语义（ADR-0012）：401/400/200 ignored/202/duplicate/503。 */
+/** GitLab webhook HTTP 语义（ADR-0013）：401/400/200 ignored/202/duplicate/503。 */
 class GitLabWebhookControllerTest {
 
   private static final String SECRET = "gl-secret";

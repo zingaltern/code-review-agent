@@ -65,7 +65,7 @@ public class ServerBeans {
   }
 
   /**
-   * Git 平台适配器（M4e 第二半，ADR-0012：按 CRA_SERVER_PLATFORM 装配 GitHub 或 GitLab；两者模块互不依赖）。
+   * Git 平台适配器（M4e 第二半，ADR-0013：按 CRA_SERVER_PLATFORM 装配 GitHub 或 GitLab；两者模块互不依赖）。
    *
    * @param config 服务配置
    * @return adapter
@@ -351,7 +351,7 @@ public class ServerBeans {
   }
 
   /**
-   * webhook 验签器（平台对应：GitHub HMAC 或 GitLab secret token，ADR-0012）。
+   * webhook 验签器（平台对应：GitHub HMAC 或 GitLab secret token，ADR-0013）。
    *
    * @param config 服务配置
    * @return 验签器（非当前平台的分支不会被使用）

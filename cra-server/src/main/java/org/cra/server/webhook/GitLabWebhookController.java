@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * GitLab webhook 端点（M4e 第二半，ADR-0012；02§5 服务形态的 GitLab 版）。
+ * GitLab webhook 端点（M4e 第二半，ADR-0013；02§5 服务形态的 GitLab 版）。
  *
  * <p>流程：`X-Gitlab-Token` 验签 → Merge Request Hook 解析（只评审 open/reopen/带新提交的 update）→ 幂等登记 → 有界队列。 非
  * MR 事件与合并/关闭/审批/元数据更新/draft 一律 **200 + 显式 reason**（GitLab 对非 2xx 会重投）；验签失败 401、缺头/非法 payload

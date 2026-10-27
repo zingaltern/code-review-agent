@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.junit.jupiter.api.Test;
 
-/** GitLab X-Gitlab-Token 验签（ADR-0012）。 */
+/** GitLab X-Gitlab-Token 验签（ADR-0013）。 */
 class GitLabWebhookTokenVerifierTest {
 
   private final GitLabWebhookTokenVerifier verifier = new GitLabWebhookTokenVerifier("s3cret");

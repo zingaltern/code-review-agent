@@ -11,7 +11,7 @@ import org.cra.common.exception.CraConfigException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** M4e 第二半：CLI 平台选择与 GitLab 配置解析（ADR-0012；默认 github 保持兼容）。 */
+/** M4e 第二半：CLI 平台选择与 GitLab 配置解析（ADR-0013；默认 github 保持兼容）。 */
 class CliArgsPlatformTest {
 
   @TempDir Path tempDir;

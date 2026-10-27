@@ -1,6 +1,6 @@
 # cra-server 部署形态（M4b 服务化）
 
-> 依据：02§5（部署形态与状态归属）、07§5 M4b/M4e、ADR-0008/ADR-0012。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
+> 依据：02§5（部署形态与状态归属）、07§5 M4b/M4e、ADR-0008/ADR-0013。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
 > 适用读者：部署本服务的 owner / 运维。评审逻辑本身见 02/03/04，不在本文重复；GitLab 平台事实见 `deployment-gitlab.md`。
 
 ---
@@ -20,7 +20,7 @@ GitLab ──webhook(token)─┘      ├─ WebhookController / GitLabWebhookC
                                └─ AttestationController（/api/v1/reports/attest，HMAC 报告签名）
 ```
 
-- **第二组合根**：cra-server 与 cra-runner-cli 只是两种壳（02§5），评审逻辑完全复用 core；**平台由 `CRA_SERVER_PLATFORM` 在装配期决定**（M4e 第二半，ADR-0012），只注册当前平台的 webhook 端点；
+- **第二组合根**：cra-server 与 cra-runner-cli 只是两种壳（02§5），评审逻辑完全复用 core；**平台由 `CRA_SERVER_PLATFORM` 在装配期决定**（M4e 第二半，ADR-0013），只注册当前平台的 webhook 端点；
 - **账本**：PostgreSQL，按仓库创建 `ReviewLedger` 实例（delivery 表与签发表为 server 自有）；账本键仍为 repo + pr/commit，与平台无关；
 - **队列**：进程内有界队列（不引入外部 broker，理由见 ADR-0008）；满时 HTTP 503 → 平台按同一 delivery/event 重投；
 - **幂等**：delivery id（PG 唯一键）挡重复投递（GitLab 用 `X-Gitlab-Event-UUID`，缺失时用 payload 摘要）；core 的 commit 闸 + 指纹账本挡同 head 重跑（02§4.1）；
@@ -52,7 +52,7 @@ curl -fsS http://127.0.0.1:8080/readyz
 
 服务端只接受 `X-Hub-Signature-256`（HMAC-SHA256），验签在 JSON 解析之前；失败 401，不泄露细节。
 
-### 2.2 GitLab webhook 配置（M4e 第二半，ADR-0012）
+### 2.2 GitLab webhook 配置（M4e 第二半，ADR-0013）
 
 设置 `CRA_SERVER_PLATFORM=gitlab` 后只注册 GitLab 端点（GitHub 端点返回 404）；默认 `github` 只注册 GitHub 端点。
 
@@ -76,7 +76,7 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 | `CRA_SERVER_DB_USER` / `CRA_SERVER_DB_PASSWORD` | 否 | `cra` | PG 凭据（compose 注入；生产必须覆盖密码） |
 | `CRA_SERVER_DB_POOL` | 否 | `10` | Hikari 连接池上限 |
 | `CRA_SERVER_WEBHOOK_SECRET` | 是 | — | webhook 密钥：GitHub = HMAC 密钥；GitLab = webhook Secret token（`X-Gitlab-Token`） |
-| `CRA_SERVER_PLATFORM` | 否 | `github` | 平台选择（`github`\|`gitlab`，小写；M4e 第二半，ADR-0012） |
+| `CRA_SERVER_PLATFORM` | 否 | `github` | 平台选择（`github`\|`gitlab`，小写；M4e 第二半，ADR-0013） |
 | `CRA_GITLAB_BASE_URL` | 否 | `https://gitlab.com/api/v4` | GitLab API 根（实例根或已含 `/api/v4` 均可，自动归一） |
 | `CRA_GITLAB_TOKEN` | gitlab 模式必填 | — | GitLab access token（`api` scope；PRIVATE-TOKEN） |
 | `CRA_GITLAB_TOKEN_FILE` | 否 | — | token 文件路径（容器/K8s secret mount；与 `CRA_GITLAB_TOKEN` 二选一，前者优先） |

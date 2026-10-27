@@ -8,7 +8,7 @@ import org.cra.git.gitlab.api.GitLabAssembly;
 import org.cra.git.gitlab.api.GitLabComponents;
 
 /**
- * 平台组件集（ADR-0012）：按配置装配 GitHub 或 GitLab 的 adapter + CommentSource，组合根与 sweep 共用。
+ * 平台组件集（ADR-0013）：按配置装配 GitHub 或 GitLab 的 adapter + CommentSource，组合根与 sweep 共用。
  *
  * <p>两个实现模块互不依赖（11§4 第 4 条）；本类位于组合根，按平台选择其一，未选中的平台不构造、不读取其 token。
  *

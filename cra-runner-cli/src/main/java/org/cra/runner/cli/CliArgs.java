@@ -122,7 +122,7 @@ final class CliArgs {
     // dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）
     boolean dryRun = (local && !dryRunArgSeen) || dryRunFlag;
 
-    // 平台选择（M4e 第二半，ADR-0012）：默认 github 保持兼容；本地 pre-PR 形态与平台无关
+    // 平台选择（M4e 第二半，ADR-0013）：默认 github 保持兼容；本地 pre-PR 形态与平台无关
     String platform = PlatformArgs.platform(named, env);
     boolean gitlab = PlatformArgs.GITLAB.equals(platform);
 

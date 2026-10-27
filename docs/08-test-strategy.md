@@ -124,7 +124,7 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | 24 | delivery 幂等：同 delivery 两次只入队一次（第二次 200 duplicate）；不同 delivery 同 head → core commit 闸 SKIPPED、`review_run` 不新增 | 单测 + PG 集成 | 02§4.1；ADR-0008 |
 | 25 | PG 账本契约：与 SQLite 共享 `ReviewLedgerContractTest`（完成标记/幂等/大小写/跨实例持久化）；五表存在；`ON CONFLICT` 重复登记幂等 | 契约测试（CI service 容器或 Testcontainers） | 05§1.5；08§3.3；ADR-0008 |
 | 26 | 报告签名：服务端签发 → `cra-eval verify --signature` 通过；篡改报告/信封 → 退出码 5；未知 commit → 409；无 Bearer → 401 | 单测 + HTTP 集成 + CLI 黑盒 | 04§2.4；ADR-0008 |
-| 27 | GitLab 平台接线（M4e 第二半）：`--platform gitlab` → GitLab adapter + CommentSource → 发布后同 commit 重放命中 DONE、零重复（WireMock）；server `CRA_SERVER_PLATFORM=gitlab` → `/webhooks/gitlab` open/update-with-oldrev 202、同 UUID duplicate 200、merge/draft/非 MR 200 ignored + reason、错 token 401、非法 payload 400、GitHub 端点 404 | 单测 + WireMock + HTTP+PG 集成 | 07§5 M4e；ADR-0012；deployment-gitlab §7/§8/§12 |
+| 27 | GitLab 平台接线（M4e 第二半）：`--platform gitlab` → GitLab adapter + CommentSource → 发布后同 commit 重放命中 DONE、零重复（WireMock）；server `CRA_SERVER_PLATFORM=gitlab` → `/webhooks/gitlab` open/update-with-oldrev 202、同 UUID duplicate 200、merge/draft/非 MR 200 ignored + reason、错 token 401、非法 payload 400、GitHub 端点 404 | 单测 + WireMock + HTTP+PG 集成 | 07§5 M4e；ADR-0013；deployment-gitlab §7/§8/§12 |
 
 **【强制】** 上表 1–27 是对应里程碑 CI/验收的最低测试集：验收执行时逐条引用本表编号作为证据（PR 描述粘贴输出，00§5）。
 

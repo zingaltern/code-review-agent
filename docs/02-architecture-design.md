@@ -1,6 +1,6 @@
 # 02 · 总体架构设计
 
-> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0012）；真实写操作 pending）
+> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：新增 cra-git-gitlab（ADR-0011），GitLab 触发边界表见 docs/deployment-gitlab.md）
 > 文档版本：v1.4（2026-10-26，M4b 服务化：cra-server 第二组合根 + PG 账本 + 报告签名，ADR-0008；M4c/M4d：账本载体扩展为 PR 评论 / commit comment / issue 三形态，触发边界表补 push 与夜间定时两行）
 > 文档版本：v1.3.2（2026-10-26，本轮治理：cra-common 增加无依赖文本/校验辅助，模块说明同步）
@@ -175,7 +175,7 @@ GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / pu
 
 **M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集只留接口与调度骨架（M4f-full 实现）。
 
-**M4e 第二半注记（2026-10-27，ADR-0012）**：CLI 与 server 都按平台选择装配——CLI `--platform github|gitlab` / `CRA_GIT_PLATFORM`（GitLab 用 `--gitlab-project` + `CRA_GITLAB_TOKEN`，账本键仍 repo+pr/commit）；server `CRA_SERVER_PLATFORM=github|gitlab`，GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 → MR 事件子集 → 同一 PG delivery 幂等 → 队列）。未选中平台的端点不注册；非 MR/draft/merge/close/审批/元数据更新显式 200 ignored 并声明 reason。真实 GitLab 写操作尚无 owner token（读路径已验证），边界与待验证项见 `docs/deployment-gitlab.md` §9/§12。
+**M4e 第二半注记（2026-10-27，ADR-0013）**：CLI 与 server 都按平台选择装配——CLI `--platform github|gitlab` / `CRA_GIT_PLATFORM`（GitLab 用 `--gitlab-project` + `CRA_GITLAB_TOKEN`，账本键仍 repo+pr/commit）；server `CRA_SERVER_PLATFORM=github|gitlab`，GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 → MR 事件子集 → 同一 PG delivery 幂等 → 队列）。未选中平台的端点不注册；非 MR/draft/merge/close/审批/元数据更新显式 200 ignored 并声明 reason。真实 GitLab 写操作尚无 owner token（读路径已验证），边界与待验证项见 `docs/deployment-gitlab.md` §9/§12。
 
 ## 6. 横切关注点
 

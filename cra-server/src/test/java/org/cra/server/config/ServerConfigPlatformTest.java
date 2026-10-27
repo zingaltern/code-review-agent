@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.mock.env.MockEnvironment;
 
-/** cra-server 平台选择配置（M4e 第二半，ADR-0012）。 */
+/** cra-server 平台选择配置（M4e 第二半，ADR-0013）。 */
 class ServerConfigPlatformTest {
 
   @TempDir Path tempDir;

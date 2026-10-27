@@ -1,6 +1,6 @@
 # 11 · 扩展性契约
 
-> 文档版本：v1.4（2026-10-27，M4e 第二半：Git 平台适配 / CommentSource 两行补 CLI/server 平台选择（ADR-0012）；真实写操作 pending）
+> 文档版本：v1.4（2026-10-27，M4e 第二半：Git 平台适配 / CommentSource 两行补 CLI/server 平台选择（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.2（2026-10-26，M4b：账本 PG 形态落地 + 报告签名信封登记；M4c/M4d：载体扩展登记——Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行补 commit-comment 与 issue 载体及键控方法，§7 对应两项转为"已登记并实现"）
 > v1.1（2026-10-25，v1.0 入库后协调修订：§3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制，消除同批文档间的定义冲突）
 > 前置阅读：`02-architecture-design.md`、`03-multi-agent-design.md`、`04-context-and-prompt-design.md`、`05-data-and-integration.md`、`07-roadmap.md`
@@ -24,8 +24,8 @@
 
 | 扩展点 | 接口或机制 | 稳定性 | 当前实现 | 新增实现的最小集 |
 |---|---|---|---|---|
-| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3）；**M4c/M4d 载体扩展已落地**（commit comment / issue）；**M4e `cra-git-gitlab`**（ADR-0011，不依赖 github）：compare diff / discussions / MR notes / commit comments / issues，端点差异与边界表见 `docs/deployment-gitlab.md`；**第二半已接线（ADR-0012）**：CLI `--platform gitlab` / server `CRA_SERVER_PLATFORM=gitlab` 按平台装配，真实写操作待 owner token | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；**M4c/M4d 载体（05§2.4/§2.5）**：`postCommitReview` + `postIssueReview` 两个 `default` 方法——默认抛 `UnsupportedOperationException`（不可得显式拒绝，§4 第 5 条），平台不支持 push/夜间形态时不得静默丢发布；接入走 §6 checklist |
-| 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法）；**M4c/M4d 账本读侧**（commit comment / issue）；**M4e `cra-git-gitlab`** 同步实现 PR/commit/issue 三类账本（ADR-0011），CLI/server 按平台选择注入（ADR-0012） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；**载体账本扩展（05§1.3）**：`fetchCommitBotComments` / `fetchIssueBotComments` / `listBotIssues` 三个 `default` 方法——前两者默认显式拒绝（静默空账本会导致重复发布），`listBotIssues` 默认空列表（不可得语义）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
+| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3）；**M4c/M4d 载体扩展已落地**（commit comment / issue）；**M4e `cra-git-gitlab`**（ADR-0011，不依赖 github）：compare diff / discussions / MR notes / commit comments / issues，端点差异与边界表见 `docs/deployment-gitlab.md`；**第二半已接线（ADR-0013）**：CLI `--platform gitlab` / server `CRA_SERVER_PLATFORM=gitlab` 按平台装配，真实写操作待 owner token | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；**M4c/M4d 载体（05§2.4/§2.5）**：`postCommitReview` + `postIssueReview` 两个 `default` 方法——默认抛 `UnsupportedOperationException`（不可得显式拒绝，§4 第 5 条），平台不支持 push/夜间形态时不得静默丢发布；接入走 §6 checklist |
+| 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法）；**M4c/M4d 账本读侧**（commit comment / issue）；**M4e `cra-git-gitlab`** 同步实现 PR/commit/issue 三类账本（ADR-0011），CLI/server 按平台选择注入（ADR-0013） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；**载体账本扩展（05§1.3）**：`fetchCommitBotComments` / `fetchIssueBotComments` / `listBotIssues` 三个 `default` 方法——前两者默认显式拒绝（静默空账本会导致重复发布），`listBotIssues` 默认空列表（不可得语义）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
 | 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1）；**M4c：`firstParentChain`**（default 空列表 = 不可得，push 基线解析据此要求显式 `--base`） |
 | 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态，M4b 已落地），按部署形态选择（02§5）；**M4c/M4d 键控扩展**：`ReviewKey`（repo + 形态 + (pr\|commit)）| 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植**；键控方法以 default 加入（05§1.3 v1.4），无 PR 载体粒度 = 载体评论级 |
 | 报告签名信封 | `ReportSignature`（cra-common，04§2.4、ADR-0008/0009） | 演进（格式约定） | `cra-server` 签发（`/api/v1/reports/attest`，需 `X-CRA-Repo`），`cra-eval verify --signature --repo` 验签 | 行式信封 `cra-report-hmac-sha256-v2`（key_id/report_sha256/repo/commit/tier/issued_at/run_id/signature）；HMAC-SHA256 覆盖版本行至 run_id 行（不含 signature 行）；repo 绑定 owner/name；v1 信封不再接受，格式变更【强制】bump 版本并写 ADR |
@@ -155,4 +155,4 @@ grep "context" 应命中并核对：
 | v1.1 | 2026-10-25 | §3 澄清 1 的 ADR 载体与 10§6 统一为 docs/adr/ 目录机制 |
 | v1.2 | 2026-10-26 | M4c/M4d 载体扩展登记（Git 平台适配 / CommentSource / LocalRepoContext / ReviewLedger 四行）；§7 两项转为"已登记并实现" |
 | v1.3 | 2026-10-27 | M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；§7 M4e 更新为 GitLab 已落地、Gerrit 未做 |
-| v1.4 | 2026-10-27 | M4e 第二半：两行补 CLI/server 平台选择（ADR-0012）；§7 M4e 更新为已接线、真实写操作 pending |
+| v1.4 | 2026-10-27 | M4e 第二半：两行补 CLI/server 平台选择（ADR-0013）；§7 M4e 更新为已接线、真实写操作 pending |

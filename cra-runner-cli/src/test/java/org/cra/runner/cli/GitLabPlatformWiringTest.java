@@ -31,7 +31,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
 /**
- * CLI GitLab 平台接线（M4e 第二半，ADR-0012）：`--platform gitlab` → AppConfig 装配 GitLab adapter +
+ * CLI GitLab 平台接线（M4e 第二半，ADR-0013）：`--platform gitlab` → AppConfig 装配 GitLab adapter +
  * CommentSource → 评论账本；发布后同 commit 重放命中 DONE 闸、零重复。
  *
  * <p>WireMock 回放 GitLab REST v4（Git/LLM 调用不进单测，07§6.3）；装配根与真实运行相同，避免"适配器单测绿、组合根仍接 GitHub"的假接线。

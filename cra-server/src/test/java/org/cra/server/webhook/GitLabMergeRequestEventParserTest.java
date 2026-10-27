@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.Test;
 
-/** GitLab Merge Request Hook 映射（ADR-0012；02§5 触发边界）。 */
+/** GitLab Merge Request Hook 映射（ADR-0013；02§5 触发边界）。 */
 class GitLabMergeRequestEventParserTest {
 
   private final GitLabMergeRequestEventParser parser = new GitLabMergeRequestEventParser();

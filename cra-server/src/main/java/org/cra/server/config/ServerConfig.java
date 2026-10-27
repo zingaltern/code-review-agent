@@ -24,7 +24,7 @@ import org.springframework.core.env.Environment;
  *
  * @param webhookSecret webhook 密钥（GitHub：X-Hub-Signature-256 HMAC；GitLab：X-Gitlab-Token secret
  *     token）
- * @param platform Git 平台（`github`|`gitlab`；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0012）
+ * @param platform Git 平台（`github`|`gitlab`；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0013）
  * @param gitlabBaseUrl GitLab API 根（含 /api/v4；CRA_GITLAB_BASE_URL）
  * @param gitlabToken GitLab access token（CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE；gitlab 模式必填）
  * @param gitlabBotUsername `/user` 不可读时的 bot 身份回退（CRA_GITLAB_BOT_USERNAME，ADR-0011 决策 3）

@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
  * cra review --repo "$GITHUB_REPOSITORY" --pr "$PR_NUMBER" \
  *   --base "$BASE_SHA" --head "$HEAD_SHA" --depth standard --token "$GITHUB_TOKEN" [--dry-run] [--security-block]
  *
- * # CI 模式（GitLab，11§6 / ADR-0012）
+ * # CI 模式（GitLab，11§6 / ADR-0013）
  * cra review --platform gitlab --gitlab-project "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID" \
  *   --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" [--depth standard]
  *

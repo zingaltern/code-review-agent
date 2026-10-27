@@ -19,7 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>状态码语义：401 验签失败；400 缺头/payload 非法；202 已入队；200 重复 delivery 或事件被忽略；503 背压（带 Retry-After，GitHub
  * 会重投同一 delivery）。
  *
- * <p>M4e 第二半（ADR-0012）：本端点仅在 `CRA_SERVER_PLATFORM=github`（或未设置）时注册；GitLab 模式走 {@link
+ * <p>M4e 第二半（ADR-0013）：本端点仅在 `CRA_SERVER_PLATFORM=github`（或未设置）时注册；GitLab 模式走 {@link
  * GitLabWebhookController}，非当前平台的端点不存在（404）。
  */
 @RestController

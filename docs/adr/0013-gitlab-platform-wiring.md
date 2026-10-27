@@ -1,4 +1,4 @@
-# ADR-0012 GitLab 平台接线（CLI/server 平台选择与 webhook）
+# ADR-0013 GitLab 平台接线（CLI/server 平台选择与 webhook）
 
 - 状态：accepted（2026-10-27，M4e 第二半；真实 GitLab 写操作因无 owner token 仍为 pending）
 - 背景：ADR-0011 已交付 `cra-git-gitlab`（`GitPlatformAdapter` + `CommentSource`，不依赖 `cra-git-github`），但 CLI 与 server 仍固定装配 GitHub。11§6 的接入 checklist 要求"新平台能被组合根选择，且平台差异显式声明"；直接照抄 GitHub 装配会把两平台 token/仓库/验签语义混在一起。需要在不改 SPI 签名、不改账本格式、不引入实现模块横向依赖的前提下完成接线。

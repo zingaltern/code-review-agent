@@ -19,7 +19,7 @@ import org.springframework.context.annotation.Configuration;
  * 组合根（10§3/10§4：M0–M3 全部对象图在 cra-runner-cli 装配；Spring 仅 DI/配置，@Autowired 零出现——R6/R7 守护）。各模块只经 api
  * 装配工厂触达（internal 跨模块不可见，R3）。
  *
- * <p>M4e 第二半（ADR-0012）：Git 平台按 {@link CraConfig#platform()} 装配——GitHub（默认）或 GitLab；两者都不依赖对方模块。
+ * <p>M4e 第二半（ADR-0013）：Git 平台按 {@link CraConfig#platform()} 装配——GitHub（默认）或 GitLab；两者都不依赖对方模块。
  */
 @Configuration
 class AppConfig {
@@ -32,7 +32,7 @@ class AppConfig {
 
   @Bean
   PlatformComponents platformComponents() {
-    // ADR-0012：未选中的平台不构造、不读取其 token；GitLab 模式不需要 githubToken，反之亦然
+    // ADR-0013：未选中的平台不构造、不读取其 token；GitLab 模式不需要 githubToken，反之亦然
     return PlatformComponents.create(config);
   }
 

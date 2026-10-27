@@ -1,7 +1,7 @@
 package org.cra.runner.cli;
 
 /**
- * GitLab 连接设置（M4e 第二半；ADR-0012）。
+ * GitLab 连接设置（M4e 第二半；ADR-0013）。
  *
  * <p>密钥只从环境变量或密钥文件读取（05§6）：`CRA_GITLAB_TOKEN` / `CRA_GITLAB_TOKEN_FILE`；不接受命令行明文 token。
  *

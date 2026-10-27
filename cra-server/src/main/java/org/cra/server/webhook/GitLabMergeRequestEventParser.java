@@ -11,7 +11,7 @@ import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 /**
- * GitLab Merge Request Hook 解析（ADR-0012；02§5 触发边界的 GitLab 映射）。
+ * GitLab Merge Request Hook 解析（ADR-0013；02§5 触发边界的 GitLab 映射）。
  *
  * <p>只评审会改变可评审内容的动作：`open` / `reopen` / 带新提交的 `update`（GitLab 用 `oldrev` 非空表示新提交，对应 GitHub 的
  * `synchronize`）。`merge` / `close` / 审批类 / 仅元数据更新 / draft 明确忽略并返回原因——不静默假装支持，也不在 HTTP 层返回错误（GitLab

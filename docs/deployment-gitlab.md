@@ -1,6 +1,6 @@
 # GitLab 适配与部署边界（M4e 第二半）
 
-> 依据：ADR-0011（适配器）、ADR-0012（平台选择与 webhook 接线）、11§6（新 Git 平台接入 checklist）、05§2.1–§2.5、02§5。本文是 GitLab 平台事实的**主载体**；11§2 与 README 只做一句话指回。
+> 依据：ADR-0011（适配器）、ADR-0013（平台选择与 webhook 接线）、11§6（新 Git 平台接入 checklist）、05§2.1–§2.5、02§5。本文是 GitLab 平台事实的**主载体**；11§2 与 README 只做一句话指回。
 > 适用范围：`cra-git-gitlab` 适配器 + CLI/server 的平台选择与 GitLab webhook。**真实 GitLab 写操作仍无 owner token，未做线上验证**（读路径已对 gitlab.com 公共项目实跑，见 §12）。
 
 ---
@@ -9,7 +9,7 @@
 
 - 新模块 `cra-git-gitlab`（包 `org.cra.git.gitlab`），**不依赖 `cra-git-github`**；实现 `fetchDiff` / `readFile` / `postReview` / `fetchBotComments`，并按需实现 `listFiles` / `fetchDispositionSignals`、M4c/M4d 载体 `postCommitReview` / `postIssueReview`、`CommentSource` 的 PR/commit/issue 账本方法。
 - 账本标记格式原样移植 05§1.3（`v=2.1`、finding/run 两类标记、末位规则、DONE|DEGRADED），解析器在本模块独立持有并保留 100% 分支覆盖门禁；**不自造格式**。
-- **第二半已接线**（ADR-0012）：
+- **第二半已接线**（ADR-0013）：
   - CLI：`--platform github|gitlab` / `CRA_GIT_PLATFORM`（默认 github）；`cra review` 与 `cra sweep` 按平台装配 adapter + `CommentSource`；
   - server：`CRA_SERVER_PLATFORM=github|gitlab`；GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 + MR 事件映射 + delivery 幂等）。
 - 已验证：`mvn -B -ntp verify` 全绿；GitLab adapter 端点契约测试（WireMock 录制回放，22 例）；fixture 端到端（发布 → 同 commit 账本命中 → 零重复，1 例）；CLI 平台接线（`--platform gitlab` → GitLab adapter + GitLab `CommentSource` → 账本幂等）；server GitLab webhook HTTP 集成（需要 PG 的 5 例：202/duplicate、update 映射、401/400、非 MR 忽略、平台端点与健康检查）。

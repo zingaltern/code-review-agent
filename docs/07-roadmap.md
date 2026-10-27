@@ -1,6 +1,6 @@
 # 07 · 实施路线图与任务拆解
 
-> 文档版本：v1.7（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0012）；真实写操作 pending）
+> 文档版本：v1.7（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.6（2026-10-27，M4e 第一半：cra-git-gitlab 适配器 + ADR-0011 + GitLab 边界表落地记录）
 > 文档版本：v1.5（2026-10-27，M4 收口：M4a/M4b/M4c/M4d 合入 + context 用例 2→6 + 官方 L3 全量重跑）
 > 文档版本：v1.4（2026-10-26，M4b 服务化落地 + M4c push 直推 + M4d 夜间存量落地记录与验收证据）

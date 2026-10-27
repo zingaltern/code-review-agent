@@ -8,7 +8,7 @@ import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 
 /**
- * Git 平台选择与 GitLab 连接参数解析（M4e 第二半；ADR-0012）。
+ * Git 平台选择与 GitLab 连接参数解析（M4e 第二半；ADR-0013）。
  *
  * <p>平台优先级：`--platform` &gt; `CRA_GIT_PLATFORM` &gt; `github`（默认保持既有行为）。GitLab 的仓库标识、token 与 API
  * 根沿用 GitLab CI 变量；token 只认环境变量/文件，命令行 `--token` 仅属于 GitHub（避免跨平台串用密钥）。

@@ -30,7 +30,7 @@
       <groupId>org.cra</groupId>
       <artifactId>cra-git-github</artifactId>
     </dependency>
-    <!-- M4e 第二半（ADR-0012）：平台选择；GitLab 实现与 github 实现互不依赖 -->
+    <!-- M4e 第二半（ADR-0013）：平台选择；GitLab 实现与 github 实现互不依赖 -->
     <dependency>
       <groupId>org.cra</groupId>
       <artifactId>cra-git-gitlab</artifactId>

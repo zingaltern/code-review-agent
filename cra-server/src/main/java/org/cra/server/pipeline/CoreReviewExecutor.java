@@ -52,7 +52,7 @@ public final class CoreReviewExecutor implements ReviewExecutor {
 
   /**
    * @param dataSource PG 连接池（账本）
-   * @param adapter Git 平台适配器（GitHub 或 GitLab，ADR-0012）
+   * @param adapter Git 平台适配器（GitHub 或 GitLab，ADR-0013）
    * @param gateway LLM 网关
    * @param crew 评审班组
    * @param verifier 验证子代理

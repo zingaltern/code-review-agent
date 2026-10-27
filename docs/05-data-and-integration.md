@@ -1,6 +1,6 @@
 # 05 · 数据模型与集成设计
 
-> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0012）；调试/契约不变）
+> 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；调试/契约不变）
 > 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ①③④⑥）
 > **v1.1**：SPI 增加本地 jgit blame；账本指纹规范；锚定校验与逐条降级；安全检查单扩充。
@@ -310,7 +310,7 @@ cra review --push --repo "$GITHUB_REPOSITORY" --head "$GITHUB_SHA" \
 # 夜间存量评审（M4d，05§2.5；产出 issue，扫描范围可配）
 cra sweep --repo owner/name --since 30d --max-prs 10 --depth quick --token "$GITHUB_TOKEN" [--dry-run]
 
-# GitLab CI 模式（M4e 第二半，ADR-0012；token 只认 CRA_GITLAB_TOKEN / _FILE）
+# GitLab CI 模式（M4e 第二半，ADR-0013；token 只认 CRA_GITLAB_TOKEN / _FILE）
 cra review --platform gitlab --gitlab-project "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID" \
   --base "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --depth standard
 
@@ -476,7 +476,7 @@ cra:
     review-policy-source: base      # v1.1：固定 base，禁 head（04§3.2）
 ```
 
-**平台选择（M4e 第二半，ADR-0012）**：平台不是 `application.yml` 的模型配置，而是组合根启动参数（平台实现模块互不依赖，11§4）：
+**平台选择（M4e 第二半，ADR-0013）**：平台不是 `application.yml` 的模型配置，而是组合根启动参数（平台实现模块互不依赖，11§4）：
 
 | 变量 | 作用 | 默认 |
 |---|---|---|

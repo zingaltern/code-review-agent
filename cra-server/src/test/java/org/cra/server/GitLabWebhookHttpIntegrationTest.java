@@ -33,7 +33,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * GitLab webhook 服务端端到端（M4e 第二半，ADR-0012；需要 PG：CI service 容器经 CRA_TEST_PG_URL）。
+ * GitLab webhook 服务端端到端（M4e 第二半，ADR-0013；需要 PG：CI service 容器经 CRA_TEST_PG_URL）。
  *
  * <p>覆盖：`/webhooks/gitlab` 验签 → MR 事件映射 → 入队 → 异步执行（假执行器写 PG 完成标记）→ 同 event UUID 幂等； 错 token
  * 401、缺头/非法 payload 400、非 MR 事件 200 显式 ignored、GitHub 端点未注册 404、`/healthz` 声明平台。
