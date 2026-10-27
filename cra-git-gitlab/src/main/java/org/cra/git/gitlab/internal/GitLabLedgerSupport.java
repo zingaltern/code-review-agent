@@ -14,7 +14,7 @@ import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser;
 import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser.MarkerParseResult;
 import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser.ParseOutcome;
 
-/** 账本标记解析与 commit comment 合成 id 的纯辅助（05§1.3 规则原样移植，ADR-0009 决策 7）。 */
+/** 账本标记解析与 commit comment 合成 id 的纯辅助（05§1.3 规则原样移植，ADR-0011 决策 7）。 */
 final class GitLabLedgerSupport {
 
   private GitLabLedgerSupport() {}
@@ -62,7 +62,7 @@ final class GitLabLedgerSupport {
   }
 
   /**
-   * GitLab commit comment 无平台 id（ADR-0009 决策 7）：由 `sha + 正文` 生成稳定的本地合成 id。
+   * GitLab commit comment 无平台 id（ADR-0011 决策 7）：由 `sha + 正文` 生成稳定的本地合成 id。
    *
    * <p>发布侧与回放侧使用同一函数，因此完成标记的 commentId 可在同 commit 重跑时命中；该 id 不是平台标识， 不可用于编辑/删除评论。
    *

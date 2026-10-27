@@ -1,6 +1,6 @@
 # 10 · 架构规范
 
-> 文档版本：v1.2（2026-10-27，M4e 第一半：矩阵新增 cra-git-gitlab 行列 + R4 实现互不依赖 + 包结构表，ADR-0009）
+> 文档版本：v1.2（2026-10-27，M4e 第一半：矩阵新增 cra-git-gitlab 行列 + R4 实现互不依赖 + 包结构表，ADR-0011）
 > 文档版本：v1.1（2026-10-26，M4b：cra-server 行生效 + R1/R3/R6 扩展 + 包结构表，ADR-0008）
 > 文档版本：v1.0.3（2026-10-26，本轮治理：cra-common 子包列表同步 + 生产侧 god class 行数基线更新）
 > 文档版本：v1.0.2（2026-10-25，M0 实现撞墙定点修订：R1 片段 Infra 行补 Eval——10§2 矩阵与 ADR-0005 放开的 cra-eval→git(+git-gh) ✅ 会被旧片段层规则误判红，矩阵是单一事实源）
@@ -69,7 +69,7 @@ org.cra.<module>/
 | cra-llm | `LlmGateway` + 降级结果对象（02§4.2） | `routing` / `retry` / `concurrency` / `cost`（02§4.5） |
 | cra-git | `GitPlatformAdapter`、`LocalRepoContext`（05§2.1） | jgit blame 实现 |
 | cra-git-github | 包名 `org.cra.git.github`（09§3）；api = 装配工厂 | `http`、账本标记解析（05§1.3）、锚定校验（05§2.2） |
-| cra-git-gitlab | 包名 `org.cra.git.gitlab`（09§3）；api = 装配工厂 | `http`、账本标记解析（05§1.3，独立复制）、GitLab 端点映射与锚定三元组（ADR-0009） |
+| cra-git-gitlab | 包名 `org.cra.git.gitlab`（09§3）；api = 装配工厂 | `http`、账本标记解析（05§1.3，独立复制）、GitLab 端点映射与锚定三元组（ADR-0011） |
 | cra-context | `ContextAssembler` | `diff` / `window` / `slice` / `budget`（04§1） |
 | cra-agents | `SubAgent`、`AgentRole`、`ToolWhitelist`、`Budget` 定义（03§1） | 角色绑定与模板装载；prompt 资源在 `resources/prompts/`（04§4、11§2） |
 | cra-store | `ReviewLedger`（02§5、05§1.5） | `sqlite` / GitHub 评论账本 / `postgres`（M4b） |

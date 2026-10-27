@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.regex.Pattern;
 
 /**
- * GitLab payload 的纯解析/编码辅助：严格 UTF-8、glob→regex、项目与文件路径编码（ADR-0009）。
+ * GitLab payload 的纯解析/编码辅助：严格 UTF-8、glob→regex、项目与文件路径编码（ADR-0011）。
  *
  * <p>GitLab 要求项目路径与文件完整路径整体 URL 编码（`group%2Fproject`、`src%2Fmain%2FFoo.java`）， 因此不能复用按段拼接的 GitHub
  * 编码。

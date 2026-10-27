@@ -45,7 +45,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * GitLab adapter 端点契约测试（WireMock stub 即端点契约文档，08§8.1；ADR-0009 端点映射）。
+ * GitLab adapter 端点契约测试（WireMock stub 即端点契约文档，08§8.1；ADR-0011 端点映射）。
  *
  * <p>端点形状对照 GitLab REST v4 官方文档核查：compare / repository files(raw) / repository tree / merge request
  * discussions / merge request notes / versions / commit comments / issues / emoji reactions。 项目路径按
@@ -233,7 +233,7 @@ class GitLabHttpAdapterWireMockTest {
             .willReturn(createdJson("{\"id\":9500}")));
 
     PrReviewResult result = adapter.postReview(command(2));
-    assertThat(result.reviewId()).isEmpty(); // GitLab 无 review 聚合对象（ADR-0009 决策 5）
+    assertThat(result.reviewId()).isEmpty(); // GitLab 无 review 聚合对象（ADR-0011 决策 5）
     assertThat(result.summaryCommentId()).contains(9500L);
     assertThat(result.items())
         .extracting(ReviewItemResult::publishStatus)

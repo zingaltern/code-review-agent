@@ -39,7 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * GitLab REST v4 实现（ADR-0009 端点映射）：compare diff / repository files / MR discussions（inline）/ MR
+ * GitLab REST v4 实现（ADR-0011 端点映射）：compare diff / repository files / MR discussions（inline）/ MR
  * notes（Summary）/ commit comments / issues / 账本拉取。
  *
  * <p>与 GitHub 实现的结构差异：GitLab 没有"整包 review"对象，inline 逐条建 discussion；diff 锚定需要 base/head/start
@@ -88,7 +88,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                 + "&to="
                 + GitLabPayloadSupport.urlEncode(headSha));
     if (root.path("compare_timeout").asBoolean(false)) {
-      // 部分 diffs 不静默评审（ADR-0009 决策 11）：宁可失败也不产生覆盖声明造假的报告
+      // 部分 diffs 不静默评审（ADR-0011 决策 11）：宁可失败也不产生覆盖声明造假的报告
       throw new CraIntegrationException(
           "GitLab compare timed out for " + baseSha + "..." + headSha + "（partial diffs refused）");
     }
@@ -207,7 +207,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     }
     // Summary 最后发：其 DONE 标记是"完整发布"证据；失败 = 无标记 = 重跑走指纹级补发（02§4.1）
     Optional<Long> summaryId = postSummary(cmd);
-    // GitLab 无 review 聚合对象：reviewId 显式缺省（ADR-0009 决策 5）
+    // GitLab 无 review 聚合对象：reviewId 显式缺省（ADR-0011 决策 5）
     return new PrReviewResult(cmd.prNumber(), Optional.empty(), summaryId, items);
   }
 
@@ -276,7 +276,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   /**
    * 解析 diff 锚定三元组：优先 MR 的 `diff_refs`；被评审 head 不是当前 head 时从 versions 中找同一 head 的版本；都不可得返回
-   * null（逐条降级进 Summary，ADR-0009 决策 5）。
+   * null（逐条降级进 Summary，ADR-0011 决策 5）。
    */
   private DiffRefs resolveDiffRefs(PostReviewCommand cmd) {
     RepoRef repo = new RepoRef(cmd.repoOwner(), cmd.repoName());
@@ -342,7 +342,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
         cmd.repoName(),
         "/repository/commits/" + GitLabPayloadSupport.urlEncode(cmd.commitSha()) + "/comments",
         payload);
-    // GitLab 不返回 comment id（ADR-0009 决策 7）：返回稳定合成 id，供核心判定"完整发布"
+    // GitLab 不返回 comment id（ADR-0011 决策 7）：返回稳定合成 id，供核心判定"完整发布"
     return Optional.of(GitLabLedgerSupport.syntheticCommitCommentId(cmd.commitSha(), cmd.body()));
   }
 
@@ -352,7 +352,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     payload.put("title", cmd.title());
     payload.put("description", cmd.body());
     if (!cmd.labels().isEmpty()) {
-      // GitLab labels 为逗号分隔；缺失标签会被自动创建（ADR-0009 决策 8）
+      // GitLab labels 为逗号分隔；缺失标签会被自动创建（ADR-0011 决策 8）
       payload.put("labels", String.join(",", cmd.labels()));
     }
     JsonNode response = transport.postJson(cmd.repoOwner(), cmd.repoName(), "/issues", payload);
@@ -559,7 +559,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
    *
    * <p>GitLab reply 没有 `in_reply_to_id`，线程关系由 discussion 表达；reaction 走 note 的 award_emoji
    * （`thumbsup`/`thumbsdown`）。discussion `resolved` 虽在 REST 可得，但 DispositionSignal 模型无该类别，
-   * 本轮不采（ADR-0009 决策 10）。
+   * 本轮不采（ADR-0011 决策 10）。
    */
   @Override
   public DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber) {

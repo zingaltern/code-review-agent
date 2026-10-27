@@ -1,4 +1,4 @@
-# ADR-0009 GitLab 平台适配（M4e 第一半：新实现模块，不改 SPI 签名）
+# ADR-0011 GitLab 平台适配（M4e 第一半：新实现模块，不改 SPI 签名）
 
 - 状态：accepted（2026-10-27，M4e 第一半实现随本 ADR 落地；Gerrit 与语义索引不在本 ADR 范围）
 - 背景：11§2 已把 Git 平台适配登记为稳定扩展点，05§2.1 的 `GitPlatformAdapter` 与 `CommentSource` 只约束 common POJO。GitLab 与 GitHub 在 diff 端点、评论载体、锚定参数、分页与限流上均不同；照抄 GitHub 实现会产出"看起来能跑、锚定全错"的适配器。本 ADR 先钉死平台事实与差异，再落 `cra-git-gitlab`（11§6 checklist 第 3 步）。

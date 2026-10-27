@@ -1,6 +1,6 @@
 # GitLab 适配与部署边界（M4e 第一半）
 
-> 依据：ADR-0009、11§6（新 Git 平台接入 checklist）、05§2.1–§2.5、02§5。本文是 GitLab 平台事实的**主载体**；11§2 与 README 只做一句话指回。
+> 依据：ADR-0011、11§6（新 Git 平台接入 checklist）、05§2.1–§2.5、02§5。本文是 GitLab 平台事实的**主载体**；11§2 与 README 只做一句话指回。
 > 适用范围：`cra-git-gitlab` 适配器模块（`GitPlatformAdapter` + `CommentSource`）。**M4e 第一半不改 CLI/server 的平台选择**，真实 GitLab 写操作尚无 owner token，未做线上验证（见 §7）。
 
 ---
@@ -79,7 +79,7 @@
 | push 直推（M4c） | `(repo, commit)`（pr=0） | 单条 commit comment | `POST/GET /repository/commits/{sha}/comments`；一条评论只承载一个末位 run 标记，无 finding 级标记；**评论无平台 id → 合成 id** |
 | 夜间存量（M4d） | `(repo, commit)` | 单条 issue | `POST /issues`（`description`）；`GET /issues?author_username=` 拉 bot issue，按标记内 `commit=` 过滤；`iid` 作载体 id |
 
-**commit comment 合成 id（ADR-0009 决策 7）**：GitLab commit comment 响应没有评论 id。适配器用 `sha256(sha + "\n" + note)` 前 15 位十六进制生成正整数，发布与回放使用同一函数；该 id 只用于本地映射，**不可用于编辑/删除评论**。合成 id 让 `postCommitReview` 能返回非空 id（核心据此判定"完整发布"），并使同 commit 重放的 DONE 闸命中。
+**commit comment 合成 id（ADR-0011 决策 7）**：GitLab commit comment 响应没有评论 id。适配器用 `sha256(sha + "\n" + note)` 前 15 位十六进制生成正整数，发布与回放使用同一函数；该 id 只用于本地映射，**不可用于编辑/删除评论**。合成 id 让 `postCommitReview` 能返回非空 id（核心据此判定"完整发布"），并使同 commit 重放的 DONE 闸命中。
 
 **denoising**：MR discussions 中 bot 的回复也会被收集，但只有末位合法标记参与账本；`status=SYSTEM`/`system=true` 的事件不参与；同一 note id 去重。
 
@@ -93,10 +93,10 @@
 | commit comment 列表分页 | **文档未声明** | 使用通用 offset `page/per_page`；真实平台需复核 |
 | 账本标记的 HTML 注释保留 | **待真实验证** | 账本依赖 note/description 原文中的 `<!-- cra:... -->`；GitLab API 原文通常保留，但渲染/净化行为需真实实例确认（fixture 假定保留） |
 | award emoji 名称 | **文档未枚举** | 按 GitLab emoji 全集的 `thumbsup`/`thumbsdown` 实现；真实平台待核验 |
-| discussion `resolved` | **可得但不采** | GitLab REST 有 `resolvable/resolved`；`DispositionSignal` 模型无 resolve 类别，不新增 common 类型（ADR-0009 决策 10） |
+| discussion `resolved` | **可得但不采** | GitLab REST 有 `resolvable/resolved`；`DispositionSignal` 模型无 resolve 类别，不新增 common 类型（ADR-0011 决策 10） |
 | 合并事件回填 | **不在适配器** | `CommentSource` 无该数据面；与 GitHub 实现同口径 |
 | 冲突 MR 是否触发 | **文档未声明，待验证** | MR pipeline 只依赖源分支内容 → 推断不阻断；真实实例确认前按"可能触发"配置 |
-| `compare_timeout` | **明确失败** | 部分 diffs 不静默评审（ADR-0009 决策 11） |
+| `compare_timeout` | **明确失败** | 部分 diffs 不静默评审（ADR-0011 决策 11） |
 | 应用级限流 | **429 无头也可能发生** | 退避 ≤3 次后如实失败；不假装无限制 |
 | Gerrit / 语义索引 | **未做** | 本任务明确排除；M4e 第二半/后续里程碑 |
 
@@ -133,4 +133,4 @@ ReviewLedger ledger =
 - [ ] fork MR 场景已确认 secrets/父项目权限边界；
 - [ ] 首次 push 形态评审已显式给 `--base`（本地无 checkout 时 CLI 拒绝猜基线，05§2.4）；
 - [ ] `--dry-run` 实跑一次并确认零写（WireMock 契约测试已断言读路径只有 GET）；
-- [ ] 真实写操作（review/commit comment/issue）在 owner token 到位后按 ADR-0009 待验证清单逐项核验。
+- [ ] 真实写操作（review/commit comment/issue）在 owner token 到位后按 ADR-0011 待验证清单逐项核验。

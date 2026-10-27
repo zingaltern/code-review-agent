@@ -48,7 +48,7 @@
 
 ## 3. 命名约定
 
-包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-git-gitlab → org.cra.git.gitlab`（M4e，ADR-0009）、`cra-runner-cli → org.cra.runner.cli`、`cra-archtest → org.cra.archtest`（v1 基线补登，第五轮缺陷②））；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
+包名【强制】：`org.cra.<module>`（`cra-common → org.cra.common`、`cra-git-github → org.cra.git.github`、`cra-git-gitlab → org.cra.git.gitlab`（M4e，ADR-0011）、`cra-runner-cli → org.cra.runner.cli`、`cra-archtest → org.cra.archtest`（v1 基线补登，第五轮缺陷②））；跨模块共享类型只允许放 `org.cra.common`（02§3 依赖方向）。
 
 类名后缀语义表【强制】——新类型取名先查此表，与既有类型对齐：
 

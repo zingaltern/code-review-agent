@@ -16,7 +16,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * GitLab REST v4 HTTP 基础设施（ADR-0009）：`PRIVATE-TOKEN` 认证、项目路径编码、GET/POST/PUT 发送、 429/带 Retry-After 的
+ * GitLab REST v4 HTTP 基础设施（ADR-0011）：`PRIVATE-TOKEN` 认证、项目路径编码、GET/POST/PUT 发送、 429/带 Retry-After 的
  * 403 退避（≤3 次）与 `RateLimit-Remaining` 告警。
  *
  * <p>本类不认识 diff/评论/处置语义，只负责把一次请求可靠送达；分页头 `X-Next-Page` 原样交给调用方。

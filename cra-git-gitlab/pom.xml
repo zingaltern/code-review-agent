@@ -11,7 +11,7 @@
 
   <artifactId>cra-git-gitlab</artifactId>
   <name>cra-git-gitlab</name>
-  <description>GitLab 实现（M4e，ADR-0009）：compare diff / repository files / MR discussions / notes / commit comments / issues / 账本标记解析；不依赖 cra-git-github</description>
+  <description>GitLab 实现（M4e，ADR-0011）：compare diff / repository files / MR discussions / notes / commit comments / issues / 账本标记解析；不依赖 cra-git-github</description>
 
   <dependencies>
     <dependency>

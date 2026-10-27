@@ -26,7 +26,7 @@ public final class GitLabAssembly {
    * 创建 GitLab 组件（带 bot 身份回退）。
    *
    * <p>GitLab CI job token 通常不能读 `GET /user`，此时必须显式给出 bot 用户名（如 project access token 对应的 bot
-   * 用户），否则适配器拒绝把任何评论当账本（ADR-0009 决策 3）。
+   * 用户），否则适配器拒绝把任何评论当账本（ADR-0011 决策 3）。
    *
    * @param apiBase API 根地址（null/空白取 {@link #DEFAULT_API_BASE}）
    * @param token GitLab access token
