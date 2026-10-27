@@ -9,6 +9,7 @@ import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
+import org.cra.common.event.EventHistoryQuery;
 import org.cra.common.run.Depth;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
@@ -16,6 +17,7 @@ import org.cra.core.api.CoreAssembly;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SignoffOptions;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
 import org.cra.llm.api.LlmGateway;
@@ -45,6 +47,7 @@ public final class CoreReviewExecutor implements ReviewExecutor {
   private final LocalRepoContext localRepoContext;
   private final PipelineOptions pipelineOptions;
   private final CrossCheckerOptions crossCheckerOptions;
+  private final EventHistoryQuery eventHistoryQuery;
   private final Path runRoot;
   private final Depth depth;
   private final boolean dryRun;
@@ -60,6 +63,7 @@ public final class CoreReviewExecutor implements ReviewExecutor {
    * @param localRepoContext 本地仓库上下文（无 checkout 为空形态）
    * @param pipelineOptions 编排参数
    * @param crossCheckerOptions CrossChecker 配置
+   * @param eventHistoryQuery 事件史查询端口（M4f-full；null = 未装配）
    * @param config 服务配置（深度/runRoot/dryRun）
    */
   public CoreReviewExecutor(
@@ -72,6 +76,7 @@ public final class CoreReviewExecutor implements ReviewExecutor {
       LocalRepoContext localRepoContext,
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
+      EventHistoryQuery eventHistoryQuery,
       ServerConfig config) {
     this.dataSource = dataSource;
     this.adapter = adapter;
@@ -82,6 +87,7 @@ public final class CoreReviewExecutor implements ReviewExecutor {
     this.localRepoContext = localRepoContext;
     this.pipelineOptions = pipelineOptions;
     this.crossCheckerOptions = crossCheckerOptions;
+    this.eventHistoryQuery = eventHistoryQuery;
     this.runRoot = config.runRoot();
     this.depth = Depth.valueOf(config.reviewDepth().toUpperCase(Locale.ROOT));
     this.dryRun = config.dryRun();
@@ -141,6 +147,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
         runRoot,
         pipelineOptions,
         localRepoContext,
-        crossCheckerOptions);
+        crossCheckerOptions,
+        SignoffOptions.disabled(),
+        eventHistoryQuery);
   }
 }

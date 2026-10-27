@@ -62,6 +62,31 @@ class ContextCitationTest {
   }
 
   @Test
+  void parsesEventRefsInsideCitationBlockOnly() {
+    String evidence =
+        """
+        L10: 超时假设与产品事件矛盾
+        正文里提到 event loop 不算引用。
+        矛盾来源：
+        - event INC-42 — 2026-08-14 会话超时事故
+        - event: TICKET-7 说明
+        - event INC-42 — 重复引用去重
+        """;
+
+    List<ContextCitation.EventRef> refs = ContextCitation.eventRefs(evidence);
+
+    assertThat(refs)
+        .extracting(ContextCitation.EventRef::eventId)
+        .containsExactly("INC-42", "TICKET-7");
+  }
+
+  @Test
+  void eventRefsEmptyWithoutCitation() {
+    assertThat(ContextCitation.eventRefs("普通证据 L3: event loop 里没有异常")).isEmpty();
+    assertThat(ContextCitation.eventRefs(null)).isEmpty();
+  }
+
+  @Test
   void noCitationYieldsEmptyLists() {
     assertThat(ContextCitation.commitRefs("普通证据 L3: x", "src/Foo.java")).isEmpty();
     assertThat(ContextCitation.reviewMdRefs("普通证据")).isEmpty();

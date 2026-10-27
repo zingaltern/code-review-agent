@@ -6,6 +6,7 @@
 > **v1.2.1**：三功能框架映射（01§3.4）；CrossChecker 角色占位。
 > **v1.3**：§3.1 CrossChecker 两模式详设；A/B 赛马映射；轮次打回语义。
 > **v1.3.1**：§3.1 修正"输入不含 diff"的自我矛盾表述（diff 参与假设推导，本质区别是**额外上下文输入 + 检查对象不同**）+ 局限声明（切片启发式，召回无保证）；**§4.2 verifier/judge brief 按 category 分型组装**（context 类注入 cited commit diff 节选与 REVIEW.md 条目——否则验证层对 context 证据失明，必然 INSUFFICIENT→拒杀）；§6 补 CrossChecker 预算行。
+> **v1.4**（2026-10-27，M4f-full，ADR-0012）：§3.1 模式 A 输入 b 增**产品事件史**（工单/事故复盘 JSONL → PG）；§4.2 context 类增事件条目预取与 `event <id>` 引用；§6 预算行改为"变更史/事件史合计 ≤4k"。
 
 ## 0. 三功能框架映射（框架与案例见 01§3.4）
 
@@ -83,7 +84,7 @@ interface SubAgent<I, O> {
 | TestReviewer | 逻辑文件变更且测试变更比例低 | diff + 测试目录结构 | 测试缺口类 |
 | ConventionReviewer | REVIEW.md 定义约定时 | diff + REVIEW.md 约定段 | 约定违反（多为 nit） |
 | PerfReviewer | Deep 或命中 perf 路径 | diff + 热点标注 | 性能风险类 |
-| **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full | **diff（假设推导用）+ 额外上下文输入**：上下游变更史、产品背景段（见 §3.1） | "代码本身正确但与上下文假设矛盾"类 finding（category=context） |
+| **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full | **diff（假设推导用）+ 额外上下文输入**：上下游变更史、产品背景段、产品事件史（M4f-full，ADR-0012） | "代码本身正确但与上下文假设矛盾"类 finding（category=context） |
 
 Reviewer prompt 原则（模板见 04）：
 
@@ -103,12 +104,14 @@ Reviewer prompt 原则（模板见 04）：
   a. 本次变更 diff 的精简视图（hunk 头 + 增删行，用于推导隐含假设）
   b. 上下游路径近期变更史：jgit log 近 N 周（默认 8）内，
      调用方/被调方路径（依赖切片同源的路径集）的 commit 摘要
+     + 产品事件史（M4f-full，ADR-0012）：与变更路径/commit/关键词相关的
+       工单/事故复盘摘要（服务端 PG，近 N 周，最多 20 条）
   c. REVIEW.md 产品背景段（04§3.1：Product context / Known incidents）
 
 流程：从 a 推导隐含假设清单（超时/容量/并发/顺序/环境类）
   → 对每个假设检索 b/c 中近期的矛盾事件
   → 命中即产出 finding（category=context，默认 important 档，引用矛盾事件
-     的具体来源：commit sha 或 REVIEW.md 条目——证据规则与 §3 相同）
+     的具体来源：commit sha / event id / REVIEW.md 条目——证据规则与 §3 相同）
 ```
 
 **模式 B：嗅探检查集执行（sniff test set）**
@@ -120,9 +123,9 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 **分阶段落地（07 M4f）**：
 
 - **M4f-lite**：模式 A 的 b（git 变更史）+ c（REVIEW.md 段落）+ 模式 B——**零服务依赖**（jgit 在 CI checkout 已有，REVIEW.md 在仓库内），与现有流水线同构；
-- **M4f-full**：产品事件史采集管道（工单/事故复盘结构化入库）依赖 M4b 服务化定时任务，覆盖"检索矛盾事件"的完整数据面。
+- **M4f-full**（2026-10-27 落地，ADR-0012）：产品事件史采集管道——`EventHistorySource`（JSONL 本地/对象存储）→ `IncrementalEventHistoryCollector`（窗口/水位/幂等/有上限重试）→ PG `product_event` → `EventHistoryQuery` 检索 → CrossChecker 材料注入 + verifier/judge 按 `event <id>` 预取。**默认关闭**（`CRA_SERVER_EVENT_HISTORY_ENABLED=false`）；Jira/Confluence 等连接器是实现 `EventHistorySource` 的后续扩展，不在第一版。tribal knowledge 不可见仍是硬边界（01§3.4）。
 
-**信任与隔离**：REVIEW.md 产品背景段沿用 base 分支读取 + owner 审批信任模型（04§3.2）；上下游 commit message 属不可信输入，UNTRUSTED 定界（04§3.3）；CrossChecker 产出的 finding 走与其他角色相同的验证晋升管线（§4，**brief 按 category 分型组装见 §4.2**）——cross check 的发现同样要过 double check，不享有免检。
+**信任与隔离**：REVIEW.md 产品背景段沿用 base 分支读取 + owner 审批信任模型（04§3.2）；上下游 commit message 与产品事件摘要属不可信输入，UNTRUSTED 定界（04§3.3）；事件 `raw_json` 只入库、不注入 brief；CrossChecker 产出的 finding 走与其他角色相同的验证晋升管线（§4，**brief 按 category 分型组装见 §4.2**）——cross check 的发现同样要过 double check，不享有免检。
 
 ## 4. 评判层：独立复核 Verifier 与仲裁 Judge（v1.1 重写）
 
@@ -139,7 +142,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 **输入（v1.3.1：按 category 分型组装）**：
 
 - **代码类**（bug/security/test/convention/performance）：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段；
-- **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
+- **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ 被引事件史条目（M4f-full，ADR-0012：按 `event <id>` 预取摘要/类型/时间/来源/commit_refs/paths，每批 ≤5 条、≤1.5k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
 
 - **test 类（v1.3.2 新增分型）**：finding 全文 + 变更文件上下文 + **仓库测试文件清单**（head 侧 `listFiles("**/test/**/*.java")`，≤80 行，超出注明总数）。理由（M3 取证）：test 类 finding 的核心主张「某行为无测试覆盖」是**负向/全局主张**——验证上下文只有 main 文件时无法证否 → 必然 INSUFFICIENT → Judge 按证据不足拒（L3 实测 judge 的 53 条 REJECTED 中 48 条为此类）。注入清单后验证者能核对「是否已有覆盖」，未列出的行为走 followup_file 受控补查。清单不可得（listFiles 失败）→ 降级为空并记 trace `test_index`（available=false），验证按原形态进行、结论如实标注。
 
@@ -236,7 +239,7 @@ for (var e : byFile.entrySet()) {
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
 | VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |
 | JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier） | ≤1k | 2 |
-| **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
+| **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k；v1.4 事件史） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。
 

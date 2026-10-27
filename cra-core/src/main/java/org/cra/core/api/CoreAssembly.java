@@ -5,6 +5,7 @@ import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
+import org.cra.common.event.EventHistoryQuery;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
 import org.cra.llm.api.LlmGateway;
@@ -106,6 +107,40 @@ public final class CoreAssembly {
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions,
       SignoffOptions signoffOptions) {
+    return createOrchestrator(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        crossCheckerOptions,
+        signoffOptions,
+        null);
+  }
+
+  /**
+   * 创建 M4f-full 形态编排器（追加事件史查询端口；null = 未装配，CrossChecker 声明事件史不可得）。
+   *
+   * @param eventHistoryQuery 事件史检索端口（ADR-0012）
+   * @return Orchestrator
+   */
+  public static Orchestrator createOrchestrator(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
+      EventHistoryQuery eventHistoryQuery) {
     return new org.cra.core.internal.ReviewPipeline(
         adapter,
         ledger,
@@ -117,6 +152,7 @@ public final class CoreAssembly {
         options == null ? PipelineOptions.defaults() : options,
         localRepoContext,
         crossCheckerOptions,
-        signoffOptions == null ? SignoffOptions.defaults() : signoffOptions);
+        signoffOptions == null ? SignoffOptions.defaults() : signoffOptions,
+        eventHistoryQuery);
   }
 }

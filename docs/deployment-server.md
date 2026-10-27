@@ -1,7 +1,8 @@
 # cra-server 部署形态（M4b 服务化）
 
-> 依据：02§5（部署形态与状态归属）、07§5 M4b/M4e、ADR-0008/ADR-0013。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
+> 依据：02§5（部署形态与状态归属）、07§5 M4b/M4e/M4f-full、ADR-0008/0012/0013。本文是服务化形态的**操作手册**：怎么起、配什么、怎么检查、怎么停机、有哪些边界。
 > 适用读者：部署本服务的 owner / 运维。评审逻辑本身见 02/03/04，不在本文重复；GitLab 平台事实见 `deployment-gitlab.md`。
+> **M4f-full**：事件史采集（默认关闭）与 CrossChecker 检索/引用见 §1、§3、§5.1、§7。
 
 ---
 
@@ -9,15 +10,21 @@
 
 ```
 GitHub ──webhook(HMAC)──┐
+GitLab ──webhook(token)─┤
                         ├─▶ cra-server
-GitLab ──webhook(token)─┘      ├─ WebhookController / GitLabWebhookController（按平台注册）
-                               │     └─ 验签 → PR/MR 事件子集解析
-                               ├─ WebhookIngestService（delivery 幂等 claim → 有界队列）
-                               ├─ ReviewQueue（有界 + 背压 + 固定 worker）
-                               │     └─ ReviewJobHandler → CoreReviewExecutor
-                               │            └─ cra-core ReviewPipeline（与 CLI 同一实现）
-                               ├─ PostgreSQL 账本（cra-store PostgresLedger，05§1.5 五表）
-                               └─ AttestationController（/api/v1/reports/attest，HMAC 报告签名）
+                        │      ├─ WebhookController / GitLabWebhookController（按平台注册）
+                        │      │     └─ 验签 → PR/MR 事件子集解析
+                        │      ├─ WebhookIngestService（delivery 幂等 claim → 有界队列）
+                        │      ├─ ReviewQueue（有界 + 背压 + 固定 worker）
+                        │      │     └─ ReviewJobHandler → CoreReviewExecutor
+                        │      │            └─ cra-core ReviewPipeline（与 CLI 同一实现）
+                        │      ├─ PostgreSQL 账本（cra-store PostgresLedger，05§1.5 五表）
+                        │      ├─ 事件史（M4f-full，ADR-0012）
+                        │      │     ├─ EventHistoryCollectionJob（cron，默认关闭）
+                        │      │     ├─ IncrementalEventHistoryCollector ← EventHistorySource（JSONL 本地/HTTP(S)）
+                        │      │     ├─ product_event / event_collection_checkpoint（server.sql）
+                        │      │     └─ EventHistoryQuery → CrossChecker 材料 + event 引用预取
+                        │      └─ AttestationController（/api/v1/reports/attest，HMAC 报告签名）
 ```
 
 - **第二组合根**：cra-server 与 cra-runner-cli 只是两种壳（02§5），评审逻辑完全复用 core；**平台由 `CRA_SERVER_PLATFORM` 在装配期决定**（M4e 第二半，ADR-0013），只注册当前平台的 webhook 端点；
@@ -25,6 +32,7 @@ GitLab ──webhook(token)─┘      ├─ WebhookController / GitLabWebhookC
 - **队列**：进程内有界队列（不引入外部 broker，理由见 ADR-0008）；满时 HTTP 503 → 平台按同一 delivery/event 重投；
 - **幂等**：delivery id（PG 唯一键）挡重复投递（GitLab 用 `X-Gitlab-Event-UUID`，缺失时用 payload 摘要）；core 的 commit 闸 + 指纹账本挡同 head 重跑（02§4.1）；
 - **签名报告**：服务端对 L2 报告签发 HMAC 信封，`cra-eval verify --signature` 校验（04§2.4）。
+- **事件史（M4f-full，ADR-0012）**：默认关闭。开启后按 cron 从 JSONL 来源增量采集工单/事故复盘到 `product_event`；CrossChecker（`CRA_CROSSCHECKER_ENABLED=true`）按变更路径/commit/关键词检索并注入 brief，验证层按 `event <id>` 预取事件条目。采集失败（来源/入库重试耗尽）如实记录 `executed=false`，不阻断评审。
 
 ## 2. 快速启动（docker-compose）
 
@@ -104,8 +112,15 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 | `CRA_CROSSCHECKER_ENABLED` | 否 | `false` | M4f-lite CrossChecker |
 | `CRA_CROSSCHECKER_MODES` | 否 | `assumption,sniff` | 模式开关 |
 | `CRA_CROSSCHECKER_HISTORY_WEEKS` | 否 | `8` | 变更史回溯周数 |
-| `CRA_SERVER_EVENT_HISTORY_ENABLED` | 否 | `false` | M4f-full 事件史采集骨架开关 |
-| `CRA_SERVER_EVENT_HISTORY_CRON` | 否 | `0 0 3 * * *` | 采集 cron（Spring 六段式） |
+| `CRA_SERVER_EVENT_HISTORY_ENABLED` | 否 | `false` | 事件史采集开关（M4f-full，ADR-0012）；开启时 `SOURCE` 必填（fail closed） |
+| `CRA_SERVER_EVENT_HISTORY_CRON` | 否 | `0 0 3 * * *` | 采集 cron（Spring 六段式；组装期 `CronExpression` 校验） |
+| `CRA_SERVER_EVENT_HISTORY_SOURCE` | 开启时必填 | — | JSONL 来源：本地路径 / `file:` URI / `http(s)` 预签名 URL |
+| `CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS` | 否 | `7` | 单次采集窗口（天）；应 ≥ cron 周期 |
+| `CRA_SERVER_EVENT_HISTORY_OVERLAP_HOURS` | 否 | `24` | 与上次水位的重叠（迟到事件；幂等键防重复） |
+| `CRA_SERVER_EVENT_HISTORY_MAX_ATTEMPTS` | 否 | `3` | 读取/入库最大尝试次数（含首次） |
+| `CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS` | 否 | `500` | 第 n 次重试等待 n × 基数（毫秒） |
+| `CRA_SERVER_EVENT_HISTORY_MAX_BYTES` | 否 | `67108864` | 单次读取上限（64MB；超出按读取失败） |
+| `CRA_SERVER_EVENT_HISTORY_MAX_EVENTS` | 否 | `5000` | 单次入库上限（超出按发生时间升序截断，水位随已入库部分） |
 
 ## 4. 端点与状态码
 
@@ -124,6 +139,20 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 - **健康检查**：compose 用 `/readyz`（PG 可达）；`/healthz` 额外暴露队列水位，便于观察背压；
 - **优雅停机**：`SIGTERM` → Spring `server.shutdown=graceful` 停止接收新请求 → `ReviewQueue.stop()` 停止接收新任务，在 `CRA_SERVER_DRAIN_TIMEOUT_SECONDS` 内等待队列清空与 in-flight 归零 → 超时才 `shutdownNow`；`docker stop_grace_period` 必须大于 Spring grace + 排水时间（compose 默认 `90s`，Spring grace 30s + 排水 30s 留余量）；
 - 停机日志包含 `drained/queued/inFlight/accepted/completed/failed/rejected`，可据此判断是否有任务被丢弃。
+
+## 5.1 事件史采集（M4f-full，默认关闭）
+
+1. 准备 JSONL（每行一个对象；字段见 05§1.6/ADR-0012）：
+
+   ```json
+   {"event_id":"INC-42","repo":"owner/repo","service":"billing","tenant":"acme","occurred_at":"2026-08-14T03:00:00Z","type":"incident","summary":"企业长会话窗口改为 8h 后，30 分钟会话续期假设失效","source_url":"https://tracker/INC-42","commit_refs":["abc1234"],"paths":["src/billing/**"]}
+   ```
+
+2. 配 `CRA_SERVER_EVENT_HISTORY_SOURCE`（本地路径/`file:`/`http(s)` 预签名 URL）与 `CRA_SERVER_EVENT_HISTORY_ENABLED=true`，重启服务；
+3. 手动触发一次（或等 cron）后核对：`/healthz` 不暴露采集计数（当前只有进程/队列统计），以服务日志 `event-history 采集结束: executed=… inserted=… note=…` 为准；PG 侧 `SELECT count(*), max(occurred_at) FROM product_event`；
+4. 重复跑零重复：同 `(repo,event_id)` 只覆盖不新增；第二次运行日志应为 `inserted=0 updated=N`；
+5. 失败处置：来源不可读/入库重试耗尽 → `executed=false` + note；解析失败 → `failed>0` 且**水位不推进**（修好来源后下次重试）；不要手工改水位表来"跳过"失败行；
+6. 只让 CrossChecker 用事件史时仍需 `CRA_CROSSCHECKER_ENABLED=true`；事件史无数据/未命中时 CrossChecker 按模式 A 的变更史与 REVIEW.md 产品段继续，覆盖声明写明"事件史不可得/无命中"。
 
 ## 6. 报告签名（消除 L2 荣誉制）
 
@@ -158,11 +187,17 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 | 被忽略的 webhook 事件 | 返回 200，但当前实现没有专用日志行（draft/非 PR 均如此）；排障以 GitHub delivery 状态与 HTTP 响应体为准 | 本次验收 |
 | fork PR | webhook 可到，但 GitHub token 权限受限；回帖可能失败 | 02§5 |
 | 服务端无 checkout | `LocalRepoContext.localRepoRoot()` 为空：pre-existing 检测降级为不标注 + Summary 声明 | 05§2.1 |
+| 事件史来源 | 第一版只支持 JSONL（本地/`file:`/`http(s)` 预签名 URL）；**Jira、Confluence、ServiceNow/服务台、Slack/Teams 事故频道、PagerDuty、GitHub Issues 均未接**（后续 `EventHistorySource` 实现） | 11§2、ADR-0012 |
+| 事件史覆盖 | 只覆盖已文档化入库的工单/事故复盘；tribal knowledge 不可见（01§3.4）；路径关联依赖事件源声明 `paths`，无结构性召回保证 | ADR-0012 |
+| 事件史摘要 | 事件摘要来自外部系统，属不可信输入（brief 内 UNTRUSTED 定界）；`raw_json` 只入库不注入；摘要可能过时/错误 | 04§3.3、ADR-0012 |
+| 事件史水位 | 行级解析失败时**不推进水位**（失败行下次重试）；修复来源前该源会持续重读同一窗口 | ADR-0012 |
+| 事件史读取上限 | 单次 JSONL 读取 ≤64MB（默认）；超出按读取失败，需拆分对象或调大 `CRA_SERVER_EVENT_HISTORY_MAX_BYTES`；无云 SDK 分页/断点续传 | ADR-0012 |
+| 事件史与评测 | CLI 评测组合根未装配 `EventHistoryQuery`；L2/L3 的 context 门禁仍由 git 变更史 + REVIEW.md 驱动，不验证事件史路径 | 04§2.4 |
 | 多仓库 | 每个仓库一个 PG 账本实例（按 owner/name 键控），orchestrator 按仓库缓存；仓库数增长 = 常驻线程池增长，需按部署规模评估 | ADR-0008 |
 | 多副本 | delivery 幂等由 PG 唯一键兜底，但同一仓库的 orchestrator 缓存/队列是进程内的；同 head 重跑由 core commit 闸兜底 | ADR-0008 |
 | 签发 commit 判定范围 | v2 起按 `(repo, commit)` 查 `review_run`；`X-CRA-Repo: owner/name` 必填（`CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT=true` 时）。v1 全局签发路径已移除，旧签名需重签 | ADR-0009、05§1.5 |
 | 过期 Summary 收尾 | PG 账本不落评论原文（与 SQLite 同语义）：`ReviewLedger.comment()` 为空 → 新 run 不 PATCH 旧 Summary 的 `[已被 run_xxx 取代]` 前缀；旧 Summary 仍可见 | 05§1.5、05§2.2 与本地形态一致 |
-| 事件史采集 | M4b 只有接口与调度骨架，采集器为 Noop，日志明确写“未实现” | 07§5 M4b、M4f-full |
+| 事件史采集（默认关闭） | `CRA_SERVER_EVENT_HISTORY_ENABLED=false` 时装配 Noop、采集不执行；开启时按 JSONL 增量采集（M4f-full） | ADR-0012 |
 
 ## 8. 运维检查单
 

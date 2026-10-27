@@ -108,6 +108,22 @@ final class VerificationWave {
       DiffResult reviewDiff,
       String runId,
       List<String> testFileIndex) {
+    return verify(candidates, policy, headFiles, reviewDiff, runId, testFileIndex, null);
+  }
+
+  /**
+   * 验证波（M4f-full：context 类事件引用按 repo 解析）。
+   *
+   * @param repo 仓库（owner/name；null = 不解析事件引用）
+   */
+  WaveResult verify(
+      List<FindingAggregator.Scored> candidates,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult reviewDiff,
+      String runId,
+      List<String> testFileIndex,
+      String repo) {
     Map<String, List<FindingAggregator.Scored>> byFile = new LinkedHashMap<>();
     for (FindingAggregator.Scored scored : candidates) {
       byFile.computeIfAbsent(scored.finding().file(), k -> new ArrayList<>()).add(scored);
@@ -126,7 +142,8 @@ final class VerificationWave {
                       reviewDiff,
                       runId,
                       degradations,
-                      testFileIndex)));
+                      testFileIndex,
+                      repo)));
     }
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
     long tokensIn = 0;
@@ -161,7 +178,8 @@ final class VerificationWave {
       DiffResult reviewDiff,
       String runId,
       List<String> degradations,
-      List<String> testFileIndex) {
+      List<String> testFileIndex,
+      String repo) {
     if (budget.phase() == RunBudgetTracker.Phase.STOP) {
       // 100% 预算击穿：验证不可得 → UNVERIFIED（02§4.2），不发布
       degradations.add("verifier-budget-exhausted");
@@ -188,7 +206,8 @@ final class VerificationWave {
             reviewDiff,
             verifier.budget(),
             resolver,
-            testFileIndex == null ? List.of() : testFileIndex);
+            testFileIndex == null ? List.of() : testFileIndex,
+            repo);
     AgentBrief brief = verifier.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSuffix(file));
     trace.emit(

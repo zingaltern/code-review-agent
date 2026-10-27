@@ -47,6 +47,24 @@ final class FindingPromoter {
       ReviewPolicy policy,
       RunBudgetTracker budget,
       TraceWriter trace) {
+    return promote(runId, candidates, waveResult, headFiles, policy, budget, trace, null);
+  }
+
+  /**
+   * 验证结论 → 发布决策（M4f-full：context 类事件引用按 repo 解析）。
+   *
+   * @param repo 仓库（owner/name；null = 不解析事件引用）
+   * @return 晋升结果
+   */
+  Outcome promote(
+      String runId,
+      List<FindingAggregator.Scored> candidates,
+      VerificationWave.WaveResult waveResult,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      RunBudgetTracker budget,
+      TraceWriter trace,
+      String repo) {
     boolean publishUnverified = "labeled".equals(options.publishUnverified());
     JudgeArbiter arbiter = new JudgeArbiter(judge, agentRunner, trace);
     List<FindingAggregator.Scored> confirmedCandidates = new ArrayList<>();
@@ -91,7 +109,8 @@ final class FindingPromoter {
         case JUDGE -> {
           boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
           JudgeArbiter.Judgement judgement =
-              arbitrate(arbiter, finding, verifierOutcome, spotCheck, headFiles, policy, runId);
+              arbitrate(
+                  arbiter, finding, verifierOutcome, spotCheck, headFiles, policy, runId, repo);
           budget.record(judgement.tokensIn(), judgement.tokensOut());
           tokensIn += judgement.tokensIn();
           tokensOut += judgement.tokensOut();
@@ -128,7 +147,8 @@ final class FindingPromoter {
       boolean spotCheck,
       Map<String, FileContent> headFiles,
       ReviewPolicy policy,
-      String runId) {
+      String runId,
+      String repo) {
     String verdictText =
         verifierOutcome != null && verifierOutcome.verdict() != null
             ? verifierOutcome.verdict().verdict().name()
@@ -142,7 +162,8 @@ final class FindingPromoter {
             JudgeArbiter.reasonText(spotCheck),
             headFiles,
             policy,
-            citedResolver);
+            citedResolver,
+            repo);
     return arbiter.arbitrate(input, runId, finding.id());
   }
 

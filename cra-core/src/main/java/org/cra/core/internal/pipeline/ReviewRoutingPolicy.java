@@ -92,8 +92,8 @@ final class ReviewRoutingPolicy {
    * CrossChecker 触发判定（03§3 角色表 + 02§4.3 档位联动 + 05§5
    * 配置）：agents.crosschecker.enabled=true、standard/deep 档（quick 不触发）、班组已装配，且至少一个模式有数据可查。
    *
-   * <p>数据门槛（07 T1.4：段落缺失时相关检查优雅跳过）：模式 A 需 Product context / Known incidents 非空或变更史可得； 模式 B 需 Sniff
-   * tests 非空。
+   * <p>数据门槛（07 T1.4：段落缺失时相关检查优雅跳过）：模式 A 需 Product context / Known incidents 非空，或变更史/事件史 可得；模式 B 需
+   * Sniff tests 非空。
    *
    * @param depthPlan 深度计划（生效档位）
    * @param policy base 分支 REVIEW.md 策略
@@ -108,13 +108,29 @@ final class ReviewRoutingPolicy {
       ReviewCrew crew,
       CrossCheckerOptions options,
       CrossCheckHistory history) {
+    return crossCheckTriggered(depthPlan, policy, crew, options, history, CrossCheckEvents.none());
+  }
+
+  /**
+   * CrossChecker 触发判定（M4f-full：产品事件史也是模式 A 的数据面）。
+   *
+   * @param events 产品事件史（未启用/未命中时 {@link CrossCheckEvents#none()}）
+   * @return true 派发 1 实例
+   */
+  static boolean crossCheckTriggered(
+      DepthPlan depthPlan,
+      ReviewPolicy policy,
+      ReviewCrew crew,
+      CrossCheckerOptions options,
+      CrossCheckHistory history,
+      CrossCheckEvents events) {
     if (options == null || !options.enabled() || crew == null || crew.crossChecker() == null) {
       return false;
     }
     if (depthPlan.effectiveDepth() == Depth.QUICK) {
       return false;
     }
-    Availability data = availability(policy, history);
+    Availability data = availability(policy, history, events);
     boolean assumption =
         options.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION) && data.assumptionData();
     boolean sniff = options.modeEnabled(CrossCheckerOptions.Mode.SNIFF) && data.sniffData();
@@ -124,11 +140,13 @@ final class ReviewRoutingPolicy {
   /** 两个模式各自是否有数据可查（触发判定与未触发原因共用，避免口径漂移）。 */
   private record Availability(boolean assumptionData, boolean sniffData) {}
 
-  private static Availability availability(ReviewPolicy policy, CrossCheckHistory history) {
+  private static Availability availability(
+      ReviewPolicy policy, CrossCheckHistory history, CrossCheckEvents events) {
     boolean assumptionData =
         !policy.productContext().isEmpty()
             || !policy.knownIncidents().isEmpty()
-            || history.hasData();
+            || history.hasData()
+            || (events != null && events.hasData());
     boolean sniffData = !policy.sniffTests().isEmpty();
     return new Availability(assumptionData, sniffData);
   }
@@ -147,15 +165,24 @@ final class ReviewRoutingPolicy {
   /** 未触发原因（覆盖声明必须可见，07 T1.4）。 */
   static String crossCheckSkipReason(
       DepthPlan depthPlan, ReviewPolicy policy, ReviewCrew crew, CrossCheckHistory history) {
+    return crossCheckSkipReason(depthPlan, policy, crew, history, CrossCheckEvents.none());
+  }
+
+  static String crossCheckSkipReason(
+      DepthPlan depthPlan,
+      ReviewPolicy policy,
+      ReviewCrew crew,
+      CrossCheckHistory history,
+      CrossCheckEvents events) {
     if (crew.crossChecker() == null) {
       return "班组未装配 cross-checker";
     }
     if (depthPlan.effectiveDepth() == Depth.QUICK) {
-      return "quick 档不触发（02§4.3 档位联动；M4f-lite 仅 standard/deep）";
+      return "quick 档不触发（02§4.3 档位联动；M4f-lite/full 仅 standard/deep）";
     }
-    Availability data = availability(policy, history);
+    Availability data = availability(policy, history, events);
     if (!data.assumptionData() && !data.sniffData()) {
-      return "REVIEW.md 未配置 Product context/Known incidents/Sniff tests，且变更史为空/不可得（07 T1.4 段落缺失优雅跳过）";
+      return "REVIEW.md 未配置 Product context/Known incidents/Sniff tests，且变更史/事件史为空或不可得（07 T1.4 段落缺失优雅跳过）";
     }
     return "配置的 mode 与可用数据不匹配（05§5 agents.crosschecker.mode）";
   }

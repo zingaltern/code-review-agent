@@ -79,7 +79,7 @@ code-review-agent/
 ├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
 │   ├── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
-│   └── cra-git-gitlab/    # GitLab 实现（M4e，ADR-0011/0012；不依赖 github；CLI/server 可按平台选择）
+│   └── cra-git-gitlab/    # GitLab 实现（M4e，ADR-0011/0013；不依赖 github；CLI/server 可按平台选择）
 ├── cra-context/           # ContextAssembler：diff 解析、窗口/全文策略、切片、预算裁剪
 ├── cra-agents/            # 子代理定义：角色 prompt 模板、工具白名单、输出 schema
 ├── cra-core/              # Orchestrator：Planner/Fan-out/Verify/Aggregate/Publish/Convergence
@@ -173,7 +173,7 @@ GitLab 的对应触发边界（MR pipeline / draft / 冲突 / fork / 并发 / pu
 
 设计约束：**cra-core 全部逻辑与形态无关**（输入 ReviewRequest，输出 ReviewResult + 待发布 comments），CLI 与 server 只是两种壳；账本经 `cra-store` 的 `ReviewLedger` SPI 访问。
 
-**M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集只留接口与调度骨架（M4f-full 实现）。
+**M4b 落地注记（2026-10-26，ADR-0008）**：服务形态已实现——`cra-server`（Spring Boot web，第二组合根）→ `POST /webhooks/github`（HMAC-SHA256 验签 → pull_request 子集解析）→ PG `webhook_delivery` 幂等 claim → 进程内有界队列（满 = 503 背压，GitHub 按同一 delivery 重投）→ worker 调 `CoreAssembly` 创建的 orchestrator（按仓库缓存）→ `PostgresLedger` 落 05§1.5 五表。`/api/v1/reports/attest` 对 L2 报告签发 HMAC 信封（默认只签服务端已完成评审的 commit），`cra-eval verify --signature` 验签。操作手册见 `docs/deployment-server.md`；事件史采集已在 M4f-full 落地（JSONL→PG→CrossChecker，ADR-0012，默认关闭）。
 
 **M4e 第二半注记（2026-10-27，ADR-0013）**：CLI 与 server 都按平台选择装配——CLI `--platform github|gitlab` / `CRA_GIT_PLATFORM`（GitLab 用 `--gitlab-project` + `CRA_GITLAB_TOKEN`，账本键仍 repo+pr/commit）；server `CRA_SERVER_PLATFORM=github|gitlab`，GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 → MR 事件子集 → 同一 PG delivery 幂等 → 队列）。未选中平台的端点不注册；非 MR/draft/merge/close/审批/元数据更新显式 200 ignored 并声明 reason。真实 GitLab 写操作尚无 owner token（读路径已验证），边界与待验证项见 `docs/deployment-gitlab.md` §9/§12。
 

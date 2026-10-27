@@ -1,5 +1,6 @@
 package org.cra.core.internal;
 
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -8,6 +9,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.cra.common.context.ReviewPolicy;
+import org.cra.common.event.EventHistoryQuery;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.CandidateFinding;
@@ -23,6 +25,7 @@ import org.cra.common.run.ReviewRequest;
 import org.cra.context.api.ReviewPolicyParser;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
+import org.cra.core.internal.pipeline.CrossCheckEvents;
 import org.cra.core.internal.pipeline.CrossCheckHistory;
 import org.cra.core.internal.pipeline.DepthPlan;
 import org.cra.git.api.GitPlatformAdapter;
@@ -41,16 +44,34 @@ final class PipelineDataLoader {
   private final ReviewPolicyParser policyParser;
   private final LocalRepoContext localRepoContext;
   private final CrossCheckerOptions crossCheckerOptions;
+  private final EventHistoryQuery eventHistoryQuery;
+  private final Clock clock;
 
   PipelineDataLoader(
       GitPlatformAdapter adapter,
       ReviewPolicyParser policyParser,
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions) {
+    this(adapter, policyParser, localRepoContext, crossCheckerOptions, null, Clock.systemUTC());
+  }
+
+  /**
+   * @param eventHistoryQuery 事件史查询端口（M4f-full；null = 未装配，CrossChecker 声明事件史不可得）
+   * @param clock 事件检索窗口锚点（测试可固定）
+   */
+  PipelineDataLoader(
+      GitPlatformAdapter adapter,
+      ReviewPolicyParser policyParser,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      EventHistoryQuery eventHistoryQuery,
+      Clock clock) {
     this.adapter = adapter;
     this.policyParser = policyParser;
     this.localRepoContext = localRepoContext;
     this.crossCheckerOptions = crossCheckerOptions;
+    this.eventHistoryQuery = eventHistoryQuery;
+    this.clock = clock;
   }
 
   DiffResult fetchDiff(ReviewRequest request) {
@@ -74,6 +95,44 @@ final class PipelineDataLoader {
         diff.commits().stream().map(CommitSummary::sha).collect(Collectors.toSet());
     return CrossCheckHistoryAssembler.assemble(
         localRepoContext, paths, crossCheckerOptions.historyWeeks(), request.headSha(), prCommits);
+  }
+
+  /**
+   * 查询与变更路径/commit/关键词相关的产品事件史（M4f-full，ADR-0012）。
+   *
+   * <p>窗口与变更史同源（historyWeeks）；quick 档不查询（CrossChecker 不触发）。未装配端口 / 检索失败 → available=false +
+   * 声明，不静默当作"已检查且无矛盾"。
+   *
+   * @param history 已组装的变更史（其 commit 也作为事件检索面）
+   * @return 事件史 + 声明
+   */
+  CrossCheckEvents resolveCrossCheckEvents(
+      ReviewRequest request,
+      DiffResult diff,
+      ChunkPlanner.Plan plan,
+      DepthPlan depthPlan,
+      CrossCheckHistory history) {
+    if (!crossCheckerOptions.enabled() || depthPlan.effectiveDepth() == Depth.QUICK) {
+      return CrossCheckEvents.none();
+    }
+    Set<String> paths = new LinkedHashSet<>();
+    plan.chunks().forEach(chunk -> chunk.files().forEach(file -> paths.add(file.path())));
+    Set<String> commits = new LinkedHashSet<>();
+    diff.commits().forEach(commit -> commits.add(commit.sha()));
+    commits.add(request.headSha());
+    if (history != null) {
+      history.entries().forEach(entry -> commits.add(entry.sha()));
+    }
+    List<String> messages = diff.commits().stream().map(CommitSummary::message).toList();
+    String repo = request.repoOwner() + "/" + request.repoName();
+    return CrossCheckEventAssembler.assemble(
+        eventHistoryQuery,
+        repo,
+        paths,
+        commits,
+        messages,
+        crossCheckerOptions.historyWeeks(),
+        clock);
   }
 
   /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */

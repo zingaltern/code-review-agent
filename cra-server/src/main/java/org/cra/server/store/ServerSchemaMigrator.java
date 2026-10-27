@@ -13,16 +13,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 服务端 schema 迁移（手写幂等 DDL，07§5 M4b）：启动时执行 cra-store 的五表 + server 的
- * delivery/attestation/schema_migration。
+ * 服务端 schema 迁移（手写幂等 DDL，07§5 M4b/M4f-full）：启动时执行 cra-store 的五表 + server 的
+ * delivery/attestation/product_event/event_collection_checkpoint/schema_migration。
  *
- * <p>不引入 Flyway（ADR-0008）：DDL 只有两个版本且全为 IF NOT EXISTS，手写脚本可审计；schema_migration 仅登记已执行版本，不做回滚。
+ * <p>不引入 Flyway（ADR-0008）：DDL 全为 IF NOT EXISTS，手写脚本可审计；schema_migration 仅登记已执行版本，不做回滚。
  */
 public final class ServerSchemaMigrator {
 
   private static final Logger LOG = LoggerFactory.getLogger(ServerSchemaMigrator.class);
   private static final String SERVER_SCHEMA = "db/postgres/server.sql";
-  private static final String SERVER_VERSION = "server-0001";
+  private static final String SERVER_VERSION = "server-0002";
 
   private final DataSource dataSource;
 

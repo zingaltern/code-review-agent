@@ -1,6 +1,7 @@
 package org.cra.core.internal;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -16,6 +17,7 @@ import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.context.ReviewPolicy;
+import org.cra.common.event.EventHistoryQuery;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.LedgerFindingMarker;
@@ -32,6 +34,7 @@ import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SignoffOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
+import org.cra.core.internal.pipeline.CrossCheckEvents;
 import org.cra.core.internal.pipeline.CrossCheckHistory;
 import org.cra.core.internal.pipeline.DepthPlan;
 import org.cra.core.internal.pipeline.DepthPolicy;
@@ -89,6 +92,7 @@ public final class ReviewPipeline implements Orchestrator {
   private final CitedEvidenceResolver citedResolver;
   private final SignoffAdvisor signoffAdvisor;
   private final ExecutorService verifyPool;
+  private final EventHistoryQuery eventHistoryQuery;
 
   public ReviewPipeline(
       GitPlatformAdapter adapter,
@@ -159,10 +163,44 @@ public final class ReviewPipeline implements Orchestrator {
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions,
       SignoffOptions signoffOptions) {
+    this(
+        adapter,
+        ledger,
+        gateway,
+        crew,
+        verifier,
+        judge,
+        runRoot,
+        options,
+        localRepoContext,
+        crossCheckerOptions,
+        signoffOptions,
+        null);
+  }
+
+  /**
+   * M4f-full 形态构造（追加事件史查询端口；null = 未装配，CrossChecker 声明事件史不可得）。
+   *
+   * @param eventHistoryQuery 事件史检索端口（cross-checker 的 context 类外部证据面，ADR-0012）
+   */
+  public ReviewPipeline(
+      GitPlatformAdapter adapter,
+      ReviewLedger ledger,
+      LlmGateway gateway,
+      ReviewCrew crew,
+      SubAgent<VerificationBatchInput> verifier,
+      SubAgent<JudgeCaseInput> judge,
+      Path runRoot,
+      PipelineOptions options,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
+      EventHistoryQuery eventHistoryQuery) {
     this.ledger = ledger;
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
     this.verifier = verifier;
+    this.eventHistoryQuery = eventHistoryQuery;
     this.agentRunner = new AgentRunner(gateway);
     CrossCheckerOptions effectiveCrossChecker =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
@@ -175,9 +213,11 @@ public final class ReviewPipeline implements Orchestrator {
             adapter,
             ContextAssembly.createReviewPolicyParser(),
             localRepoContext,
-            effectiveCrossChecker);
+            effectiveCrossChecker,
+            eventHistoryQuery,
+            Clock.systemUTC());
     this.gatekeeper = new FindingGatekeeper(dataLoader, localRepoContext);
-    this.citedResolver = new CitedEvidenceResolver(localRepoContext);
+    this.citedResolver = new CitedEvidenceResolver(localRepoContext, eventHistoryQuery);
     this.promoter = new FindingPromoter(judge, agentRunner, this.options, citedResolver);
     this.publisher = new ReviewPublisher(adapter, ledger);
     this.verifyPool =
@@ -311,9 +351,11 @@ public final class ReviewPipeline implements Orchestrator {
           };
       String policySection =
           PolicySections.render(policy, PipelineDataLoader.hasReviewMdChange(diff));
-      // M4f-lite：CrossChecker 变更史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查本地仓库
+      // M4f-lite/full：CrossChecker 变更史 + 产品事件史（03§3.1 输入 b）——仅在配置开启且非 quick 档时查询
       CrossCheckHistory crossCheckHistory =
           dataLoader.resolveCrossCheckHistory(request, diff, plan, depthPlan);
+      CrossCheckEvents crossCheckEvents =
+          dataLoader.resolveCrossCheckEvents(request, diff, plan, depthPlan, crossCheckHistory);
       ReviewStage.StageOutcome outcome =
           reviewStage.execute(
               runId,
@@ -327,7 +369,8 @@ public final class ReviewPipeline implements Orchestrator {
               prTitle,
               commitMessages,
               policySection,
-              crossCheckHistory);
+              crossCheckHistory,
+              crossCheckEvents);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
       trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
@@ -398,8 +441,9 @@ public final class ReviewPipeline implements Orchestrator {
                       s -> s.finding().category() == org.cra.common.finding.FindingCategory.TEST)
               ? dataLoader.testFileIndex(request, trace)
               : List.of();
+      String repoKey = request.repoOwner() + "/" + request.repoName();
       VerificationWave.WaveResult waveResult =
-          wave.verify(candidates, policy, headFiles, reviewDiff, runId, testFileIndex);
+          wave.verify(candidates, policy, headFiles, reviewDiff, runId, testFileIndex, repoKey);
       degradations.addAll(waveResult.degradations());
       budget.record(waveResult.tokensIn(), waveResult.tokensOut());
       long tokensIn = outcome.tokensIn() + waveResult.tokensIn();
@@ -407,7 +451,8 @@ public final class ReviewPipeline implements Orchestrator {
 
       // T2.5/T2.6：晋升规则（M2 形态）+ Judge 仲裁与抽查复核（03§4.3/03§4.4）
       FindingPromoter.Outcome promotion =
-          promoter.promote(runId, candidates, waveResult, headFiles, policy, budget, trace);
+          promoter.promote(
+              runId, candidates, waveResult, headFiles, policy, budget, trace, repoKey);
       tokensIn += promotion.tokensIn();
       tokensOut += promotion.tokensOut();
       List<FindingAggregator.Scored> confirmedCandidates = promotion.confirmed();
