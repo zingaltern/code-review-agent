@@ -114,16 +114,48 @@ final class VerificationBatchAssembler {
       CitedEvidenceResolver citedResolver,
       List<String> testFileIndex,
       String repo) {
+    return buildBatch(
+        file, batch, policy, headFiles, diff, budget, citedResolver, testFileIndex, repo, "");
+  }
+
+  /**
+   * 组装验证批次输入（M4e 语义上下文：L2 跨文件切片注入 Verifier brief；ADR-0014）。
+   *
+   * <p>切片与代码上下文同属不可信内容，占用同一 {@code codeContext} 槽；切片 token 从代码上下文预算中扣除， 保证验证 brief
+   * 不越单代理输入硬限（04§2.2、ADR-0014 决策 7）。
+   *
+   * @param crossFileContext L2 跨文件切片文本（{@code CrossFileSlices.text()}；未启用/不可得为空串）
+   */
+  static VerificationBatchInput buildBatch(
+      String file,
+      List<FindingAggregator.Scored> batch,
+      ReviewPolicy policy,
+      Map<String, FileContent> headFiles,
+      DiffResult diff,
+      AgentBudget budget,
+      CitedEvidenceResolver citedResolver,
+      List<String> testFileIndex,
+      String repo,
+      String crossFileContext) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
     String findingsText = renderFindingsText(batch);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
+    String slices = crossFileContext == null ? "" : crossFileContext;
+    long sliceTokens = TokenMath.estimateTokens(slices);
     long reserved =
-        TokenMath.estimateTokens(findingsText) + 1_200 + TokenMath.estimateTokens(testIndex);
+        TokenMath.estimateTokens(findingsText)
+            + 1_200
+            + TokenMath.estimateTokens(testIndex)
+            + sliceTokens;
     long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
+    String codeContext = renderCodeContext(file, batch, headFiles, diff, contextBudget);
+    if (!slices.isBlank()) {
+      codeContext = codeContext.isBlank() ? slices : codeContext + "\n\n" + slices;
+    }
     return new VerificationBatchInput(
         file,
         items,
-        renderCodeContext(file, batch, headFiles, diff, contextBudget),
+        codeContext,
         renderCitedEvidence(batch, citedResolver, repo),
         renderPolicySections(policy, batch),
         testIndex);

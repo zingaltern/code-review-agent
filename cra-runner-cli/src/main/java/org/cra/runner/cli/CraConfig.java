@@ -49,6 +49,7 @@ import org.cra.common.run.ReviewMode;
  * @param signoff 签字建议配置（05§5 agents.signoff；M4a；默认开启、作者/测试状态未知）
  * @param platform Git 平台（`github`|`gitlab`；M4e 第二半，--platform / CRA_GIT_PLATFORM，默认 github）
  * @param gitlab GitLab 连接设置（仅 platform=gitlab 时生效；密钥只从环境/文件读，05§6）
+ * @param semanticContext 语义上下文（L2 跨文件切片）配置（M4e，ADR-0014；默认关闭）
  */
 public record CraConfig(
     String repoOwner,
@@ -89,10 +90,12 @@ public record CraConfig(
     ReviewMode reviewMode,
     SignoffConfig signoff,
     String platform,
-    GitLabSettings gitlab) {
+    GitLabSettings gitlab,
+    SemanticContextConfig semanticContext) {
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
+    semanticContext = semanticContext == null ? SemanticContextConfig.defaults() : semanticContext;
     platform =
         platform == null || platform.isBlank()
             ? "github"
@@ -221,7 +224,8 @@ public record CraConfig(
         ReviewMode.PULL_REQUEST,
         SignoffConfig.defaults(),
         "github",
-        GitLabSettings.none());
+        GitLabSettings.none(),
+        SemanticContextConfig.defaults());
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -331,7 +335,8 @@ public record CraConfig(
         ReviewMode.PULL_REQUEST,
         SignoffConfig.defaults(),
         "github",
-        GitLabSettings.none());
+        GitLabSettings.none(),
+        SemanticContextConfig.defaults());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -376,7 +381,8 @@ public record CraConfig(
         reviewMode(),
         signoff(),
         platform(),
-        gitlab());
+        gitlab(),
+        semanticContext());
   }
 
   /**
@@ -425,6 +431,7 @@ public record CraConfig(
         reviewMode(),
         signoff(),
         platform(),
-        gitlab());
+        gitlab(),
+        semanticContext());
   }
 }

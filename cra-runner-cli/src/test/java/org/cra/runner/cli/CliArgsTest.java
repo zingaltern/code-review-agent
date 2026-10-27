@@ -248,6 +248,58 @@ class CliArgsTest {
   }
 
   @Test
+  void semanticContextDefaultsOffAndParsesConfig() {
+    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；flag/env 优先级 = flag > env > 默认
+    CraConfig defaults = CliArgs.parse(baseArgs(), ENV);
+    assertThat(defaults.semanticContext().enabled()).isFalse();
+    assertThat(defaults.semanticContext().maxFiles()).isEqualTo(2_000);
+    assertThat(defaults.semanticContext().maxFileBytes()).isEqualTo(262_144L);
+    assertThat(defaults.semanticContext().sliceTokens()).isEqualTo(4_000L);
+
+    CraConfig enabled =
+        CliArgs.parse(
+            concat(
+                baseArgs(),
+                "--semantic-context",
+                "--semantic-context-max-files",
+                "50",
+                "--semantic-context-slice-tokens",
+                "2048"),
+            ENV);
+    assertThat(enabled.semanticContext().enabled()).isTrue();
+    assertThat(enabled.semanticContext().maxFiles()).isEqualTo(50);
+    assertThat(enabled.semanticContext().sliceTokens()).isEqualTo(2_048L);
+
+    CraConfig explicitOff = CliArgs.parse(concat(baseArgs(), "--semantic-context=false"), ENV);
+    assertThat(explicitOff.semanticContext().enabled()).isFalse();
+
+    CraConfig fromEnv =
+        CliArgs.parse(
+            baseArgs(),
+            Map.of(
+                "GITHUB_TOKEN", "gh-env-token",
+                "CRA_LLM_API_KEY", "sk-env",
+                "CRA_LLM_BASE_URL", "https://llm.example/v1",
+                "CRA_LLM_MODEL", "glm-x",
+                "CRA_SEMANTIC_CONTEXT_ENABLED", "true",
+                "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", "4096"));
+    assertThat(fromEnv.semanticContext().enabled()).isTrue();
+    assertThat(fromEnv.semanticContext().maxFileBytes()).isEqualTo(4_096L);
+  }
+
+  @Test
+  void semanticContextRejectsOutOfRangeSliceTokens() {
+    assertThatThrownBy(
+            () ->
+                CliArgs.parse(
+                    concat(
+                        baseArgs(), "--semantic-context", "--semantic-context-slice-tokens", "10"),
+                    ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("sliceTokens");
+  }
+
+  @Test
   void crossCheckerRejectsInvalidModesAndWeeks() {
     assertThatThrownBy(
             () ->

@@ -39,9 +39,28 @@ final class CrossCheckHistoryAssembler {
       int weeks,
       String headSha,
       Set<String> excludeShas) {
+    return assemble(localRepoContext, paths, weeks, headSha, excludeShas, false);
+  }
+
+  /**
+   * 查询路径集近 N 周变更史（可带语义索引增强的路径集）。
+   *
+   * @param indexAssisted 路径集是否含语义索引增强的关联文件（定义/引用/import 关联）——声明按来源如实区分
+   */
+  static CrossCheckHistory assemble(
+      LocalRepoContext localRepoContext,
+      Set<String> paths,
+      int weeks,
+      String headSha,
+      Set<String> excludeShas,
+      boolean indexAssisted) {
     List<String> notes = new ArrayList<>();
+    String scopeNote =
+        indexAssisted
+            ? "CrossChecker 上下游路径集 = 本 PR 变更文件 + 语义索引关联文件（定义/引用/import；ADR-0014）"
+            : SCOPE_LIMITATION_NOTE;
     if (localRepoContext == null || localRepoContext.localRepoRoot().isEmpty()) {
-      notes.add(SCOPE_LIMITATION_NOTE);
+      notes.add(scopeNote);
       notes.add("CrossChecker 变更史不可得（无本地仓库），模式 A 仅用 REVIEW.md 产品段（05§2.1 降级声明）");
       return new CrossCheckHistory(List.of(), false, notes);
     }
@@ -52,11 +71,11 @@ final class CrossCheckHistoryAssembler {
               .filter(entry -> !excluded(entry, excludeShas))
               .toList();
     } catch (RuntimeException e) {
-      notes.add(SCOPE_LIMITATION_NOTE);
+      notes.add(scopeNote);
       notes.add("CrossChecker 变更史读取失败（" + e.getClass().getSimpleName() + "），模式 A 仅用产品段");
       return new CrossCheckHistory(List.of(), false, notes);
     }
-    notes.add(SCOPE_LIMITATION_NOTE);
+    notes.add(scopeNote);
     notes.add(
         "CrossChecker 变更史：近 "
             + weeks

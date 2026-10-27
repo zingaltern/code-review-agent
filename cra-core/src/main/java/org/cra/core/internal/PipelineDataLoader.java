@@ -22,14 +22,18 @@ import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.RepoRef;
 import org.cra.common.run.Depth;
 import org.cra.common.run.ReviewRequest;
+import org.cra.common.semantic.SymbolIndexSnapshot;
 import org.cra.context.api.ReviewPolicyParser;
 import org.cra.core.api.CrossCheckerOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.CrossCheckEvents;
 import org.cra.core.internal.pipeline.CrossCheckHistory;
 import org.cra.core.internal.pipeline.DepthPlan;
+import org.cra.core.internal.pipeline.SemanticContext;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 
 /**
  * 流水线数据面（T1.4/T2.7，04§3.2/03§5.2）：REVIEW.md 策略加载、head 全文预取、增量 diff、文件内容缓存与锚定判定。
@@ -45,6 +49,8 @@ final class PipelineDataLoader {
   private final LocalRepoContext localRepoContext;
   private final CrossCheckerOptions crossCheckerOptions;
   private final EventHistoryQuery eventHistoryQuery;
+  private final SemanticContextOptions semanticContextOptions;
+  private final SymbolIndex symbolIndex;
   private final Clock clock;
 
   PipelineDataLoader(
@@ -52,7 +58,15 @@ final class PipelineDataLoader {
       ReviewPolicyParser policyParser,
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions) {
-    this(adapter, policyParser, localRepoContext, crossCheckerOptions, null, Clock.systemUTC());
+    this(
+        adapter,
+        policyParser,
+        localRepoContext,
+        crossCheckerOptions,
+        null,
+        SemanticContextOptions.disabled(),
+        null,
+        Clock.systemUTC());
   }
 
   /**
@@ -66,11 +80,39 @@ final class PipelineDataLoader {
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryQuery eventHistoryQuery,
       Clock clock) {
+    this(
+        adapter,
+        policyParser,
+        localRepoContext,
+        crossCheckerOptions,
+        eventHistoryQuery,
+        SemanticContextOptions.disabled(),
+        null,
+        clock);
+  }
+
+  /**
+   * @param semanticContextOptions 语义上下文配置（M4e；null = 关闭）
+   * @param symbolIndex 符号索引端口（null = 未装配 → 开启时按不可得声明）
+   * @param clock 事件检索窗口锚点（测试可固定）
+   */
+  PipelineDataLoader(
+      GitPlatformAdapter adapter,
+      ReviewPolicyParser policyParser,
+      LocalRepoContext localRepoContext,
+      CrossCheckerOptions crossCheckerOptions,
+      EventHistoryQuery eventHistoryQuery,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex,
+      Clock clock) {
     this.adapter = adapter;
     this.policyParser = policyParser;
     this.localRepoContext = localRepoContext;
     this.crossCheckerOptions = crossCheckerOptions;
     this.eventHistoryQuery = eventHistoryQuery;
+    this.semanticContextOptions =
+        semanticContextOptions == null ? SemanticContextOptions.disabled() : semanticContextOptions;
+    this.symbolIndex = symbolIndex;
     this.clock = clock;
   }
 
@@ -80,21 +122,81 @@ final class PipelineDataLoader {
   }
 
   /**
+   * 构建语义上下文（M4e，ADR-0014）：默认关闭；quick 档不触发（02§4.3）；构建失败/无本地仓库/超限 → 不可得 + 声明，不炸 run。
+   *
+   * <p>关闭时零副作用（不构建索引、不发 trace、不产生声明）——reviewer brief 与开关引入前逐字节一致（ADR-0014 决策 5）。
+   *
+   * @param request 评审请求（head 为索引锚点）
+   * @param depthPlan 深度计划（quick 不触发）
+   * @param trace trace 写入器（仅启用时记录 {@code semantic_context} 事件）
+   * @return 语义上下文
+   */
+  SemanticContext buildSemanticContext(
+      ReviewRequest request, DepthPlan depthPlan, TraceWriter trace) {
+    if (!semanticContextOptions.enabled()) {
+      return SemanticContext.disabled();
+    }
+    if (depthPlan.effectiveDepth() == Depth.QUICK) {
+      SemanticContext quick =
+          SemanticContext.of(
+              semanticContextOptions,
+              SymbolIndexSnapshot.unavailable(
+                  request.headSha(), "quick 档不触发（02§4.3；语义上下文仅 standard/deep）"));
+      trace.emit("semantic_context", quick.traceFields());
+      return quick;
+    }
+    SymbolIndexSnapshot snapshot;
+    if (symbolIndex == null) {
+      snapshot =
+          SymbolIndexSnapshot.unavailable(
+              request.headSha(), "语义索引未装配（组合根未注入 SymbolIndex）；L2 切片按不可得声明");
+    } else {
+      snapshot = symbolIndex.build(request.headSha(), semanticContextOptions.indexOptions());
+    }
+    SemanticContext context = SemanticContext.of(semanticContextOptions, snapshot);
+    trace.emit("semantic_context", context.traceFields());
+    return context;
+  }
+
+  /**
    * 查询上下游路径集近 N 周变更史（排除本 PR 自身 commit——变更本身不是外部证据）。
    *
    * <p>quick 档不查询（02§4.3 档位联动：CrossChecker 不触发）；无本地仓库时降级为空历史 + 声明（05§2.1 同 blame 模式）。
    */
   CrossCheckHistory resolveCrossCheckHistory(
       ReviewRequest request, DiffResult diff, ChunkPlanner.Plan plan, DepthPlan depthPlan) {
+    return resolveCrossCheckHistory(request, diff, plan, depthPlan, Set.of());
+  }
+
+  /**
+   * 查询上下游路径集近 N 周变更史（语义索引增强路径集，03§3.1 输入 b；ADR-0014 决策 8）。
+   *
+   * @param extraPaths 索引增强的关联路径（定义/引用/import 关联；空集 = 仅变更文件）
+   */
+  CrossCheckHistory resolveCrossCheckHistory(
+      ReviewRequest request,
+      DiffResult diff,
+      ChunkPlanner.Plan plan,
+      DepthPlan depthPlan,
+      Set<String> extraPaths) {
     if (!crossCheckerOptions.enabled() || depthPlan.effectiveDepth() == Depth.QUICK) {
       return CrossCheckHistory.none();
     }
     Set<String> paths = new LinkedHashSet<>();
     plan.chunks().forEach(chunk -> chunk.files().forEach(file -> paths.add(file.path())));
+    boolean indexAssisted = extraPaths != null && !extraPaths.isEmpty();
+    if (indexAssisted) {
+      paths.addAll(extraPaths);
+    }
     Set<String> prCommits =
         diff.commits().stream().map(CommitSummary::sha).collect(Collectors.toSet());
     return CrossCheckHistoryAssembler.assemble(
-        localRepoContext, paths, crossCheckerOptions.historyWeeks(), request.headSha(), prCommits);
+        localRepoContext,
+        paths,
+        crossCheckerOptions.historyWeeks(),
+        request.headSha(),
+        prCommits,
+        indexAssisted);
   }
 
   /**

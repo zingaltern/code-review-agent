@@ -16,8 +16,10 @@ import org.cra.common.finding.CandidateFinding;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.core.internal.pipeline.AntiAnchorValidator;
+import org.cra.core.internal.pipeline.CrossFileSlices;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
+import org.cra.core.internal.pipeline.SemanticContext;
 
 /**
  * 验证波编排（07 T2.4）：候选按文件分批 → 每批一个验证 brief（balanced-review）→ 三值判定；INSUFFICIENT 受控补查一次（followup_file
@@ -29,6 +31,7 @@ import org.cra.core.internal.pipeline.RunBudgetTracker;
 final class VerificationWave {
 
   private final SubAgent<VerificationBatchInput> verifier;
+  private final SemanticContext semanticContext;
   private final AgentRunner agentRunner;
   private final TraceWriter trace;
   private final RunBudgetTracker budget;
@@ -68,6 +71,29 @@ final class VerificationWave {
       ExecutorService pool,
       Function<String, Optional<String>> followupLookup,
       CitedEvidenceResolver citedResolver) {
+    this(
+        verifier,
+        agentRunner,
+        trace,
+        budget,
+        pool,
+        followupLookup,
+        citedResolver,
+        SemanticContext.disabled());
+  }
+
+  /**
+   * @param semanticContext 语义上下文（M4e：L2 跨文件切片注入验证 brief；关闭时为空切片、零声明）
+   */
+  VerificationWave(
+      SubAgent<VerificationBatchInput> verifier,
+      AgentRunner agentRunner,
+      TraceWriter trace,
+      RunBudgetTracker budget,
+      ExecutorService pool,
+      Function<String, Optional<String>> followupLookup,
+      CitedEvidenceResolver citedResolver,
+      SemanticContext semanticContext) {
     this.verifier = verifier;
     this.agentRunner = agentRunner;
     this.trace = trace;
@@ -75,6 +101,7 @@ final class VerificationWave {
     this.pool = pool;
     this.followupLookup = followupLookup;
     this.citedResolver = citedResolver;
+    this.semanticContext = semanticContext == null ? SemanticContext.disabled() : semanticContext;
   }
 
   /**
@@ -131,19 +158,26 @@ final class VerificationWave {
     List<Future<BatchOutcome>> futures = new ArrayList<>();
     List<String> degradations = new java.util.concurrent.CopyOnWriteArrayList<>();
     for (Map.Entry<String, List<FindingAggregator.Scored>> entry : byFile.entrySet()) {
+      String batchFile = entry.getKey();
+      // M4e（ADR-0014）：本文件批次的 L2 跨文件切片（关闭/不可得时为空串）
+      CrossFileSlices slices =
+          semanticContext.slicesFor(
+              reviewDiff.files().stream().filter(file -> file.path().equals(batchFile)).toList());
+      List<FindingAggregator.Scored> batch = entry.getValue();
       futures.add(
           pool.submit(
               () ->
                   verifyBatch(
-                      entry.getKey(),
-                      entry.getValue(),
+                      batchFile,
+                      batch,
                       policy,
                       headFiles,
                       reviewDiff,
                       runId,
                       degradations,
                       testFileIndex,
-                      repo)));
+                      repo,
+                      slices)));
     }
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
     long tokensIn = 0;
@@ -179,7 +213,8 @@ final class VerificationWave {
       String runId,
       List<String> degradations,
       List<String> testFileIndex,
-      String repo) {
+      String repo,
+      CrossFileSlices slices) {
     if (budget.phase() == RunBudgetTracker.Phase.STOP) {
       // 100% 预算击穿：验证不可得 → UNVERIFIED（02§4.2），不发布
       degradations.add("verifier-budget-exhausted");
@@ -207,7 +242,8 @@ final class VerificationWave {
             verifier.budget(),
             resolver,
             testFileIndex == null ? List.of() : testFileIndex,
-            repo);
+            repo,
+            slices.text());
     AgentBrief brief = verifier.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSuffix(file));
     trace.emit(

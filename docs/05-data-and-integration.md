@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.8（2026-10-28，M4e 池内项"语义索引/跨文件上下文"第一版：§5 新增 `semantic_context.*` 配置项与环境变量（ADR-0014；默认关闭））
 > 文档版本：v1.7（2026-10-27，M4e 第二半 + M4f-full：CLI/server 平台选择与 GitLab webhook（ADR-0013）；§1.6 产品事件史 JSONL/PG/检索/引用（ADR-0012）；调试/契约不变）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：GitLab 适配器端点差异/账本映射/待验证项落 ADR-0011 与 docs/deployment-gitlab.md；SPI 签名不变）
 > 文档版本：v1.3.3（2026-10-26，M4b：PostgreSQL 五表 + 手写幂等 DDL；`cra-eval verify` 增签名参数）
@@ -516,6 +517,11 @@ cra:
         v2: { model: "<异构>", template: refute-oriented }
       important-refuted-spotcheck: 0.20       # 拒真保险丝（03§4.3）
     budget: { run-total-tokens: 500000, degrade-at: [0.70, 0.85] }   # v1.2.1：500k + 阈值重校（02§4.4）
+    semantic-context:              # M4e（ADR-0014）：L2 跨文件切片；默认关闭
+      enabled: false               # CRA_SEMANTIC_CONTEXT_ENABLED / --semantic-context
+      max-files: 2000              # 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES）
+      max-file-bytes: 262144       # 单文件字节上限（CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES）
+      slice-tokens: 4000           # 单 brief 切片 token 上限，从 L1 预算扣除（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS）
   review:
     default-depth: standard
     large-diff-lines: 2000
@@ -537,6 +543,10 @@ cra:
 | `CRA_GITLAB_PROJECT` / `--gitlab-project` | CLI 的 GitLab 项目（`group/project`，可嵌套 group）；server 从 MR payload 的 `project.path_with_namespace` 取 | `CI_PROJECT_PATH` |
 | `CRA_GITLAB_BOT_USERNAME` | `/user` 不可读时的 bot 身份回退 | 空 |
 | `CRA_SERVER_WEBHOOK_SECRET` | GitHub HMAC 密钥 / GitLab webhook Secret token | 必填 |
+| `CRA_SEMANTIC_CONTEXT_ENABLED` / `--semantic-context` | 语义上下文（L2 跨文件切片，ADR-0014）：开启后 standard/deep 档对 dataflow/security/verifier 注入切片 | `false` |
+| `CRA_SEMANTIC_CONTEXT_MAX_FILES` / `--semantic-context-max-files` | 索引扫描 Java 文件数上限（升序截断并声明） | `2000` |
+| `CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES` / `--semantic-context-max-file-bytes` | 单文件字节上限（超限跳过并声明） | `262144` |
+| `CRA_SEMANTIC_CONTEXT_SLICE_TOKENS` / `--semantic-context-slice-tokens` | 单 brief 切片 token 上限（500–12000；从 L1 预算扣除） | `4000` |
 
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 

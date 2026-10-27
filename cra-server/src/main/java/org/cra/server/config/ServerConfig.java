@@ -63,6 +63,11 @@ import org.springframework.scheduling.support.CronExpression;
  * @param eventHistoryMaxBytes 事件源单次读取字节上限
  * @param eventHistoryMaxEvents 单次入库事件上限
  * @param runTotalTokens run 级 token 预算（02§4.4，默认 500k）
+ * @param semanticContextEnabled 语义上下文（L2 跨文件切片）开关（M4e，ADR-0014；CRA_SEMANTIC_CONTEXT_ENABLED，默认
+ *     false——关闭不动基线行为）
+ * @param semanticContextMaxFiles 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES，默认 2000）
+ * @param semanticContextMaxFileBytes 单文件字节上限（CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES，默认 262144）
+ * @param semanticContextSliceTokens 单 brief 切片 token 上限（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS，默认 4000）
  */
 public record ServerConfig(
     String webhookSecret,
@@ -103,7 +108,11 @@ public record ServerConfig(
     long eventHistoryRetryBackoffMillis,
     long eventHistoryMaxBytes,
     int eventHistoryMaxEvents,
-    long runTotalTokens) {
+    long runTotalTokens,
+    boolean semanticContextEnabled,
+    int semanticContextMaxFiles,
+    long semanticContextMaxFileBytes,
+    long semanticContextSliceTokens) {
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
@@ -230,7 +239,11 @@ public record ServerConfig(
         longValue(env, "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS", 500),
         longValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_BYTES", 67_108_864L),
         intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS", 5_000),
-        longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", 500_000L));
+        longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", 500_000L),
+        bool(env, "CRA_SEMANTIC_CONTEXT_ENABLED", false),
+        intValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILES", 2_000),
+        longValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", 262_144L),
+        longValue(env, "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS", 4_000L));
   }
 
   /**
