@@ -11,7 +11,7 @@
 | 4 | M4b 报告签发未按 repo 限定 | **A：按 repo 限定** | 已实现并合并：报告签名 v2 + `X-CRA-Repo` + `(repo, commit)` 查询（PR #14 / ADR-0009） |
 | 5 | 评测门禁代码改动不触发 L2 | **A：纳入 L2 触发范围** | 已实现并合并（PR #9）：`VerifyCommand/ReportHasher/GateEvaluator/GatePolicy/AggregateEngine` |
 | 6 | 文档与实现不一致 | **A：做文档一致性清理** | **已完成**：PR #8 合并 `b17c580`（含 4A/5A 口径与 README 限制） |
-| 7 | M4e / M4f-full 未完成 | 按提示词继续开发 | **M4e 第一半已合并**：PR #13 `f7fa5f9`（GitLab 适配器 58 测试；ADR-0011；CLI/server 接线与真实写操作 pending）；Gerrit/语义索引/M4f-full 仍未做 |
+| 7 | M4e / M4f-full 未完成 | 按提示词继续开发 | **M4e GitLab 两半已合并**：PR #13 `f7fa5f9`（适配器，ADR-0011）+ PR #17 `c364323`（CLI/server 平台选择与 GitLab webhook，ADR-0013）；真实 GitLab 写操作仍待 owner token；**M4f-full 已合并**：PR #18 `b418c0b`（事件史 JSONL→PG→CrossChecker，ADR-0012，默认关闭；Jira/Confluence 等外部源未接）；Gerrit、语义索引/跨文件上下文仍未做 |
 | 8 | CrossChecker 默认关闭 | **B：保持默认关闭** | `CRA_CROSSCHECKER_ENABLED=false`；开启约 +20k token/次；按仓库/路径按需开启 |
 | 9 | L3 翻转 case 的 expected 是否过严 | **B：审计，只修正确有错误者** | 审计报告 docs/audits/l3-flip-audit-2026-10-27.md（PR #12）：A=1（Mockito-3 锚点）、B=4（验证层误拒）、C/D=3（无候选/类别口径）；本审计未改数据/阈值 |
 | 10 | L2/L3 模型与温度不统一 | **A：标准化** | 暂定 opencode-go `deepseek-v4.1-flash` + temperature 0.2（与官方 L3 一致）；本地 `deepseek-chat` L2 报告标记为非标准；暂不重跑历史报告；待 L3 稳定性实验结果最终确认 |
@@ -35,3 +35,9 @@
 - **PR #8（文档一致性）**：合并 `b17c580`；已修正 4A 签名 v2、5A L2 触发、真实 GitHub 验收、单租户限制、L3 owner 裁决 A 等过期口径。
 - **PR #13（M4e GitLab 第一半）**：合并 `f7fa5f9`；ADR 由 0009 重号为 0011，模块测试 58 例、verify（含 PG）与 eval-l1 绿；CLI/server 接线与真实 GitLab 写操作 pending。
 - **L3 稳定性实验**：运行方报告已完成，但仓库分支、PR、eval run、artifact 与记忆均未留下可验收落点；**本记录不将其计为已验收**，需提交报告/分支/run id 后再独立验收。
+
+## 验收状态更新（2026-10-27 收尾第二轮）
+
+- **PR #18（M4f-full）**：合并 `b418c0b`；L2 52/60 = 0.867（WL 0.7583）、clean 0.93、零发布 0/30、100/100；事件史默认关闭，只接 JSONL；Jira/Confluence/ServiceNow/Slack/PagerDuty/GitHub Issues 作为事件源均未接。
+- **PR #17（M4e 第二半）**：合并 `c364323`；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab` + `/webhooks/gitlab` 接线完成；verify（含 PG）/L1 绿，L2 按规则跳过；真实 GitLab **读**路径已对公共项目验证，**真实写操作仍 pending（无 owner token）**；Gerrit、语义索引未做。
+- **完成度口径**：按 11 个功能项，10 项完整（M0–M3、M4a/b/c/d、M4f-lite、M4f-full），M4e 仍为部分完成（GitLab 完成，Gerrit/语义索引未做）。
