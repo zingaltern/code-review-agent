@@ -239,6 +239,34 @@ final class PipelineDataLoader {
 
   /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */
   /**
+   * 全量 Java 文件路径索引（ADR-0015：调用点索引的扫描域）：head 侧一次 listFiles。
+   *
+   * <p>不可得（平台不支持/接口失败）→ 降级为空列表 + trace 声明；调用点索引随之声明 {@code available=false}，验证按原形态进行。
+   *
+   * @param request 评审请求（head sha 为索引锚点）
+   * @param trace trace 写入器
+   * @return Java 文件路径列表（失败降级为空）
+   */
+  List<String> javaFileIndex(ReviewRequest request, TraceWriter trace) {
+    try {
+      List<String> files =
+          adapter.listFiles(
+              new RepoRef(request.repoOwner(), request.repoName()), request.headSha(), "**/*.java");
+      trace.emit("java_file_index", Map.of("available", true, "files", files.size()));
+      return files;
+    } catch (RuntimeException e) {
+      trace.emit(
+          "java_file_index",
+          Map.of(
+              "available",
+              false,
+              "reason",
+              e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()));
+      return List.of();
+    }
+  }
+
+  /**
    * 测试文件清单采集（v1.3.2 test 类分型）：head 侧一次 listFiles。
    *
    * <p>背景（M3 取证）：test 类 finding 主张「某行为无测试覆盖」——负向/全局主张，验证上下文 不含测试目录时无法证否 → 必然 INSUFFICIENT → Judge

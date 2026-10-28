@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.SubAgent;
@@ -16,8 +17,10 @@ import org.cra.common.finding.CandidateFinding;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.core.internal.pipeline.AntiAnchorValidator;
+import org.cra.core.internal.pipeline.CallSiteIndex;
 import org.cra.core.internal.pipeline.CrossFileSlices;
 import org.cra.core.internal.pipeline.FindingAggregator;
+import org.cra.core.internal.pipeline.RefuteEvidenceGate;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
 import org.cra.core.internal.pipeline.SemanticContext;
 
@@ -25,6 +28,10 @@ import org.cra.core.internal.pipeline.SemanticContext;
  * 验证波编排（07 T2.4）：候选按文件分批 → 每批一个验证 brief（balanced-review）→ 三值判定；INSUFFICIENT 受控补查一次（followup_file
  * 全文注入，03§4.2 判定要求第三条）；LLM 不可得 → 缩小上下文重试 1 次 → 仍失败 该批全 UNAVAILABLE（02§4.2）；CONFIRMED
  * 过反锚定引用新颖性校验（质控信号 PASS/FAIL 入 trace，不阻断）。
+ *
+ * <p>v1.4（ADR-0015）：bug 类 REFUTED 过 {@link RefuteEvidenceGate} 机械校验——无可核查反证 → 降级为
+ * INSUFFICIENT_EVIDENCE 交 Judge 仲裁（trace 记 {@code refute_evidence_check}）； bug 类批次附带确定性调用点索引（{@link
+ * CallSiteIndex}），索引随判定结果传给 Judge 案件。
  *
  * <p>批内串行（首轮 → 可选补查轮），批间并行（≤4，04§2.3 验证 wave 并行度）；预算记账在收集线程做。
  */
@@ -38,13 +45,15 @@ final class VerificationWave {
   private final ExecutorService pool;
   private final Function<String, Optional<String>> followupLookup;
   private final CitedEvidenceResolver citedResolver;
+  private final BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer;
 
   /** 批内单 finding 判定结果。 */
   record PerFinding(
       VerdictJsonCodec.ParsedVerdict verdict,
       AntiAnchorValidator.Result antiAnchor,
       boolean followupAttempted,
-      String model) {}
+      String model,
+      RefuteEvidenceGate.Result refuteCheck) {}
 
   /** 验证波产出。 */
   record WaveResult(
@@ -52,7 +61,8 @@ final class VerificationWave {
       long tokensIn,
       long tokensOut,
       List<String> degradations,
-      int batches) {}
+      int batches,
+      Map<String, CallSiteIndex> callSiteIndexByFinding) {}
 
   /**
    * @param verifier 验证者定义（组合根注入）
@@ -62,27 +72,7 @@ final class VerificationWave {
    * @param pool 批间并行池（pipeline 持有）
    * @param followupLookup 补查文件全文查找（path → head 侧内容；不可得为 empty）
    * @param citedResolver 被引证据解析（context 类分型组装）
-   */
-  VerificationWave(
-      SubAgent<VerificationBatchInput> verifier,
-      AgentRunner agentRunner,
-      TraceWriter trace,
-      RunBudgetTracker budget,
-      ExecutorService pool,
-      Function<String, Optional<String>> followupLookup,
-      CitedEvidenceResolver citedResolver) {
-    this(
-        verifier,
-        agentRunner,
-        trace,
-        budget,
-        pool,
-        followupLookup,
-        citedResolver,
-        SemanticContext.disabled());
-  }
-
-  /**
+   * @param callSiteIndexer 调用点索引构建（bug 类分型；null = 不采集）
    * @param semanticContext 语义上下文（M4e：L2 跨文件切片注入验证 brief；关闭时为空切片、零声明）
    */
   VerificationWave(
@@ -93,7 +83,9 @@ final class VerificationWave {
       ExecutorService pool,
       Function<String, Optional<String>> followupLookup,
       CitedEvidenceResolver citedResolver,
+      BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer,
       SemanticContext semanticContext) {
+    this.semanticContext = semanticContext == null ? SemanticContext.disabled() : semanticContext;
     this.verifier = verifier;
     this.agentRunner = agentRunner;
     this.trace = trace;
@@ -101,7 +93,7 @@ final class VerificationWave {
     this.pool = pool;
     this.followupLookup = followupLookup;
     this.citedResolver = citedResolver;
-    this.semanticContext = semanticContext == null ? SemanticContext.disabled() : semanticContext;
+    this.callSiteIndexer = callSiteIndexer;
   }
 
   /**
@@ -180,6 +172,7 @@ final class VerificationWave {
                       slices)));
     }
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
+    Map<String, CallSiteIndex> indexByFinding = new LinkedHashMap<>();
     long tokensIn = 0;
     long tokensOut = 0;
     int batches = 0;
@@ -188,6 +181,7 @@ final class VerificationWave {
         BatchOutcome outcome = future.get();
         batches++;
         outcomes.putAll(outcome.outcomes());
+        indexByFinding.putAll(outcome.indexByFinding());
         tokensIn += outcome.tokensIn();
         tokensOut += outcome.tokensOut();
         budget.record(outcome.tokensIn(), outcome.tokensOut());
@@ -199,10 +193,15 @@ final class VerificationWave {
         throw new IllegalStateException("验证批次执行失败: " + cause.getMessage(), cause);
       }
     }
-    return new WaveResult(outcomes, tokensIn, tokensOut, List.copyOf(degradations), batches);
+    return new WaveResult(
+        outcomes, tokensIn, tokensOut, List.copyOf(degradations), batches, indexByFinding);
   }
 
-  private record BatchOutcome(Map<String, PerFinding> outcomes, long tokensIn, long tokensOut) {}
+  private record BatchOutcome(
+      Map<String, PerFinding> outcomes,
+      long tokensIn,
+      long tokensOut,
+      Map<String, CallSiteIndex> indexByFinding) {}
 
   private BatchOutcome verifyBatch(
       String file,
@@ -229,9 +228,10 @@ final class VerificationWave {
               "unavailable",
               "reason",
               "budget"));
-      return new BatchOutcome(allUnavailable(batch), 0, 0);
+      return new BatchOutcome(allUnavailable(batch), 0, 0, Map.of());
     }
     CitedEvidenceResolver resolver = citedResolver;
+    CallSiteIndex callSiteIndex = resolveCallSiteIndex(file, batch);
     VerificationBatchInput input =
         VerificationBatchAssembler.buildBatch(
             file,
@@ -243,6 +243,7 @@ final class VerificationWave {
             resolver,
             testFileIndex == null ? List.of() : testFileIndex,
             repo,
+            callSiteIndex,
             slices.text());
     AgentBrief brief = verifier.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSuffix(file));
@@ -282,7 +283,8 @@ final class VerificationWave {
         return new BatchOutcome(
             allUnavailable(batch),
             run.tokensIn() + retry.tokensIn(),
-            run.tokensOut() + retry.tokensOut());
+            run.tokensOut() + retry.tokensOut(),
+            Map.of());
       }
       run = retry;
     }
@@ -300,7 +302,7 @@ final class VerificationWave {
               "unavailable",
               "reason",
               "schema"));
-      return new BatchOutcome(allUnavailable(batch), run.tokensIn(), run.tokensOut());
+      return new BatchOutcome(allUnavailable(batch), run.tokensIn(), run.tokensOut(), Map.of());
     }
     // 受控补查（INSUFFICIENT_EVIDENCE → followup_file → 至多一轮）
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
@@ -312,22 +314,23 @@ final class VerificationWave {
       CandidateFinding finding = scored.finding();
       VerdictJsonCodec.ParsedVerdict verdict = effective.get(finding.id());
       boolean followupAttempted = false;
+      String followupText = null;
       if (verdict != null
           && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE) {
         String followupFile = verdict.followupFile();
-        Optional<String> followupText =
+        Optional<String> followupContent =
             followupFile == null ? Optional.empty() : followupLookup.apply(followupFile);
         trace.emit(
             "verify_followup",
             Map.of(
                 "finding_id", finding.id(),
                 "file", String.valueOf(followupFile),
-                "status", followupText.isPresent() ? "provided" : "unreadable"));
-        if (followupText.isPresent()) {
+                "status", followupContent.isPresent() ? "provided" : "unreadable"));
+        if (followupContent.isPresent()) {
           followupAttempted = true;
+          followupText = followupContent.get();
           AgentBrief followupBrief =
-              verifier.buildBrief(
-                  VerificationBatchAssembler.withFollowup(input, followupText.get()));
+              verifier.buildBrief(VerificationBatchAssembler.withFollowup(input, followupText));
           trace.persistBrief(followupBrief, briefSuffix(file) + "-fu");
           AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> followupRun =
               agentRunner.executeParsed(
@@ -345,6 +348,26 @@ final class VerificationWave {
             }
           }
         }
+      }
+      RefuteEvidenceGate.Result refuteCheck = RefuteEvidenceGate.Result.notApplicable();
+      if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.REFUTED) {
+        refuteCheck =
+            RefuteEvidenceGate.check(
+                finding.category(),
+                verdict.verdict(),
+                verdict.refutation(),
+                visibleContext(input, followupText));
+        if (refuteCheck.downgraded()) {
+          // ADR-0015：无可核查反证的 REFUTED 不得直接丢弃——降级交 Judge 仲裁
+          verdict = downgrade(verdict, refuteCheck.reason());
+        }
+        trace.emit(
+            "refute_evidence_check",
+            Map.of(
+                "finding_id", finding.id(),
+                "status", refuteCheck.status().name(),
+                "reason", refuteCheck.reason().name(),
+                "downgraded", refuteCheck.downgraded()));
       }
       AntiAnchorValidator.Result antiAnchor = null;
       if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.CONFIRMED) {
@@ -370,10 +393,15 @@ final class VerificationWave {
                 "rationale",
                 rationale.length() > 400 ? rationale.substring(0, 400) : rationale,
                 "followup",
-                followupAttempted));
+                followupAttempted,
+                "refutation_kind",
+                verdict.refutation() == null || verdict.refutation().kind() == null
+                    ? "none"
+                    : verdict.refutation().kind().name()));
       }
       outcomes.put(
-          finding.id(), new PerFinding(verdict, antiAnchor, followupAttempted, run.model()));
+          finding.id(),
+          new PerFinding(verdict, antiAnchor, followupAttempted, run.model(), refuteCheck));
     }
     long confirmed =
         outcomes.values().stream()
@@ -397,6 +425,10 @@ final class VerificationWave {
                         && p.verdict().verdict()
                             == VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE)
             .count();
+    long downgraded =
+        outcomes.values().stream()
+            .filter(p -> p.refuteCheck() != null && p.refuteCheck().downgraded())
+            .count();
     trace.emit(
         "verify",
         Map.of(
@@ -413,8 +445,66 @@ final class VerificationWave {
                 "insufficient",
                 insufficient,
                 "unavailable",
-                outcomes.size() - confirmed - refuted - insufficient)));
-    return new BatchOutcome(outcomes, tokensIn, tokensOut);
+                outcomes.size() - confirmed - refuted - insufficient),
+            "refute_downgraded",
+            downgraded));
+    Map<String, CallSiteIndex> indexByFinding = new LinkedHashMap<>();
+    if (callSiteIndex != null && callSiteIndex.available()) {
+      batch.forEach(s -> indexByFinding.put(s.finding().id(), callSiteIndex));
+    }
+    return new BatchOutcome(outcomes, tokensIn, tokensOut, indexByFinding);
+  }
+
+  /** 调用点索引（bug 类批次；采集失败不影响验证，索引内部如实降级）。 */
+  private CallSiteIndex resolveCallSiteIndex(String file, List<FindingAggregator.Scored> batch) {
+    if (callSiteIndexer == null) {
+      return null;
+    }
+    boolean hasBug =
+        batch.stream()
+            .anyMatch(s -> s.finding().category() == org.cra.common.finding.FindingCategory.BUG);
+    if (!hasBug) {
+      return null;
+    }
+    CallSiteIndex index;
+    try {
+      index = callSiteIndexer.apply(file, batch);
+    } catch (RuntimeException e) {
+      index = CallSiteIndex.unavailable("error: " + e.getClass().getSimpleName());
+    }
+    if (index == null) {
+      return null;
+    }
+    trace.emit(
+        "call_site_index",
+        Map.of(
+            "file_batch", file,
+            "available", index.available(),
+            "reason", index.reason(),
+            "files_scanned", index.filesScanned(),
+            "entries", index.entries().size()));
+    return index;
+  }
+
+  /** 机械校验可见的不可信上下文：代码上下文 + 被引证据 + 补查材料（ADR-0015 §2.1）。 */
+  private static String visibleContext(VerificationBatchInput input, String followupText) {
+    return input.codeContext()
+        + "\n"
+        + input.citedEvidence()
+        + "\n"
+        + (followupText == null ? "" : followupText);
+  }
+
+  /** REFUTED 降级为 INSUFFICIENT_EVIDENCE（保留原理由，追加系统校验说明供 Judge 阅读）。 */
+  private static VerdictJsonCodec.ParsedVerdict downgrade(
+      VerdictJsonCodec.ParsedVerdict original, RefuteEvidenceGate.Reason reason) {
+    String note =
+        "\n（系统校验：该 REFUTED 未提供可核查反证（" + reason.name() + "）——仅引述/锚点不符或简报外推测不足以否定失败模式，转仲裁。）";
+    return new VerdictJsonCodec.ParsedVerdict(
+        VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE,
+        (original.rationale() == null ? "" : original.rationale()) + note,
+        null,
+        original.refutation());
   }
 
   /** 缩小上下文重试形态：只保留各锚行窗口（±60 行），丢弃全文与切片（02§4.2）。 */
@@ -431,7 +521,9 @@ final class VerificationWave {
   private static Map<String, PerFinding> allUnavailable(List<FindingAggregator.Scored> batch) {
     Map<String, PerFinding> outcomes = new LinkedHashMap<>();
     for (FindingAggregator.Scored scored : batch) {
-      outcomes.put(scored.finding().id(), new PerFinding(null, null, false, null));
+      outcomes.put(
+          scored.finding().id(),
+          new PerFinding(null, null, false, null, RefuteEvidenceGate.Result.notApplicable()));
     }
     return outcomes;
   }

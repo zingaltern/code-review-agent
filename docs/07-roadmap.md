@@ -200,6 +200,25 @@
 - **M4e 池内项（语义索引/跨文件上下文，ADR-0014）**：`SymbolIndex` 数据面 + L2 跨文件切片，默认关闭（`CRA_SEMANTIC_CONTEXT_ENABLED=false`）；Java-only；`mvn verify` 全绿（12 模块，新增 27 例）；[PR #22](https://github.com/zingaltern/code-review-agent/pull/22) 描述含交接报告（ADR-0014 链接、改动清单、验收证据、开/关 brief 对比、性能与预算影响 0.56s/352 token、已知限制、下一步建议）。**L2 已批准并执行**（run 40554850710）：bad 56/60 = 0.933（Wilson 下界 0.8407）、clean 0.68、零发布 1/30、100/100 完成，门禁绿；报告绑定 `df7e095` 并作为最后提交（`6ab6301`）；squash 合并 `477f6bd`。
 - **门禁/文档**：08§5 场景编号与总数已统一（1–29）；11§2 登记报告签名、载体扩展与事件源/检索存储；M4 功能线合入后 main 无未合并分支。
 
+### 验证层反证纪律记录（ADR-0015，2026-10-28）
+
+- **触发与取证**：官方 L3 bad 71/90（WL 0.6937）已知红；稳定性实验（run 40536199041/40536205522）表明主因不是温度。复核 trace 原文：JacksonCore-8 在 run 40536205522 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray，但 diff 实际修改的是 getTextBuffer"的**引述/锚点不符**——反证可核查，但没有否定失败模式；同一 D4J 缺陷（#182）在 run 40342221542 以正确命名发布并命中。审计文档中"调用方不会把 null 当 char[] 用"的概括与 trace 不符，以 trace 为准（ADR-0015 §1.1）。
+- **落地**：bug 类 REFUTED 必须携带 `refutation{kind,anchor,quote,reason}`；`RefuteEvidenceGate` 在缺字段/`kind=CITATION_MISMATCH`/quote 无法在简报可见上下文逐字定位/quote 过短时把判定降级为 INSUFFICIENT_EVIDENCE 交 Judge（trace `refute_evidence_check`）；bug 类 brief 增确定性调用点索引（同目录有界扫描，≤700 token 从 codeContext 预留，不可得如实声明）；judge 提示词增反证审查规则。**未改**阈值（0.70/0.35/0.80）、expected/数据集、CrossChecker 默认值。
+- **测试**：`RefuteEvidenceGateTest`（无反证不得 REFUTED 的四类降级 + 合法反证保留）、`CallSiteIndexTest`（注入/降级/渲染预算）、`VerdictJsonCodecTest`（refutation 解析）、`VerifierAntiRefutePipelineTest`（JacksonCore-8 形态：引述不符 REFUTED → 降级 → Judge CONFIRMED → 发布；改前 PromotionEngine 直接 REJECT；verifier 输入 ≤12k）。`mvn -B -ntp verify` 2109 tests 全绿（1:51，含 PG 集成）。
+- **有界对比**（8 个翻转 case × k=3 × temperature=0.2 × standard × tier=l3，同一子集参数）：
+
+  | 指标 | 改前 run 40536205522 | 改后 run 40548011855 |
+  |---|---|---|
+  | 聚合检出 | 19/24 = 0.792（WL 0.5953） | **22/24 = 0.917（WL 0.7415）** |
+  | JacksonCore-8 | 0/3（3 次 REFUTED） | **2/3（run-0/1 直接 CONFIRMED）** |
+  | 验证层判定分布 | CONFIRMED 45 / REFUTED 6 / INSUFFICIENT 4 | CONFIRMED 41 / REFUTED 2 / INSUFFICIENT 14 |
+  | 零发布观测 / 样本级全零 | 3/24 / 1/8 | 2/24 / 0/8 |
+  | Judge 调用（token） | 6 次（20.7k in / 1.6k out） | 14 次（49.0k in / 3.8k out） |
+  | 观测 token 合计 | 325.7k in / 36.5k out | 362.0k in / 40.9k out |
+
+  **机制**：改后 0 次机械降级（`refute_evidence_check` 无 DOWNGRADE）——模型按新提示词直接不再以引述不符判 REFUTED（改为 CONFIRMED 或 INSUFFICIENT），提示词是主要杠杆，机械门是保险丝。改后 run-2 的唯一 REFUTED 候选为非 bug 类（`call_site_index` 未触发、gate NOT_APPLICABLE），是 bug-only 纪律的已知边界。
+- **结论**：方向性改进（+3 观测、样本级全零清零），非显著性声明（n=24，Wilson 区间重叠）；误报侧本次未跑 clean 集，以 L2 重跑报告的 clean 均值为准；全量 L3 属里程碑动作，待 owner 批准后执行。
+
 
 ## 6. 工程纪律（对所有开发 agent 生效）
 

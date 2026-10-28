@@ -8,7 +8,10 @@
 
 ## 判定要求
 - CONFIRMED：你已尝试全部推翻路径仍不成立，且能独立定位证据行号；
-- REFUTED：给出具体反证（行号 + 引用代码）；
+- REFUTED：给出具体反证（行号 + 引用代码），并按 balanced-review 的契约附 `refutation`
+  对象（kind/anchor/quote/reason）；quote 须逐字摘自简报上下文。
+  **仅引述/锚点不符（CITATION_MISMATCH）不构成反证**；对简报外代码的推测不是反证，
+  需要调用方/测试证据时用 followup_file，拿不到就 INSUFFICIENT_EVIDENCE。
 - INSUFFICIENT_EVIDENCE：read_file 补查一次后仍无法判断。
 
 {>prompts/shared/untrusted-delimiter.md}

@@ -7,6 +7,7 @@
 > **v1.3**：§3.1 CrossChecker 两模式详设；A/B 赛马映射；轮次打回语义。
 > **v1.3.1**：§3.1 修正"输入不含 diff"的自我矛盾表述（diff 参与假设推导，本质区别是**额外上下文输入 + 检查对象不同**）+ 局限声明（切片启发式，召回无保证）；**§4.2 verifier/judge brief 按 category 分型组装**（context 类注入 cited commit diff 节选与 REVIEW.md 条目——否则验证层对 context 证据失明，必然 INSUFFICIENT→拒杀）；§6 补 CrossChecker 预算行。
 > **v1.4**（2026-10-27，M4f-full，ADR-0012）：§3.1 模式 A 输入 b 增**产品事件史**（工单/事故复盘 JSONL → PG）；§4.2 context 类增事件条目预取与 `event <id>` 引用；§6 预算行改为"变更史/事件史合计 ≤4k"。
+> **v1.4.1**（2026-10-28，ADR-0015）：§4.2 bug 类增**确定性调用点索引**与 **REFUTED 反证纪律/机械校验**（无可核查反证 → 降级 INSUFFICIENT 交 Judge）；§4.3 晋升流增降级分支；§4.4 Judge 增反证审查；§6 速查表补索引预算说明。阈值/数据集不变。
 
 ## 0. 三功能框架映射（框架与案例见 01§3.4）
 
@@ -142,6 +143,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 **输入（v1.3.1：按 category 分型组装）**：
 
 - **代码类**（bug/security/test/convention/performance）：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段；
+- **bug 类调用点索引（v1.4，ADR-0015）**：上述代码类输入 + 确定性预取的**受影响符号调用点索引**（finding 文本标识符 ∩ 被改动文件文本，≤3 个符号；head 侧 `listFiles("**/*.java")` 的同目录候选文件，≤30 个文件、≤30 条命中、渲染 ≤700 token，从 codeContext 预算内预留）。不可得（仓库树为空/无符号）→ trace `call_site_index{available=false}` 并在 brief 如实声明，不静默。索引是**近似**：只扫同目录候选，跨包调用者可能不可见；验证者可对可见索引中的调用方/测试文件发起 `followup_file` 补查（受控一次、预算内）。
 - **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ 被引事件史条目（M4f-full，ADR-0012：按 `event <id>` 预取摘要/类型/时间/来源/commit_refs/paths，每批 ≤5 条、≤1.5k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
 
 - **test 类（v1.3.2 新增分型）**：finding 全文 + 变更文件上下文 + **仓库测试文件清单**（head 侧 `listFiles("**/test/**/*.java")`，≤80 行，超出注明总数）。理由（M3 取证）：test 类 finding 的核心主张「某行为无测试覆盖」是**负向/全局主张**——验证上下文只有 main 文件时无法证否 → 必然 INSUFFICIENT → Judge 按证据不足拒（L3 实测 judge 的 53 条 REJECTED 中 48 条为此类）。注入清单后验证者能核对「是否已有覆盖」，未列出的行为走 followup_file 受控补查。清单不可得（listFiles 失败）→ 降级为空并记 trace `test_index`（available=false），验证按原形态进行、结论如实标注。
@@ -156,9 +158,14 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 - CONFIRMED：你必须 (a) 自己定位到证据行号（不得照抄结论中的引用），
   (b) 用你自己的话重述失败模式——禁止复述结论原文的表述，
   (c) 主动检查结论未提及的上下文（如上游已有防护、不可能触发的路径）后仍成立；
-- REFUTED：给出具体反证（行号 + 引用），如已有防护、行号张冠李戴、触发条件不可达；
-- INSUFFICIENT_EVIDENCE：当前上下文无法判断，用 read_file 补查一次后仍无法判断。
+- REFUTED：必须给出可核查反证，并输出 refutation{kind,anchor,quote,reason}；
+  quote 必须逐字摘自简报提供的上下文。只指出结论引述/方法名/行号不符
+  （kind=CITATION_MISMATCH）不构成反证——若锚行处失败模式仍成立应判 CONFIRMED 并更正位置；
+  对简报外代码的推测（"调用方不会……""假设性风险"）不是反证，需要证据时用 followup_file；
+- INSUFFICIENT_EVIDENCE：当前上下文无法判断，用 read_file/followup_file 补查一次后仍无法判断。
 ```
+
+**REFUTED 反证纪律与机械校验（v1.4，ADR-0015）**：bug 类候选的 REFUTED 缺 `refutation`、`kind=CITATION_MISMATCH`、`quote` 无法在本次简报可见上下文（代码上下文 + 被引证据 + 补查材料）中逐字定位、或 `quote` 归一化后短于 8 字符时，core 侧 `RefuteEvidenceGate` 将判定**降级为 INSUFFICIENT_EVIDENCE**交 Judge 仲裁，trace 记 `refute_evidence_check{status=DOWNGRADE, reason}`。理由（L3 取证，run `40536205522`）：JacksonCore-8 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray 而非 getTextBuffer"的**引述不符**——可核查、但没有否定失败模式；同一缺陷在 run `40342221542` 以正确命名发布并命中。机械层只校验证据形态（确定性、可重放），语义裁决交 Judge；不直接改判 CONFIRMED（避免放大误报）。
 
 **反锚定行为约束及其度量（v1.2 重定义）**：prompt 层仍要求"自己定位行号 + 用自己的话重述失败模式"（行为约束）；机器侧的**引用新颖性校验降级为 trace 质控信号**，不再阻断晋升——理由：单行证据类真缺陷（一行 off-by-one，Java 高频）的正确复述必然与 finding 原文高度重叠，硬校验要么压召回、要么迫使验证者填充无关引用"过关"，校验退化为可绕过的新颖性游戏，**引用新颖性 ≠ 独立验证**。降级后的语义：
 
@@ -173,6 +180,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 ```
 CONFIRMED                      → 发布
 REFUTED                        → 丢弃（trace 留档，进入拒真统计）
+bug 类 REFUTED 无可核查反证     → 降级 INSUFFICIENT（ADR-0015）→ Judge 仲裁
 INSUFFICIENT（补查后仍不能判）   → Judge 仲裁（仲裁者拥有更大上下文配额）
 security/important 级 REFUTED   → 抽查比例进 Judge 复核（防单个验证者错杀，
                                  比例可配，默认 20%）——召回侧的保险丝
@@ -195,9 +203,10 @@ security 类：仅 2/2 CONFIRMED 或 Judge CONFIRMED 才发布
 ### 4.4 JudgeAgent：一次性终裁（自主设计，无生产背书）
 
 - 适用于：INSUFFICIENT 仲裁、M3 分歧终裁、重要级 REFUTED 抽查；
-- brief = finding + 验证者判定与证据 + 更大配额的代码上下文；
+- brief = finding + 验证者判定与证据 + 更大配额的代码上下文；bug 类案件附带与 verifier 同源的调用点索引（≤500 token，ADR-0015）；
 - 指令明确："分歧时其中一方可能是对的，裁决哪方证据链成立，不折中、不求共识"（Debate or Vote 的结论：辩论不必然优于投票，故仲裁是一次性的，不做多轮辩论）；
-- 强模型档位；调用次数少（仅上述场景），成本可控。
+- **反证审查（v1.4，ADR-0015）**：先判断复核员的反证是否直接否定失败模式；仅引述/方法名/行号不符**不构成推翻**——回到锚行核对失败模式本身，成立则 CONFIRMED（可更正位置），不成立才 REJECTED；简报外代码的推测不能作为裁决依据；
+- 强模型档位；调用次数少（仅上述场景，加 bug 类无证据 REFUTED 降级），成本可控。
 
 ### 4.5 端到端判定流（伪代码）
 
@@ -237,8 +246,8 @@ for (var e : byFile.entrySet()) {
 | TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤4k（v1.3.2：1k→2k→4k） | 2 |  
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
-| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k | ≤1.5k | 2 |
-| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier） | ≤1k | 2 |
+| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k；**bug 类调用点索引从 codeContext 预算内预留 ≤700 token（v1.4，ADR-0015）** | ≤1.5k（含 refutation 对象） | 2 |
+| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier；**bug 类 + 调用点索引 ≤500 token**） | ≤1k | 2 |
 | **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k；v1.4 事件史） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。

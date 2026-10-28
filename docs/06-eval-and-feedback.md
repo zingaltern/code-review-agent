@@ -121,6 +121,7 @@
 - **context 类**：M4f 未启用时 `context_detection` = skipped、不计分母；启用后按 ≥0.80 首设阈值判定（对抗 ④ 只规定"纳入 L3 门禁"，未给数值，取对抗 ① 同档）。
 - **失败 run**：全部观测无完成标记 → `run_failures` 红（不得静默为绿）；部分失败 → `reported`（不参与判定，数值含 0 贡献并在报告声明）。
 - **bug-only 检出（v1.3.2，观察指标）**：只计入 category=bug 的 expected 命中；`test` OR 条目（06§3 规则 4）的贡献不计入——用于区分「发现 bug 面」与「仅指出缺测试」，**不进任何门禁判定**（报告字段 `bug_only_detection`，文本输出同名行）。
+- **验证层反证纪律观察项（v1.4，ADR-0015）**：trace 的 `refute_evidence_check`（bug 类 REFUTED 的 `OK|DOWNGRADE` 与 reason 分布）、`call_site_index`（`available`/`entries`）与 judge 调用数增量作为**报告观察指标**输出，用于复盘误拒与索引可得率；**不参与门禁判定**，阈值/口径不变。降级后的判定按 INSUFFICIENT 语义进入既有仲裁路径，门禁只消费最终 confirmed/发布集合。
 - **per-run 指标**：报告新增 `run_metrics`（`tokens_in`/`tokens_out` 的 sum 与 mean、`latency_ms` mean，来源 trace 的 `run_end`）与逐观测 token/耗时字段——07§3 验收 6 的 "≈330k/500k=66%" 算术对照自此有字段可查，不再只能粗判。无 `run_end` 的观测不进均值分母（`observations_with_stats` 标注）。
 - **扩集后复核（M3 已执行，v1.3.2）**：T3.2 合并后 L2 实测 31/60=51.7%（下界 0.393）→ **L2 基线重冻结为 0.35**；**零发布护栏改样本级**（owner 裁决，依据：观测级在运行间波动下必然假红，三项实测均无样本级全零）。clean 基线 1.0 维持（L3 实测 0.60、L2 0.875 均低于基线）。
 

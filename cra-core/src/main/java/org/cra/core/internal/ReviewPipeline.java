@@ -3,12 +3,12 @@ package org.cra.core.internal;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
@@ -478,11 +478,20 @@ public final class ReviewPipeline implements Orchestrator {
           Map.of("clusters", merged.clusters(), "merged_away", merged.mergedAway()));
 
       // 去重（指纹 exact → ±5 滑窗 → possible_duplicate，02§4.1）+ 锚定校验（05§2.2）+ blame 复核
-      Map<String, Optional<String>> contentCache = new HashMap<>();
+      // 内容缓存跨门禁/验证/调用点索引共享，验证波与补查在并发池内读取 → 必须线程安全
+      Map<String, Optional<String>> contentCache = new ConcurrentHashMap<>();
       FindingGatekeeper.Outcome gateOutcome =
           gatekeeper.gate(request, diff, merged.kept(), publishedMarkers, contentCache, trace);
       List<FindingAggregator.Scored> candidates = gateOutcome.candidates();
       int skippedDuplicate = gateOutcome.skippedDuplicate();
+
+      // v1.4（ADR-0015）：bug 类候选的确定性调用点索引——一次仓库树列举，逐批次有界扫描
+      List<String> javaFileIndex =
+          candidates.stream()
+                  .anyMatch(
+                      s -> s.finding().category() == org.cra.common.finding.FindingCategory.BUG)
+              ? dataLoader.javaFileIndex(request, trace)
+              : List.of();
 
       // T2.4：验证波（文件批次 × balanced-review；INSUFFICIENT 受控补查；反锚定质控信号入 trace）
       VerificationWave wave =
@@ -494,6 +503,13 @@ public final class ReviewPipeline implements Orchestrator {
               verifyPool,
               path -> dataLoader.contentOf(path, request.headSha(), request, contentCache),
               citedResolver,
+              (file, batch) ->
+                  org.cra.core.internal.pipeline.CallSiteIndex.build(
+                      file,
+                      batch,
+                      reviewDiff,
+                      javaFileIndex,
+                      path -> dataLoader.contentOf(path, request.headSha(), request, contentCache)),
               semanticContext);
       // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）
       List<String> testFileIndex =
@@ -513,7 +529,15 @@ public final class ReviewPipeline implements Orchestrator {
       // T2.5/T2.6：晋升规则（M2 形态）+ Judge 仲裁与抽查复核（03§4.3/03§4.4）
       FindingPromoter.Outcome promotion =
           promoter.promote(
-              runId, candidates, waveResult, headFiles, policy, budget, trace, repoKey);
+              runId,
+              candidates,
+              waveResult,
+              headFiles,
+              policy,
+              budget,
+              trace,
+              repoKey,
+              waveResult.callSiteIndexByFinding());
       tokensIn += promotion.tokensIn();
       tokensOut += promotion.tokensOut();
       List<FindingAggregator.Scored> confirmedCandidates = promotion.confirmed();

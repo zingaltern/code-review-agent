@@ -65,6 +65,25 @@ final class FindingPromoter {
       RunBudgetTracker budget,
       TraceWriter trace,
       String repo) {
+    return promote(runId, candidates, waveResult, headFiles, policy, budget, trace, repo, Map.of());
+  }
+
+  /**
+   * 验证结论 → 发布决策（ADR-0015：bug 类 Judge 案件附带调用点索引）。
+   *
+   * @param callSiteIndexByFinding finding id → 调用点索引（验证波产出；空 = 不注入）
+   * @return 晋升结果
+   */
+  Outcome promote(
+      String runId,
+      List<FindingAggregator.Scored> candidates,
+      VerificationWave.WaveResult waveResult,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      RunBudgetTracker budget,
+      TraceWriter trace,
+      String repo,
+      Map<String, org.cra.core.internal.pipeline.CallSiteIndex> callSiteIndexByFinding) {
     boolean publishUnverified = "labeled".equals(options.publishUnverified());
     JudgeArbiter arbiter = new JudgeArbiter(judge, agentRunner, trace);
     List<FindingAggregator.Scored> confirmedCandidates = new ArrayList<>();
@@ -110,7 +129,15 @@ final class FindingPromoter {
           boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
           JudgeArbiter.Judgement judgement =
               arbitrate(
-                  arbiter, finding, verifierOutcome, spotCheck, headFiles, policy, runId, repo);
+                  arbiter,
+                  finding,
+                  verifierOutcome,
+                  spotCheck,
+                  headFiles,
+                  policy,
+                  runId,
+                  repo,
+                  callSiteIndexByFinding.get(finding.id()));
           budget.record(judgement.tokensIn(), judgement.tokensOut());
           tokensIn += judgement.tokensIn();
           tokensOut += judgement.tokensOut();
@@ -148,7 +175,8 @@ final class FindingPromoter {
       Map<String, FileContent> headFiles,
       ReviewPolicy policy,
       String runId,
-      String repo) {
+      String repo,
+      org.cra.core.internal.pipeline.CallSiteIndex callSiteIndex) {
     String verdictText =
         verifierOutcome != null && verifierOutcome.verdict() != null
             ? verifierOutcome.verdict().verdict().name()
@@ -163,7 +191,8 @@ final class FindingPromoter {
             headFiles,
             policy,
             citedResolver,
-            repo);
+            repo,
+            callSiteIndex);
     return arbiter.arbitrate(input, runId, finding.id());
   }
 
