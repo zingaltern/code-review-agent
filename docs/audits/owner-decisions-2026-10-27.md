@@ -24,7 +24,7 @@
 - 决策 5A：PR #9（`ci.yml` L2 触发正则）
 - 决策 2C：ADR-0010（`docs/adr/0010-server-signed-l2-reports.md`）
 - 决策 4A：ADR-0009（`docs/adr/0009-repo-scoped-report-attestation.md`）、PR #14
-- 决策 9B：`docs/audits/l3-flip-audit-2026-10-27.md`
+- 决策 9B：`docs/audits/l3-flip-audit-2026-10-27.md`；**验证层误拒子类已定向修复**（ADR-0015 + PR #21，见文末「验收状态更新（2026-10-28 验证层反证纪律）」）
 - 决策 3A/13：PR #10、`docs/deployment-server.md` §9
 - 决策 6：PR #8（文档一致性）
 - 决策 10：L3 稳定性实验已完成，`docs/audits/l3-stability-2026-10-27.md`；维持 temperature 0.2
@@ -46,3 +46,11 @@
 
 - **PR #22（M4e 语义索引/跨文件上下文第一版）**：合并 `477f6bd`；`SymbolIndex`（jgit head 树、Java-only、默认关闭）+ L2 跨文件切片（BH-dataflow/Security/Verifier，≤4k，从 L1 预算扣除）；`mvn verify`/L1 绿。
 - **L2**：owner 批准后经 `eval.yml` 执行（run 40554850710，head `df7e095`）：bad 56/60 = 0.933（Wilson 下界 0.8407）、clean 0.68、零发布 1/30、100/100 完成；报告绑定 `df7e095`，以最后提交 `6ab6301` 落库。
+
+## 验收状态更新（2026-10-28 验证层反证纪律）
+
+- **PR #21（验证层 REFUTED 反证纪律，ADR-0015）**：合并 `23c20dd`；bug 类 REFUTED 必须携带 `refutation{kind,anchor,quote,reason}`，`RefuteEvidenceGate` 机械校验不通过（缺字段/引述不符/quote 不可逐字定位/过短）→ 降级 INSUFFICIENT_EVIDENCE 交 Judge（trace `refute_evidence_check`）；bug 类 brief 附确定性调用点索引（同目录有界扫描，≤700 token 从 codeContext 预留，不可得如实声明）；judge 提示词增反证审查规则。**未改**阈值（0.70/0.35/0.80）、expected/数据集、CrossChecker 默认值。与 ADR-0014 语义索引并存融合（同文件批次同时计算调用点索引与 L2 切片，预算合并预留）；spotless 融合代码已格式化。
+- **有界实验**（8 翻转 case × k=3 × temperature=0.2 × standard）：聚合检出 19/24 → 22/24（WL 0.5953 → 0.7415），JacksonCore-8 0/3 → 2/3，样本级全零 1/8 → 0/8；机制为提示词直接改变判定（改后 0 次机械降级，机械门是保险丝）。详见 docs/07「验证层反证纪律记录（ADR-0015）」。
+- **合并 head L2**（run 40594443336，绑定 `a644ac6`，报告最后提交 `ad134ad`）：bad 53/60 = 0.883（Wilson 下界 0.7782）、clean 0.75、零发布样本级 0/30、100/100 完成，门禁绿。合并过程中另有一次 e12bb24 上的 L2（run 40568302478：55/60 = 0.917、WL 0.8193），因 spotless 提交改变报告绑定后按规则在最终 head 重跑，以 `a644ac6` 报告为准。
+- **全量 L3**：属里程碑动作，待 owner 批准后执行（PR #21 未自行触发）。
+
