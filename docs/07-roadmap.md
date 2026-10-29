@@ -218,6 +218,18 @@
 
   **机制**：改后 0 次机械降级（`refute_evidence_check` 无 DOWNGRADE）——模型按新提示词直接不再以引述不符判 REFUTED（改为 CONFIRMED 或 INSUFFICIENT），提示词是主要杠杆，机械门是保险丝。改后 run-2 的唯一 REFUTED 候选为非 bug 类（`call_site_index` 未触发、gate NOT_APPLICABLE），是 bug-only 纪律的已知边界。
 - **结论**：方向性改进（+3 观测、样本级全零清零），非显著性声明（n=24，Wilson 区间重叠）；误报侧本次未跑 clean 集，以 L2 重跑报告的 clean 均值为准；全量 L3 属里程碑动作，待 owner 批准后执行。
+- **全量 L3（owner 批准后执行，2026-10-29；run `40908847824`，main `7f6bcfd`，官方口径 `set=all k=3 standard tier=l3 crosschecker=true temperature=0.2`，198 观测 198 完成，报告 sha256 `df39dfe737c60e4cbdbfb46ba17986297e760ac9eceeb658bcdda448ebd8a213`）**：**门禁全绿**——bad **82/90 = 0.911（Wilson 下界 0.8343 ≥ 0.70）**、clean 误报 0.70（≤1.5）、幻觉拒绝 15/15 = 1.000、注入 0、context 18/18、零发布观测 4/90（4.4%）、样本级全零 **0/30**。对比上一轮官方 L3（run `40416120356`，71/90 红侧）：
+
+  | 指标 | 40416120356（改前） | 40908847824（改后） |
+  |---|---|---|
+  | bad 检出 | 71/90 = 0.789（WL 0.6937 红） | **82/90 = 0.911（WL 0.8343 过 0.70）** |
+  | 验证层判定分布 | CONFIRMED 297 / REFUTED 61 / INSUFFICIENT 79 | CONFIRMED 329 / REFUTED 17 / INSUFFICIENT 115 |
+  | 零发布观测 / 样本级全零 | 12/90 / 1/30 | 4/90 / 0/30 |
+  | clean 误报均值 | 0.55 | 0.70（容差 1.5 内，+0.15） |
+  | Judge 调用（token） | 81 次（256.7k in / 19.1k out） | 115 次（384.2k in / 28.2k out） |
+  | 观测 token 合计 | 3.777M in / 0.320M out | 3.969M in / 0.318M out（+5.1% in） |
+
+  逐 case：12 个 bad case 检出上升（Closure-1/3/6、Gson-5/6/7、JacksonCore-8 0/3→1/3、Jsoup-12、Mockito-3/8/9），**无 case 回退**。机制（trace）：REFUTED 61→17（-72%）；`refute_evidence_check` 触发 17 次 = 12 OK（合法反证保留）+ 5 NOT_APPLICABLE（非 bug 类）+ 0 DOWNGRADE——提示词继续是主要杠杆，机械门承担"保留合法反证"的审计职能；`call_site_index` 141 次全部不可得（评测 stub tree 为空，符合预期）。此前的 L2 合并 head 重跑（bad 55/60、53/60）与有界对比的判断在 90 观测尺度上成立；bad 检出门禁自 M3 扩集以来首次全绿。
 
 
 ## 6. 工程纪律（对所有开发 agent 生效）

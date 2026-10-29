@@ -150,8 +150,14 @@ judge（arbitrate.md）：
   （22/24，JacksonCore-8 2/3，样本级全零 0/8）；机制上改后 0 次机械降级——
   提示词让模型直接不再以引述不符判 REFUTED（CONFIRMED 或 INSUFFICIENT），机械门未触发；
   judge 调用 6→14 次（+28.3k in / +2.2k out）；详见 07§M4 收口记录与 PR；
-- `mvn -B -ntp verify` 全绿（2109 tests，含 PG 集成）；L2 按 04§2.4 重跑并作为 PR 最后一个提交；
-  全量 L3 只在 owner 批准后执行。
+- `mvn -B -ntp verify` 全绿（2109 tests，含 PG 集成）；L2 按 04§2.4 重跑并作为 PR 最后一个提交
+  （合并 head 重跑 bad 55/60、53/60 均绿）；
+- **全量 L3（owner 批准，2026-10-29；run `40908847824`，main `7f6bcfd`，官方口径，198 观测）**：
+  门禁全绿——bad **82/90 = 0.911（Wilson 下界 0.8343 ≥ 0.70）**、clean 误报 0.70（≤1.5）、
+  幻觉 15/15、注入 0、context 18/18、零发布样本级 0/30；REFUTED 61→17（-72%）、
+  `refute_evidence_check` 12 OK / 0 DOWNGRADE / 5 NOT_APPLICABLE、judge 81→115 次、
+  token +5.1% in；12 个 bad case 检出上升、无回退（JacksonCore-8 0/3→1/3）。
+  本决策的核心预期——降低验证层误拒且不放大误报——在 90 观测尺度成立，bad 检出门禁转绿。
 
 ## 5. 已知局限
 
