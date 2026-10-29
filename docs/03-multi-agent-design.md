@@ -8,6 +8,7 @@
 > **v1.3.1**：§3.1 修正"输入不含 diff"的自我矛盾表述（diff 参与假设推导，本质区别是**额外上下文输入 + 检查对象不同**）+ 局限声明（切片启发式，召回无保证）；**§4.2 verifier/judge brief 按 category 分型组装**（context 类注入 cited commit diff 节选与 REVIEW.md 条目——否则验证层对 context 证据失明，必然 INSUFFICIENT→拒杀）；§6 补 CrossChecker 预算行。
 > **v1.4**（2026-10-27，M4f-full，ADR-0012）：§3.1 模式 A 输入 b 增**产品事件史**（工单/事故复盘 JSONL → PG）；§4.2 context 类增事件条目预取与 `event <id>` 引用；§6 预算行改为"变更史/事件史合计 ≤4k"。
 > **v1.4.1**（2026-10-28，ADR-0015）：§4.2 bug 类增**确定性调用点索引**与 **REFUTED 反证纪律/机械校验**（无可核查反证 → 降级 INSUFFICIENT 交 Judge）；§4.3 晋升流增降级分支；§4.4 Judge 增反证审查；§6 速查表补索引预算说明。阈值/数据集不变。
+> **v1.4.2**（2026-10-30，ADR-0015 §6）：反证机械校验适用范围 bug → **bug/test**（security 维持 20% 抽查保险丝，暂不扩）；§4.2 与 §4.3 同步口径，降级逻辑/阈值/trace 语义不变。
 
 ## 0. 三功能框架映射（框架与案例见 01§3.4）
 
@@ -165,7 +166,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 - INSUFFICIENT_EVIDENCE：当前上下文无法判断，用 read_file/followup_file 补查一次后仍无法判断。
 ```
 
-**REFUTED 反证纪律与机械校验（v1.4，ADR-0015）**：bug 类候选的 REFUTED 缺 `refutation`、`kind=CITATION_MISMATCH`、`quote` 无法在本次简报可见上下文（代码上下文 + 被引证据 + 补查材料）中逐字定位、或 `quote` 归一化后短于 8 字符时，core 侧 `RefuteEvidenceGate` 将判定**降级为 INSUFFICIENT_EVIDENCE**交 Judge 仲裁，trace 记 `refute_evidence_check{status=DOWNGRADE, reason}`。理由（L3 取证，run `40536205522`）：JacksonCore-8 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray 而非 getTextBuffer"的**引述不符**——可核查、但没有否定失败模式；同一缺陷在 run `40342221542` 以正确命名发布并命中。机械层只校验证据形态（确定性、可重放），语义裁决交 Judge；不直接改判 CONFIRMED（避免放大误报）。
+**REFUTED 反证纪律与机械校验（v1.4，ADR-0015）**：bug/test 类候选的 REFUTED 缺 `refutation`、`kind=CITATION_MISMATCH`、`quote` 无法在本次简报可见上下文（代码上下文 + 被引证据 + 补查材料）中逐字定位、或 `quote` 归一化后短于 8 字符时，core 侧 `RefuteEvidenceGate` 将判定**降级为 INSUFFICIENT_EVIDENCE**交 Judge 仲裁，trace 记 `refute_evidence_check{status=DOWNGRADE, reason}`（status 区分 `OK` 通过 / `DOWNGRADE` 降级 / `NOT_APPLICABLE` 不适用）。理由（L3 取证，run `40536205522`）：JacksonCore-8 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray 而非 getTextBuffer"的**引述不符**——可核查、但没有否定失败模式；同一缺陷在 run `40342221542` 以正确命名发布并命中。**test 类于 v1.4.2 纳入**（ADR-0015 §6）：bad-JacksonCore-8 r1 的 test 类候选（"空缓冲区场景无测试覆盖"）同样被 CITATION_MISMATCH 直接拒掉；security 类仍走 20% 抽查保险丝，暂不纳入机械校验。机械层只校验证据形态（确定性、可重放），语义裁决交 Judge；不直接改判 CONFIRMED（避免放大误报）。
 
 **反锚定行为约束及其度量（v1.2 重定义）**：prompt 层仍要求"自己定位行号 + 用自己的话重述失败模式"（行为约束）；机器侧的**引用新颖性校验降级为 trace 质控信号**，不再阻断晋升——理由：单行证据类真缺陷（一行 off-by-one，Java 高频）的正确复述必然与 finding 原文高度重叠，硬校验要么压召回、要么迫使验证者填充无关引用"过关"，校验退化为可绕过的新颖性游戏，**引用新颖性 ≠ 独立验证**。降级后的语义：
 
@@ -180,7 +181,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 ```
 CONFIRMED                      → 发布
 REFUTED                        → 丢弃（trace 留档，进入拒真统计）
-bug 类 REFUTED 无可核查反证     → 降级 INSUFFICIENT（ADR-0015）→ Judge 仲裁
+bug/test 类 REFUTED 无可核查反证 → 降级 INSUFFICIENT（ADR-0015）→ Judge 仲裁
 INSUFFICIENT（补查后仍不能判）   → Judge 仲裁（仲裁者拥有更大上下文配额）
 security/important 级 REFUTED   → 抽查比例进 Judge 复核（防单个验证者错杀，
                                  比例可配，默认 20%）——召回侧的保险丝
