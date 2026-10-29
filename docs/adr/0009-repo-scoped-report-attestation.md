@@ -52,11 +52,16 @@ owner 2026-10-27 决策 4A：签发范围必须按 repo 限定。
   （ADR-0008 的局限声明仍然有效）。
 - `X-CRA-Repo` 由调用方提供；服务端只验证它是否与 `review_run` 匹配，不替代
   每仓库独立 token/权限模型。若未来按租户隔离密钥，应另写 ADR。
+- 2026-10-28 修订：repo 的非空与 owner/name 形式校验前移到签发入口（无条件必填，
+  非法 → 409，与 `ReportSignature.isValidRepo` 同一规则），不再落到底层信封不变量
+  抛 500；信任边界不变——头仍由调用方提供、仅做格式校验。
 
 ## 测试与验收
 
-- `ReportSignatureTest`：v2 往返、repo 篡改/缺失拒绝。
-- `AttestationServiceTest`：repo 缺失 409、repo 传入 checker、审计记录含 repo。
-- `ServerHttpIntegrationTest`：带 `X-CRA-Repo` 签发 200；缺头 409；跨 repo 同名
-  commit 不命中（由 SQL 条件保证）。
+- `ReportSignatureTest`：v2 往返、repo 篡改/缺失拒绝、repo 非法形式（owner//name 等）拒绝。
+- `AttestationServiceTest`：repo 缺失/非法 409（含宽松策略）、repo 传入 checker、审计记录含 repo。
+- `ServerHttpIntegrationTest`：带 `X-CRA-Repo` 签发 200；缺头 409；头非法形式 409；
+  跨 repo 同名 commit 不命中（由 SQL 条件保证）。
+- `PostgresKnownCommitCheckerTest`：真实 PG 上 (repo, commit) 命中、跨仓隔离、
+  大小写不敏感与空参拒绝。
 - `VerifyCommandTest`：`--repo` 匹配通过、不匹配退出码 5。

@@ -82,6 +82,29 @@ class AttestationServiceTest {
   }
 
   @Test
+  void permissivePolicyStillRefusesBlankAndInvalidRepoWith409() {
+    // repo 校验在 requireKnownCommit 之外：宽松策略下缺失/非法同样走 409 拒绝路径，
+    // 不再落到底层 Envelope 不变量抛 IllegalArgumentException（500）
+    AttestationService permissive =
+        new AttestationService(KEY, "key-v1", false, (repo, commit) -> false, new CapturingStore());
+    for (String repo : new String[] {"", "   ", null, "not-a-repo", "owner/", "a/b/c"}) {
+      assertThatThrownBy(() -> permissive.attest(REPORT, repo, "api-token"))
+          .isInstanceOf(AttestationRejectedException.class)
+          .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
+    }
+  }
+
+  @Test
+  void invalidRepoFormatIsRejectedBeforeKnownCommitCheck() {
+    // 形式非法在入口即拒：knownCommitChecker 不应被调用（checker 返回 true 也不能放行）
+    AttestationService strictWithKnownCommit =
+        new AttestationService(KEY, "key-v1", true, (repo, commit) -> true, new CapturingStore());
+    assertThatThrownBy(() -> strictWithKnownCommit.attest(REPORT, "owner//name", "api-token"))
+        .isInstanceOf(AttestationRejectedException.class)
+        .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
+  }
+
+  @Test
   void rejectsInvalidJson() {
     assertThatThrownBy(
             () ->

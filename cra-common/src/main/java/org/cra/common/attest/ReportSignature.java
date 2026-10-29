@@ -29,8 +29,8 @@ import javax.crypto.spec.SecretKeySpec;
  * signature:&lt;HMAC-SHA256 小写十六进制&gt;
  * </pre>
  *
- * <p>HMAC 的输入是前六行（含版本行）以 {@code \n} 连接、末尾无换行；{@code signature} 行不参与。行式格式便于 shell/CI 直接 diff
- * 与人工审阅，也避免在 cra-common 引入 Jackson。
+ * <p>HMAC 的输入是前八行（含版本行，至 {@code run_id} 行）以 {@code \n} 连接、末尾无换行；{@code signature} 行不参与。行式格式便于
+ * shell/CI 直接 diff 与人工审阅，也避免在 cra-common 引入 Jackson。
  */
 public final class ReportSignature {
 
@@ -40,7 +40,20 @@ public final class ReportSignature {
   private static final String HMAC_ALGORITHM = "HmacSHA256";
   private static final int SHA256_HEX_LENGTH = 64;
 
+  /** repo 形式（owner/name；信封与签发端共用同一规则，ADR-0009 决策 1）。 */
+  private static final String REPO_FORMAT = "[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+";
+
   private ReportSignature() {}
+
+  /**
+   * repo 是否为合法的 owner/name 形式（签发端入口校验与 {@link Envelope} 不变量共用同一规则）。
+   *
+   * @param value 待校验值（先 strip 再判定；null/空白为 false）
+   * @return true 若合法
+   */
+  public static boolean isValidRepo(String value) {
+    return value != null && !value.isBlank() && value.strip().matches(REPO_FORMAT);
+  }
 
   /**
    * 签名信封（字段与行式格式一一对应）。
@@ -76,7 +89,7 @@ public final class ReportSignature {
     }
 
     /**
-     * HMAC 输入文本（版本行 + 六个字段行；不含 signature 行，末尾无换行）。
+     * HMAC 输入文本（版本行 + 七个字段行；不含 signature 行，末尾无换行）。
      *
      * @return canonical text
      */
@@ -221,7 +234,7 @@ public final class ReportSignature {
 
   private static String requireRepo(String value) {
     String normalized = requireText(value, "repo");
-    if (!normalized.matches("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")) {
+    if (!isValidRepo(normalized)) {
       throw new IllegalArgumentException("repo 必须为 owner/name 形式: " + value);
     }
     return normalized;
