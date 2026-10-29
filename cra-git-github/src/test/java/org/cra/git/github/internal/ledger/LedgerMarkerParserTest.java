@@ -366,6 +366,23 @@ class LedgerMarkerParserTest {
   }
 
   @Test
+  void crlfFenceStillExcludesMarkerInsideIt() {
+    // 围栏内的伪造标记（CRLF 行尾）必须被排除且计为 suspect
+    String body = "```xml\r\n" + findingMarker() + "\r\n```\r\n正文\r\n";
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isEmpty();
+    assertThat(out.suspects()).isNotEmpty();
+  }
+
+  @Test
+  void crOnlyLineEndingsAreNormalized() {
+    // CR-only（旧 Mac 行尾）也应被归一：成对 6 反引号围栏后的末位标记可解析
+    String body = "``````\r代码\r``````\rsrc/Foo.java:91\r" + findingMarker() + "\r";
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
   void indentedFenceWithThreeSpacesStillCountsAsFence() {
     String body = "   ```\n代码\n   ```\nsrc/Foo.java:89\n" + findingMarker();
     var out = PARSER.parse(body);

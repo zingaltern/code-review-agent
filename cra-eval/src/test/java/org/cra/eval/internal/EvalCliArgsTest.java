@@ -378,6 +378,15 @@ class EvalCliArgsTest {
   }
 
   @Test
+  void valueStartingWithDoubleDashIsRejectedAtNonFirstPosition() {
+    assertThatThrownBy(
+            () -> EvalCliArgs.parse(new String[] {"run", "--k", "1", "--tier", "--l2"}, Map.of()))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("参数缺值: --tier")
+        .hasMessageContaining("--l2");
+  }
+
+  @Test
   void valueStartingWithDoubleDashIsReportedAsMissingValue() {
     assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"run", "--tier", "--l2"}, Map.of()))
         .isInstanceOf(org.cra.common.exception.CraConfigException.class)
