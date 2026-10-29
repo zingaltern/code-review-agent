@@ -128,7 +128,7 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 |---|---|---|
 | `POST /webhooks/github` | HMAC-SHA256 | 202 已入队；200 重复 delivery / 事件忽略；400 缺头/非法 payload；401 验签失败；503 队列满（带 `Retry-After: 30`）。仅 `CRA_SERVER_PLATFORM=github`（或未设置）时注册 |
 | `POST /webhooks/gitlab` | `X-Gitlab-Token` | 语义同上；200 ignored 带 `reason`（`unsupported_event` / `draft` / `merged` / `metadata_update` 等）。仅 `CRA_SERVER_PLATFORM=gitlab` 时注册 |
-| `POST /api/v1/reports/attest` | Bearer | 原始报告 JSON → `text/plain` 签名信封；400 非法报告；409 commit 未经服务端评审；401 未授权 |
+| `POST /api/v1/reports/attest` | Bearer | 原始报告 JSON → `text/plain` 签名信封；400 非法报告；409 repo 缺失/非 owner/name 形式或 commit 未经服务端评审；401 未授权 |
 | `GET /healthz` | 无 | 进程 + 队列统计（capacity/queued/inFlight/accepted/completed/failed/rejected）+ `platform` |
 | `GET /readyz` | 无 | PG 可达才 200；不可达 503（docker healthcheck 用） |
 
@@ -195,7 +195,7 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 | 事件史与评测 | CLI 评测组合根未装配 `EventHistoryQuery`；L2/L3 的 context 门禁仍由 git 变更史 + REVIEW.md 驱动，不验证事件史路径 | 04§2.4 |
 | 多仓库 | 每个仓库一个 PG 账本实例（按 owner/name 键控），orchestrator 按仓库缓存；仓库数增长 = 常驻线程池增长，需按部署规模评估 | ADR-0008 |
 | 多副本 | delivery 幂等由 PG 唯一键兜底，但同一仓库的 orchestrator 缓存/队列是进程内的；同 head 重跑由 core commit 闸兜底 | ADR-0008 |
-| 签发 commit 判定范围 | v2 起按 `(repo, commit)` 查 `review_run`；`X-CRA-Repo: owner/name` 必填（`CRA_SERVER_ATTEST_REQUIRE_KNOWN_COMMIT=true` 时）。v1 全局签发路径已移除，旧签名需重签 | ADR-0009、05§1.5 |
+| 签发 commit 判定范围 | v2 起按 `(repo, commit)` 查 `review_run`；`X-CRA-Repo: owner/name` 必填（无条件，签发入口做非空与形式校验，缺失或非法 → 409）。v1 全局签发路径已移除，旧签名需重签 | ADR-0009、05§1.5 |
 | 过期 Summary 收尾 | PG 账本不落评论原文（与 SQLite 同语义）：`ReviewLedger.comment()` 为空 → 新 run 不 PATCH 旧 Summary 的 `[已被 run_xxx 取代]` 前缀；旧 Summary 仍可见 | 05§1.5、05§2.2 与本地形态一致 |
 | 事件史采集（默认关闭） | `CRA_SERVER_EVENT_HISTORY_ENABLED=false` 时装配 Noop、采集不执行；开启时按 JSONL 增量采集（M4f-full） | ADR-0012 |
 
@@ -222,7 +222,7 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 | 非 PR 事件 → 200 ignored | 通过 | 签名 `ping` → `200 {"status":"ignored","event":"ping"}` |
 | 错签 → 401 | 通过 | `X-Hub-Signature-256=sha256:000…` → 401 `{"status":"unauthorized"}` |
 | 非法 payload → 400 | 通过 | 合法 HMAC + `{not-json` → 400 `{"status":"bad_payload"}` |
-| 报告签发 → verify 通过 | 通过 | `POST /api/v1/reports/attest` 200；`cra-eval verify --signature` exit 0（key `accept-key-20261027`） |
+| 报告签发 → verify 通过 | 通过 | `POST /api/v1/reports/attest` 200；`cra-eval verify --signature` exit 0（scratch 环境一次性密钥，验收后已弃用；明文不落仓库，密钥仅经 env/file 注入） |
 | 篡改报告 → 退出码 5 | 通过 | 仅改 `generated_at`：门禁仍绿，签名校验失败，exit 5 |
 | 优雅停机排水 | 通过 | `drained=true queued=0 inFlight=0 accepted=3 completed=3 failed=0 rejected=0` |
 
@@ -236,3 +236,4 @@ PG 账本实测（`review_run`）：`run_20261027102140-6f6f0d` / `3f9ae86` / DO
 4. 报告签发验收使用了一份 L2 形状报告并把 `commit` 改为服务端已评审的 head；服务端签发、`verify` 通过、篡改 exit 5。这正好印证 ADR-0008 的诚实边界：签名证明“持有密钥者签发了该摘要”，不证明报告内容由服务端执行生成。
 5. 临时 cloudflared tunnel 与个人 PAT 仅用于本次验收；生产应使用稳定 HTTPS 入口、专用 bot 身份/最小权限 token，并轮换 webhook secret。验收评论因此显示为 `zingaltern`（M4b PR 评论）或 `github-actions[bot]`（M4c/M4d workflow）。
 6. scratch 仓库为私有临时仓库，验收后保留作链接证据（可随时删除）；其中 webhook 仍指向已失效的临时 tunnel，不影响生产。
+7. 本节的 scratch 仓库名/webhook id 等基建细节保留作验收证据链（仓库为私有、tunnel 已失效），属已声明的取舍；密钥类值一律不落仓库（见上表"报告签发"行的注记），仅经 env/file 注入。

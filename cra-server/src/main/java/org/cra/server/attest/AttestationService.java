@@ -65,14 +65,24 @@ public final class AttestationService {
    * 签发报告。
    *
    * @param reportBytes 报告文件原始字节
-   * @param repo 报告归属仓库（owner/name；v2 必填）
+   * @param repo 报告归属仓库（owner/name；v2 必填，入口处做非空与形式校验，与 {@link ReportSignature#isValidRepo}
+   *     同一规则；信任边界不变——头由调用方提供，仅格式校验，ADR-0009）
    * @param requestedBy 请求方标识
    * @return 签发结果
-   * @throws AttestationRejectedException 报告非法或 repo/commit 未经服务端评审
+   * @throws AttestationRejectedException 报告非法、repo 缺失或非 owner/name 形式、commit 未经服务端评审
    */
   public Result attest(byte[] reportBytes, String repo, String requestedBy) {
     if (reportBytes == null || reportBytes.length == 0) {
       throw new AttestationRejectedException(400, "报告为空");
+    }
+    // repo 校验在 requireKnownCommit 之外（v2 信封 repo 必填；宽松策略下缺失/非法同样拒绝，
+    // 不再落到底层 Envelope 不变量抛 IllegalArgumentException → 500）
+    if (repo == null || repo.isBlank()) {
+      throw new AttestationRejectedException(409, "报告缺 repo 绑定，拒绝签发");
+    }
+    String normalizedRepo = repo.strip();
+    if (!ReportSignature.isValidRepo(normalizedRepo)) {
+      throw new AttestationRejectedException(409, "repo 必须为 owner/name 形式，拒绝签发: " + normalizedRepo);
     }
     JsonNode root;
     try {
@@ -86,17 +96,14 @@ public final class AttestationService {
     String commit = text(root, "commit");
     String tier = text(root, "tier");
     if (requireKnownCommit) {
-      if (repo == null || repo.isBlank()) {
-        throw new AttestationRejectedException(409, "报告缺 repo 绑定，拒绝签发");
-      }
       if (commit.isEmpty()) {
         throw new AttestationRejectedException(409, "报告缺 commit 绑定，拒绝签发");
       }
-      if (!knownCommitChecker.exists(repo.strip(), commit)) {
+      if (!knownCommitChecker.exists(normalizedRepo, commit)) {
         throw new AttestationRejectedException(
             409,
             "repo "
-                + repo.strip()
+                + normalizedRepo
                 + " 的 commit "
                 + commit
                 + " 未经服务端完成评审（review_run 无 DONE|DEGRADED）");
@@ -105,13 +112,12 @@ public final class AttestationService {
     String reportSha256 = ReportSignature.sha256(reportBytes);
     String attestationId = "att_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16);
     Instant issuedAt = Instant.now();
-    String effectiveRepo = repo == null ? "" : repo.strip();
     ReportSignature.Envelope envelope =
         ReportSignature.sign(
             signingKey,
             keyId,
             reportSha256,
-            effectiveRepo,
+            normalizedRepo,
             commit,
             tier,
             issuedAt.toString(),
@@ -120,7 +126,7 @@ public final class AttestationService {
         new AttestationRecord(
             attestationId,
             reportSha256,
-            effectiveRepo,
+            normalizedRepo,
             commit,
             tier,
             keyId,

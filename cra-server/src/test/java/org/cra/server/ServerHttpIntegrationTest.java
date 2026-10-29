@@ -158,6 +158,15 @@ class ServerHttpIntegrationTest {
             url("/api/v1/reports/attest"), new HttpEntity<>(report, noRepo), String.class);
     assertThat(missingRepo.getStatusCode().value()).isEqualTo(409);
 
+    // 头存在但非 owner/name 形式：签发入口格式校验拒绝（409），不落到底层信封不变量
+    HttpHeaders badRepo = jsonContentType();
+    badRepo.setBearerAuth(API_TOKEN);
+    badRepo.add("X-CRA-Repo", "not-a-repo");
+    ResponseEntity<String> invalidRepo =
+        rest.postForEntity(
+            url("/api/v1/reports/attest"), new HttpEntity<>(report, badRepo), String.class);
+    assertThat(invalidRepo.getStatusCode().value()).isEqualTo(409);
+
     ResponseEntity<String> unknownCommit = postAttest(report.replace(HEAD, "unknown-commit"));
     assertThat(unknownCommit.getStatusCode().value()).isEqualTo(409);
   }

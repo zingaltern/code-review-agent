@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** 报告签名信封（04§2.4 M4b）：签验往返、篡改拒绝、格式严格性。 */
@@ -73,6 +75,31 @@ class ReportSignatureTest {
     assertThatThrownBy(() -> ReportSignature.parse(text))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("签名方案不支持");
+  }
+
+  @Test
+  void repoFormatIsRejected() {
+    for (String repo : List.of("owner", "/name", "owner/", "a/b/c", "owner//name")) {
+      assertThatThrownBy(
+              () ->
+                  ReportSignature.sign(
+                      SECRET, "k", ReportSignature.sha256(REPORT), repo, "abc1234", "l2", "t", "r"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("owner/name");
+    }
+  }
+
+  @Test
+  void blankRepoIsRejected() {
+    // 空串/null 在 requireRepo 的非空校验即被拒（早于 owner/name 形式校验），异常信息为"不能为空"
+    for (String repo : Arrays.asList("", "   ", null)) {
+      assertThatThrownBy(
+              () ->
+                  ReportSignature.sign(
+                      SECRET, "k", ReportSignature.sha256(REPORT), repo, "abc1234", "l2", "t", "r"))
+          .isInstanceOf(IllegalArgumentException.class)
+          .hasMessageContaining("不能为空");
+    }
   }
 
   @Test
