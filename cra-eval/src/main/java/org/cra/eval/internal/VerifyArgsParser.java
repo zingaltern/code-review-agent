@@ -1,6 +1,7 @@
 package org.cra.eval.internal;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 
@@ -10,9 +11,25 @@ final class VerifyArgsParser {
   /** 默认签名密钥环境变量（与 server 的 CRA_SERVER_SIGNING_KEY 同值，CI 侧独立配置，05§6）。 */
   static final String DEFAULT_SIGNING_KEY_ENV = "CRA_REPORT_SIGNING_KEY";
 
+  /** verify 接受的全部旗标（与 EvalUsage 同步）。 */
+  private static final List<String> FLAGS =
+      List.of(
+          "--report",
+          "--sha256",
+          "--sha256-file",
+          "--tier",
+          "--expect-commit",
+          "--repo",
+          "--signature",
+          "--signing-key-env",
+          "--signing-key-file",
+          "--signing-key-id");
+
   private VerifyArgsParser() {}
 
   static EvalCliArgs.VerifyArgs parse(EvalArgOptions options) {
+    options.rejectUnknownFlags(FLAGS);
+    options.rejectPositional();
     Map<String, String> named = options.named();
     String report = named.get("--report");
     if (report == null || report.isBlank()) {
@@ -32,6 +49,10 @@ final class VerifyArgsParser {
     if (tier != null && !"l1".equals(tier) && !"l2".equals(tier) && !"l3".equals(tier)) {
       throw new CraConfigException("verify --tier 非法: " + tier + "（l1|l2|l3）");
     }
+    String repo = named.get("--repo");
+    if (repo != null && !repo.isBlank() && !hasSignature) {
+      throw new CraConfigException("--repo 仅与 --signature 同时使用（签名验签的仓库限定绑定）");
+    }
     String signingKeyFile = named.get("--signing-key-file");
     if (!hasSignature && signingKeyFile != null) {
       throw new CraConfigException("--signing-key-file 仅与 --signature 同时使用");
@@ -42,7 +63,7 @@ final class VerifyArgsParser {
         sha256File == null ? null : Path.of(sha256File),
         tier,
         named.get("--expect-commit"),
-        named.get("--repo"),
+        repo,
         hasSignature ? Path.of(signature) : null,
         named.getOrDefault("--signing-key-env", DEFAULT_SIGNING_KEY_ENV),
         signingKeyFile == null ? null : Path.of(signingKeyFile),

@@ -1,15 +1,22 @@
 package org.cra.eval.internal;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 
 /** {@code cra-eval gate} 参数解析（T3.1：对已有报告离线重判，不重跑 LLM）。 */
 final class GateArgsParser {
 
+  /** gate 接受的全部旗标（含无值开关，与 EvalUsage 同步）。 */
+  private static final List<String> FLAGS =
+      List.of("--report", "--tier", "--json-out", "--sha256-out", "--crosschecker-enabled");
+
   private GateArgsParser() {}
 
   static EvalCliArgs.GateArgs parse(EvalArgOptions options) {
+    options.rejectUnknownFlags(FLAGS);
+    options.rejectPositional();
     Map<String, String> named = options.named();
     String report = named.get("--report");
     if (report == null || report.isBlank()) {

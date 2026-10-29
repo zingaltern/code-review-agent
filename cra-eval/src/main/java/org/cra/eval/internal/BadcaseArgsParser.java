@@ -8,9 +8,28 @@ import org.cra.common.exception.CraConfigException;
 /** {@code cra-eval badcase add} 参数解析（T3.5）。 */
 final class BadcaseArgsParser {
 
+  /** badcase 接受的全部旗标（与 EvalUsage 同步）。 */
+  private static final List<String> FLAGS =
+      List.of(
+          "--label",
+          "--dataset",
+          "--to-set",
+          "--case-id",
+          "--annotator",
+          "--reason",
+          "--diff-file",
+          "--snapshot-dir",
+          "--artifact-root",
+          "--token",
+          "--api-base",
+          "--file",
+          "--line");
+
   private BadcaseArgsParser() {}
 
   static EvalCliArgs.BadcaseArgs parse(EvalArgOptions options, Map<String, String> env) {
+    options.rejectUnknownFlags(FLAGS);
+    // 位置参数合法：add <run_ref> <finding_id>
     Map<String, String> named = options.named();
     List<String> positional = options.positional();
     if (positional.isEmpty() || !"add".equals(positional.get(0))) {

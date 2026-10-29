@@ -55,4 +55,57 @@ class RunStatsReaderTest {
     assertThat(stats.tokensOut()).isEqualTo(20);
     assertThat(stats.latencyMs()).isEqualTo(30);
   }
+
+  @Test
+  void picksLatestRunDirByLexicographicName() throws Exception {
+    Path runRoot = tmp.resolve("run-3");
+    Path older = runRoot.resolve("run_20261025-0001");
+    Path newer = runRoot.resolve("run_20261025-0002");
+    Files.createDirectories(older);
+    Files.createDirectories(newer);
+    Files.writeString(
+        older.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":1,\"tokens_out\":2,\"latency_ms\":3}\n");
+    Files.writeString(
+        newer.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":10,\"tokens_out\":20,\"latency_ms\":30}\n");
+    CaseObservation.RunStats stats = RunStatsReader.read(runRoot);
+    // 目录名零填充时间戳：字典序最大 = 最新 run
+    assertThat(stats.available()).isTrue();
+    assertThat(stats.tokensIn()).isEqualTo(10);
+    assertThat(stats.tokensOut()).isEqualTo(20);
+    assertThat(stats.latencyMs()).isEqualTo(30);
+  }
+
+  @Test
+  void corruptLatestTraceIsNotMaskedByOlderTrace() throws Exception {
+    Path runRoot = tmp.resolve("run-4");
+    Path older = runRoot.resolve("run_20261025-0001");
+    Path newer = runRoot.resolve("run_20261025-0002");
+    Files.createDirectories(older);
+    Files.createDirectories(newer);
+    Files.writeString(
+        older.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":1,\"tokens_out\":2,\"latency_ms\":3}\n");
+    Files.writeString(newer.resolve("trace.ndjson"), "not-json\n{\"event\":\"run_start\"}\n");
+    // 最新 trace 无有效 run_end：结果必须体现不可用，不得静默回退旧 trace
+    assertThat(RunStatsReader.read(runRoot).available()).isFalse();
+  }
+
+  @Test
+  void runEndMissingTokenFieldsIsNotAvailable() throws Exception {
+    Path runRoot = tmp.resolve("run-5");
+    Path runDir = runRoot.resolve("r");
+    Files.createDirectories(runDir);
+    Files.writeString(
+        runDir.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":1,\"tokens_out\":2,\"latency_ms\":3}\n"
+            + "{\"event\":\"run_end\",\"tokens_in\":9}\n");
+    // 最后一条 run_end 缺 tokens_out/latency_ms：available=false，不得以 0 值进均值分母
+    CaseObservation.RunStats stats = RunStatsReader.read(runRoot);
+    assertThat(stats.available()).isFalse();
+    assertThat(stats.tokensIn()).isEqualTo(0);
+    assertThat(stats.tokensOut()).isEqualTo(0);
+    assertThat(stats.latencyMs()).isEqualTo(0);
+  }
 }

@@ -1,6 +1,7 @@
 package org.cra.eval.internal;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.git.RepoRef;
@@ -8,9 +9,24 @@ import org.cra.common.git.RepoRef;
 /** {@code cra-eval report} 参数解析（T3.4）。 */
 final class ReportArgsParser {
 
+  /** report 接受的全部旗标（与 EvalUsage 同步）。 */
+  private static final List<String> FLAGS =
+      List.of(
+          "--repo",
+          "--since",
+          "--json",
+          "--ledger-fixture",
+          "--trace-dir",
+          "--previous",
+          "--dataset",
+          "--token",
+          "--api-base");
+
   private ReportArgsParser() {}
 
   static EvalCliArgs.ReportArgs parse(EvalArgOptions options, Map<String, String> env) {
+    options.rejectUnknownFlags(FLAGS);
+    options.rejectPositional();
     Map<String, String> named = options.named();
     String repo = named.get("--repo");
     if (repo == null || repo.isBlank()) {
