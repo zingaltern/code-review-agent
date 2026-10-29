@@ -50,7 +50,8 @@ class AggregateEngineTest {
         completed,
         completed ? "done" : "failed",
         findings,
-        completed ? "" : "llm");
+        completed ? "" : "llm",
+        CaseObservation.RunStats.EMPTY);
   }
 
   @Test

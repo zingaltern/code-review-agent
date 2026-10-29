@@ -8,9 +8,29 @@ import org.cra.common.exception.CraConfigException;
 /** {@code cra-eval run} 参数解析（05§3）。 */
 final class RunArgsParser {
 
+  /** run 接受的全部旗标（含无值开关，与 EvalUsage 同步）。 */
+  private static final List<String> FLAGS =
+      List.of(
+          "--dataset",
+          "--set",
+          "--k",
+          "--depth",
+          "--cli-jar",
+          "--work-dir",
+          "--json",
+          "--timeout-sec",
+          "--case",
+          "--tier",
+          "--commit",
+          "--fail-on-red",
+          "--crosschecker-enabled",
+          "--sha256-out");
+
   private RunArgsParser() {}
 
   static EvalCliArgs.RunArgs parse(EvalArgOptions options, Map<String, String> env) {
+    options.rejectUnknownFlags(FLAGS);
+    options.rejectPositional();
     Map<String, String> named = options.named();
     String dataset = named.get("--dataset");
     if (dataset == null || dataset.isBlank()) {
@@ -23,9 +43,13 @@ final class RunArgsParser {
     if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
       throw new CraConfigException("depth 非法: " + depth + "（评测默认 quick，04§2.4）");
     }
+    String jsonOut = named.get("--json");
+    String sha256Out = named.get("--sha256-out");
+    if (sha256Out != null && !sha256Out.isBlank() && (jsonOut == null || jsonOut.isBlank())) {
+      throw new CraConfigException("--sha256-out 需与 --json 同用（哈希绑定 JSON 报告；单独给出会被静默忽略，04§2.4）");
+    }
     Path cliJar = CliJarLocator.locate(named.get("--cli-jar"));
     Path workDir = Path.of(named.getOrDefault("--work-dir", "cra-eval-work"));
-    String jsonOut = named.get("--json");
     long timeout = EvalArgsSupport.parsePositive(named.get("--timeout-sec"), "--timeout-sec", 900);
     List<String> only =
         named.containsKey("--case") ? List.of(named.get("--case").split(",")) : List.of();
@@ -39,7 +63,6 @@ final class RunArgsParser {
     }
     boolean failOnRed = "true".equals(named.get("--fail-on-red"));
     boolean crosschecker = "true".equals(named.get("--crosschecker-enabled"));
-    String sha256Out = named.get("--sha256-out");
     return new EvalCliArgs.RunArgs(
         datasetPath,
         set,

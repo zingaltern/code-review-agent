@@ -34,28 +34,6 @@ public record CaseObservation(
     runStats = runStats == null ? RunStats.EMPTY : runStats;
   }
 
-  /** 兼容无统计字段的构造（单测/旧调用）。 */
-  public CaseObservation(
-      String caseId,
-      String set,
-      String subtype,
-      int runIndex,
-      boolean completed,
-      String runStatus,
-      List<ObservedFinding> findings,
-      String failureReason) {
-    this(
-        caseId,
-        set,
-        subtype,
-        runIndex,
-        completed,
-        runStatus,
-        findings,
-        failureReason,
-        RunStats.EMPTY);
-  }
-
   /** 便捷：过滤 inline 观测。 */
   public List<ObservedFinding> inlineFindings() {
     List<ObservedFinding> out = new ArrayList<>();
