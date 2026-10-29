@@ -479,6 +479,9 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
         break;
       }
       page = nextPage(p, page);
+      if (page == null) {
+        break; // 异常分页头：页号无法递增，按无下一页处理
+      }
     }
     return out;
   }
@@ -539,15 +542,25 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
         break;
       }
       page = nextPage(p, page);
+      if (page == null) {
+        break; // 异常分页头：页号无法递增，按无下一页处理
+      }
     }
     return out;
   }
 
   private static String nextPage(GitLabHttpTransport.Page page, String currentPage) {
     // GitLab.com 可能省略部分分页头；满页且无 X-Next-Page 时按 offset 递增兜底
-    return page.nextPage().isBlank()
-        ? String.valueOf(Integer.parseInt(currentPage) + 1)
-        : page.nextPage();
+    return page.nextPage().isBlank() ? incrementPageOrNull(currentPage) : page.nextPage();
+  }
+
+  /** 页号递增兜底：非数字或超出 int 范围（异常分页头）按无下一页处理，返回 {@code null}，不抛 {@link NumberFormatException}。 */
+  static String incrementPageOrNull(String currentPage) {
+    try {
+      return String.valueOf(Integer.parseInt(currentPage) + 1);
+    } catch (NumberFormatException e) {
+      return null;
+    }
   }
 
   private JsonNode fetchMergeRequest(RepoRef repo, int iid) {
@@ -657,7 +670,10 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
         if (root.size() < PAGE_SIZE) {
           break;
         }
-        next = String.valueOf(Integer.parseInt(page) + 1);
+        next = incrementPageOrNull(page);
+        if (next == null) {
+          break; // 异常分页头：页号无法递增，按无下一页处理
+        }
       }
       page = next;
     }

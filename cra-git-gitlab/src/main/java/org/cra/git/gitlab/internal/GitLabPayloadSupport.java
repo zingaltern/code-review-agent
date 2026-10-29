@@ -32,8 +32,14 @@ final class GitLabPayloadSupport {
       char c = glob.charAt(i);
       if (c == '*') {
         if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-          sb.append(".*");
-          i++;
+          if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
+            // `**/` 匹配零或多级目录：**/foo 命中根级 foo，a/**/b 命中 a/b 与 a/x/y/b
+            sb.append("(?:.*/)?");
+            i += 2;
+          } else {
+            sb.append(".*");
+            i++;
+          }
         } else {
           sb.append("[^/]*");
         }

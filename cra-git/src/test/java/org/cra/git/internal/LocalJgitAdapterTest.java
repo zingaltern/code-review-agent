@@ -82,6 +82,18 @@ class LocalJgitAdapterTest {
   }
 
   @Test
+  void listFilesGlobstarMatchesZeroOrMoreDirectories() {
+    adapter = new LocalJgitAdapter(tempDir);
+
+    assertThat(adapter.listFiles(new RepoRef("o", "r"), "feature", "**/Foo.java"))
+        .containsExactly("src/Foo.java");
+    assertThat(adapter.listFiles(new RepoRef("o", "r"), "feature", "src/**/Foo.java"))
+        .containsExactly("src/Foo.java");
+    assertThat(adapter.listFiles(new RepoRef("o", "r"), "feature", "**/*.java"))
+        .containsExactlyInAnyOrder("src/Foo.java", "src/Bar.java");
+  }
+
+  @Test
   void fetchDiffProducesGitHubCompatibleFiles() {
     adapter = new LocalJgitAdapter(tempDir);
     DiffResult diff = adapter.fetchDiff(new RepoRef("o", "r"), baseSha, "feature");

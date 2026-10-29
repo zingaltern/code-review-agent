@@ -38,6 +38,9 @@ final class GitLabDispositionSupport {
   }
 
   static String excerpt(String body) {
+    if (body == null || body.isBlank()) {
+      return null;
+    }
     String oneLine = body.replaceAll("\\s+", " ").strip();
     return Texts.truncate(oneLine, 200);
   }
