@@ -581,6 +581,14 @@ class GitLabHttpAdapterWireMockTest {
   }
 
   @Test
+  void pageIncrementTreatsNonNumericPageAsNoNextPage() {
+    // 异常分页头（非数字/超 int 范围）按无下一页处理，不抛 NumberFormatException
+    assertThat(GitLabHttpAdapter.incrementPageOrNull("2")).isEqualTo("3");
+    assertThat(GitLabHttpAdapter.incrementPageOrNull("abc")).isNull();
+    assertThat(GitLabHttpAdapter.incrementPageOrNull("99999999999")).isNull();
+  }
+
+  @Test
   void rateLimit429BacksOffThenSucceeds() {
     wm.stubFor(
         get(urlEqualTo(PROJECT + "/repository/compare?from=base1&to=head2"))

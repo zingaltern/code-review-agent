@@ -130,12 +130,24 @@ public final class LedgerMarkerParser {
     return starts.get(starts.size() - 1);
   }
 
+  /**
+   * 统计围栏定界符：一串 ≥3 的连续反引号计为一个（CommonMark），且仅当该行以 ≤3 空格缩进开头时才构成围栏—— 行中/行内代码出现的 ``` 不切换奇偶，连续反引号串也不按 3
+   * 个一组重复计数。
+   */
   private static int fenceCount(String text) {
     int count = 0;
-    int idx = text.indexOf("```");
-    while (idx >= 0) {
-      count++;
-      idx = text.indexOf("```", idx + 3);
+    for (String line : text.split("\n", -1)) {
+      int lead = 0;
+      while (lead < 3 && lead < line.length() && line.charAt(lead) == ' ') {
+        lead++;
+      }
+      int ticks = 0;
+      while (lead + ticks < line.length() && line.charAt(lead + ticks) == '`') {
+        ticks++;
+      }
+      if (ticks >= 3) {
+        count++;
+      }
     }
     return count;
   }

@@ -116,6 +116,60 @@ class LedgerMarkerParserTest {
   }
 
   @Test
+  void sixBacktickFencePairBeforeEndMarkerParses() {
+    // 一串 ≥3 连续反引号 = 一个定界符：6 反引号开/闭围栏计 2，末位标记在围栏之外
+    String body = "``````\n代码\n``````\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.suspects()).isEmpty();
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
+  void mixedLengthFencePairBeforeEndMarkerParses() {
+    // 旧实现按 3 个一组计数（1+2=3 奇数）误判 INSIDE_FENCE；修复后 1+1=2
+    String body = "```java\n代码\n``````\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.suspects()).isEmpty();
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
+  void unclosedSixBacktickFenceStillRejectsEndMarker() {
+    // 反向保护：未闭合的 6 反引号围栏仍须判为围栏内（旧实现计 2 偶数会漏判）
+    String body = "``````\n代码\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isEmpty();
+    assertThat(out.suspects()).containsExactly(SuspectReason.INSIDE_FENCE);
+  }
+
+  @Test
+  void inlineTripleBackticksDoNotToggleFenceParity() {
+    // 行中出现的 ``` 不构成围栏，不影响末位标记判定
+    String body = "正文含行内 ``` 代码片段\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.suspects()).isEmpty();
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
+  void indentedFenceDelimitersStillCount() {
+    // ≤3 空格缩进的围栏照常计数：成对 → 偶数 → 标记在围栏外
+    String body = "   ```xml\n代码\n   ```\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.suspects()).isEmpty();
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
+  void fourSpaceIndentedBackticksAreNotFenceDelimiters() {
+    // 4 空格缩进是缩进代码块而非围栏，不切换奇偶
+    String body = "    ```\n代码\n    ```\nsrc/Foo.java:87\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.suspects()).isEmpty();
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
   void unclosedMarkerIsMidBodySuspect() {
     // 未闭合的 cra: 标记不构成末位标记，按"正文中间"计可疑（规则 1）
     var out = PARSER.parse("正文 src/Foo.java\n<!-- cra:v=2.1 | fp=9f2a1b ");
