@@ -54,6 +54,24 @@ class RunStatsReaderTest {
   }
 
   @Test
+  void everyNonNumericStatFieldYieldsUnavailable() throws Exception {
+    String[][] cases = {
+      {"\"tokens_out\":\"many\"", "\"tokens_out\":2"},
+      {"\"latency_ms\":\"slow\"", "\"latency_ms\":3"},
+      {"\"tokens_in\":\"many\"", "\"tokens_in\":1"},
+    };
+    for (String[] c : cases) {
+      Path runRoot = tmp.resolve("run-nonnum-" + Math.abs(c[0].hashCode()));
+      Path runDir = runRoot.resolve("r");
+      Files.createDirectories(runDir);
+      String line = "{\"event\":\"run_end\",\"tokens_in\":1,\"tokens_out\":2,\"latency_ms\":3}";
+      line = line.replace(c[1], c[0]);
+      Files.writeString(runDir.resolve("trace.ndjson"), line + "\n");
+      assertThat(RunStatsReader.read(runRoot).available()).as("非数字字段应使统计不可用: " + c[0]).isFalse();
+    }
+  }
+
+  @Test
   void traceDirectlyUnderRunRootIsReadAsSingleRun() throws Exception {
     Path runRoot = tmp.resolve("run-flat");
     Files.createDirectories(runRoot);

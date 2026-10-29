@@ -63,5 +63,6 @@
 | 2 | 真实 GitLab 写操作验收（MR discussion/note、commit comment、issue） | **暂缓**（待 owner token，再验时按 `docs/deployment-gitlab.md` §12 清单） | docs/07、README、deployment-gitlab §0/§12 同步 |
 | 3 | Gerrit 平台适配 | **不做适配**（Git 平台扩展点保留，如未来重启按 11§6 checklist 另立项） | docs/07、docs/11 §7、deployment-gitlab、README 已写入 |
 | 4 | L3 全量重跑（官方口径） | 由 owner 指定的其他会话执行（canonical 参数：`set=all k=3 depth=standard tier=l3 crosschecker=true temperature=0.2`，约 49min）；本轮不含 Mockito-3 修正后的官方数值 | — |
+| 5 | 单测文件的评审强度 | **非严格**：`REVIEW.md` 增 `Skip paths`（`src/test/**`、`**/src/test/**`、`**/*Test.java`、`**/*Tests.java`）——测试代码不进评审范围，单测正确性由 `mvn verify` 与测试自身保障，减少 nit 噪声与 token 消耗；生产代码"缺少测试覆盖"类结论不受影响（其文件仍是生产文件） | 仓库根 `REVIEW.md`（新文件）；本项为仓库策略，不改产品代码与评测基线 |
 
 - **完成度口径更新**：Gerrit 移出范围后，M4e 的剩余缺口仅为"真实 GitLab 写操作验收（暂缓）"；11 项功能中 10 项完整、M4e 基本完成（适配器/接线/语义索引均已落地并有测试与读路径实证）。
