@@ -1,5 +1,6 @@
 # 11 · 扩展性契约
 
+> 文档版本：v1.6（2026-10-30，owner 裁决：Gerrit 不做适配（§7 M4e 行同步）；真实 GitLab 写操作验收暂缓（待 token））
 > 文档版本：v1.5（2026-10-28，M4e 池内项"语义索引 / 跨文件上下文"第一版：§2 登记 `SymbolIndex`（**内部接缝**，ADR-0014；不改 ContextAssembler 签名）；§7 M4e 更新为"GitLab 已接线、语义索引已落地（默认关闭）、Gerrit 未做"）
 > 文档版本：v1.4（2026-10-27，M4e 第二半 + M4f-full：两行补 CLI/server 平台选择（ADR-0013）；新增事件源/事件检索/存储登记（ADR-0012）；真实写操作 pending）
 > 文档版本：v1.3（2026-10-27，M4e 第一半：Git 平台适配 / CommentSource 两行登记 `cra-git-gitlab`（ADR-0011）；Gerrit 与语义索引未做）
@@ -129,7 +130,7 @@ grep "context" 应命中并核对：
 | M4b webhook 服务化 | 启用既有扩展点 | ReviewLedger PG 形态（02§5 三形态表）已落地（M4b）；cra-server 只是新壳——core 全部逻辑与形态无关（02§5），CLI 与 server 同构；报告签名信封为新增演进级格式约定（§2，ADR-0008） |
 | M4c push 模式 | 已登记并实现（§2 载体扩展） | 触发层 push 事件 + commit-comment 发布载体：`postCommitReview`（default，不可得显式拒绝）+ `ReviewKey(repo, commit)` 键控 + `LocalRepoContext.firstParentChain` 基线解析（05§1.3/§2.4） |
 | M4d 夜间存量评审 | 已登记并实现（§2 载体扩展） | 产出 issue 而非 PR comment（07§5、06§4）：`postIssueReview` + `fetchIssueBotComments`/`listBotIssues`；评审流水线与账本复用，仅触发与发布形态变化（05§2.5） |
-| M4e GitLab / Gerrit 适配 + 语义索引/跨文件上下文 | 启用既有扩展点 + 内部接缝 | **GitLab 第二半已接线（2026-10-27）**：`cra-git-gitlab` 走 §6 checklist 1–7 步，ADR-0011/0013 + `docs/deployment-gitlab.md` 边界表；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab`/`/webhooks/gitlab` 已落地并由单测/WireMock/HTTP+PG 集成覆盖；**真实写操作 pending（无 owner token）**，读路径已对公共项目验证。**语义索引/跨文件上下文第一版已落地（2026-10-28，ADR-0014）**：`SymbolIndex`（§2 内部接缝，Java-only、默认关闭）+ `CrossFileSliceAssembler` 注入 L2 切片（dataflow/security/verifier，≤4k，从 L1 预算扣除）+ CrossChecker 路径集增强；gerrit 未做 |
+| M4e GitLab / Gerrit 适配 + 语义索引/跨文件上下文 | 启用既有扩展点 + 内部接缝 | **GitLab 第二半已接线（2026-10-27）**：`cra-git-gitlab` 走 §6 checklist 1–7 步，ADR-0011/0013 + `docs/deployment-gitlab.md` 边界表；CLI `--platform gitlab` + server `CRA_SERVER_PLATFORM=gitlab`/`/webhooks/gitlab` 已落地并由单测/WireMock/HTTP+PG 集成覆盖；**真实写操作 pending（无 owner token）**，读路径已对公共项目验证。**语义索引/跨文件上下文第一版已落地（2026-10-28，ADR-0014）**：`SymbolIndex`（§2 内部接缝，Java-only、默认关闭）+ `CrossFileSliceAssembler` 注入 L2 切片（dataflow/security/verifier，≤4k，从 L1 预算扣除）+ CrossChecker 路径集增强；gerrit 不做适配（owner 裁决 2026-10-30） |
 | M4f-lite CrossChecker | 启用既有扩展点 + 纯配置 | 新角色走 §5 checklist；数据前提 = T1.4 REVIEW.md 新段落解析（07§5）；开关 = `crosschecker.enabled`（05§5），默认关闭不动 Standard 基线算术（04§2.2） |
 | M4f-full 事件史管道 | 已登记并实现（§2 产品事件源 / 事件检索存储两行） | 产品事件史是独立数据面（依赖 M4b 定时任务，07§5）：JSONL 源 → 采集器 → PG → `EventHistoryQuery` → CrossChecker/验证层引用；ADR-0012。Jira/Confluence/服务台等连接器留作 `EventHistorySource` 实现，不在第一版 |
 

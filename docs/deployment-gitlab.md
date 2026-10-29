@@ -14,7 +14,7 @@
   - server：`CRA_SERVER_PLATFORM=github|gitlab`；GitLab 模式注册 `POST /webhooks/gitlab`（`X-Gitlab-Token` 验签 + MR 事件映射 + delivery 幂等）。
 - 已验证：`mvn -B -ntp verify` 全绿；GitLab adapter 端点契约测试（WireMock 录制回放，22 例）；fixture 端到端（发布 → 同 commit 账本命中 → 零重复，1 例）；CLI 平台接线（`--platform gitlab` → GitLab adapter + GitLab `CommentSource` → 账本幂等）；server GitLab webhook HTTP 集成（需要 PG 的 5 例：202/duplicate、update 映射、401/400、非 MR 忽略、平台端点与健康检查）。
 - **真实 GitLab 读路径已线上核验**（2026-10-27，公共项目 `gitlab-org/cli`，无 token）：`fetchDiff`（2 文件 / 20 patch 行）、`listFiles`（331 个 markdown）、`readFile`（`README.md` 13,772 字符）——见 §12。
-- 仍未完成：**真实 token 的写操作验证**（MR discussion / note、commit comment、issue）、GitLab CI job 实跑、Gerrit、语义索引/跨文件上下文。
+- 仍未完成：**真实 token 的写操作验证**（MR discussion / note、commit comment、issue；2026-10-30 owner 裁决：**暂缓**，待 token 再验）、GitLab CI job 实跑。**Gerrit 经 owner 裁决不做适配（2026-10-30）**；语义索引/跨文件上下文已落地（ADR-0014，默认关闭）。
 
 ## 2. 认证与基础
 
@@ -172,7 +172,8 @@ cra review --platform gitlab \
 | 冲突 MR 是否触发 | **文档未声明，待验证** | MR pipeline 只依赖源分支内容 → 推断不阻断；真实实例确认前按"可能触发"配置 |
 | `compare_timeout` | **明确失败** | 部分 diffs 不静默评审（ADR-0011 决策 11） |
 | 应用级限流 | **429 无头也可能发生** | 退避 ≤3 次后如实失败；不假装无限制 |
-| Gerrit / 语义索引 | **未做** | 本任务明确排除；后续里程碑 |
+| Gerrit | **不做适配** | owner 裁决（2026-10-30）——Git 平台扩展点（§6 checklist）保留，如未来重启按 checklist 另立项 |
+| 语义索引/跨文件上下文 | 已落地 | ADR-0014（默认关闭） |
 
 ## 10. 接入示例（Java 装配 + CLI/server）
 

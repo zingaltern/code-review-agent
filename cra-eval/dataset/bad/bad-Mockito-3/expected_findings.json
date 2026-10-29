@@ -3,12 +3,12 @@
   "expected": [
     {
       "file": "src/org/mockito/internal/invocation/InvocationMatcher.java",
-      "line": 126,
+      "line": 129,
       "category": "bug",
       "keywords": [
         "indexOfVararg"
       ],
-      "note": "人工确认：删除 indexOfVararg 起的 vararg 捕获循环（vararg 参数捕获缺陷）"
+      "note": "人工确认：删除 indexOfVararg 起的 vararg 捕获循环（vararg 参数捕获缺陷）；2026-10-30 owner 批准锚点校准 L126→129（9B 审计 A 类：实际发布锚点 L129/L132，均在 ±5 容差内）"
     }
   ],
   "negative_baits": []

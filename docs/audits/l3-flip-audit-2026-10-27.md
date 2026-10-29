@@ -56,3 +56,5 @@
 ```
 
 审计脚本/人工核对口径见本文件表格；未修改仓库数据。
+
+> **2026-10-30 后记**：owner 批准 A 类修正——bad-Mockito-3 expected line 126→129（覆盖实际发布锚点 L129/L132，仍锚同一方法）；已落地于 `cra-eval/dataset/bad/bad-Mockito-3/expected_findings.json`。B/C/D 类维持审计建议不改。理论值 72/90 = 0.800（WL 0.7059）待 L3 全量重跑验证。

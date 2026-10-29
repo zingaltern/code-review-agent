@@ -54,3 +54,14 @@
 - **合并 head L2**（run 40594443336，绑定 `a644ac6`，报告最后提交 `ad134ad`）：bad 53/60 = 0.883（Wilson 下界 0.7782）、clean 0.75、零发布样本级 0/30、100/100 完成，门禁绿。合并过程中另有一次 e12bb24 上的 L2（run 40568302478：55/60 = 0.917、WL 0.8193），因 spotless 提交改变报告绑定后按规则在最终 head 重跑，以 `a644ac6` 报告为准。
 - **全量 L3**：属里程碑动作，待 owner 批准后执行（PR #21 未自行触发）。
 
+
+## Owner 裁决补充（2026-10-30）
+
+| # | 事项 | 裁决 | 落点 |
+|---|---|---|---|
+| 1 | bad-Mockito-3 expected 锚点（9B 审计 A 类唯一一处） | **批准修正**：line 126→129（覆盖实际发布锚点 L129/L132，仍锚同一方法） | `cra-eval/dataset/bad/bad-Mockito-3/expected_findings.json`（note 已回写）；理论值 72/90 = 0.800（WL 0.7059）待 L3 全量重跑验证 |
+| 2 | 真实 GitLab 写操作验收（MR discussion/note、commit comment、issue） | **暂缓**（待 owner token，再验时按 `docs/deployment-gitlab.md` §12 清单） | docs/07、README、deployment-gitlab §0/§12 同步 |
+| 3 | Gerrit 平台适配 | **不做适配**（Git 平台扩展点保留，如未来重启按 11§6 checklist 另立项） | docs/07、docs/11 §7、deployment-gitlab、README 已写入 |
+| 4 | L3 全量重跑（官方口径） | 由 owner 指定的其他会话执行（canonical 参数：`set=all k=3 depth=standard tier=l3 crosschecker=true temperature=0.2`，约 49min）；本轮不含 Mockito-3 修正后的官方数值 | — |
+
+- **完成度口径更新**：Gerrit 移出范围后，M4e 的剩余缺口仅为"真实 GitLab 写操作验收（暂缓）"；11 项功能中 10 项完整、M4e 基本完成（适配器/接线/语义索引均已落地并有测试与读路径实证）。
