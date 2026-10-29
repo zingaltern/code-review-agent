@@ -11,7 +11,7 @@ record EvalArgOptions(String subcommand, Map<String, String> named, List<String>
 
   /** 无值开关（出现即 true，不消费下一个参数）。 */
   private static final List<String> BOOLEAN_FLAGS =
-      List.of("--fail-on-red", "--crosschecker-enabled");
+      List.of("--fail-on-red", "--crosschecker-enabled", "--semantic-context");
 
   /** 编辑距离 ≤ 3 才给"最近似旗标"提示，避免噪声。 */
   private static final int SUGGEST_DISTANCE = 3;

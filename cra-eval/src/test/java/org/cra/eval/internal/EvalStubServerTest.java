@@ -2,9 +2,15 @@ package org.cra.eval.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.DiffResult;
@@ -110,5 +116,80 @@ class EvalStubServerTest {
     assertThat(server.reviews().get(0).comments().get(0).path()).isEqualTo("src/Demo.java");
     assertThat(server.summaries()).hasSize(1);
     assertThat(server.summaries().get(0).body()).contains("status=DONE");
+  }
+
+  @Test
+  void listFilesReadsSnapshotTree() {
+    // 端到端：真实 GitHubHttpAdapter 消费 tree[].path + type=blob —— 此前 tree 恒空使
+    // javaFileIndex/test_index 在评测里从未开火（L3 取证：call_site_index 141 次 unavailable）
+    List<String> javaFiles =
+        adapter.listFiles(new RepoRef("cra-eval-fixture", "bad-Demo"), "head000", "**/*.java");
+    assertThat(javaFiles).containsExactly("src/Demo.java");
+    assertThat(
+            adapter.listFiles(
+                new RepoRef("cra-eval-fixture", "bad-Demo"), "head000", "**/test/**/*.java"))
+        .isEmpty();
+  }
+
+  @Test
+  void treeServesSnapshotFilesWithoutGitMetadata() throws Exception {
+    Path snapshot = tmp.resolve("snap-tree");
+    Files.createDirectories(snapshot.resolve(".git/objects"));
+    Files.writeString(snapshot.resolve(".git/config"), "[core]\n", StandardCharsets.UTF_8);
+    Files.createDirectories(snapshot.resolve("src/main/java"));
+    Files.writeString(
+        snapshot.resolve("src/main/java/A.java"), "class A {}\n", StandardCharsets.UTF_8);
+    Files.createDirectories(snapshot.resolve("src/test/java"));
+    Files.writeString(
+        snapshot.resolve("src/test/java/ATest.java"), "class ATest {}\n", StandardCharsets.UTF_8);
+    Files.writeString(snapshot.resolve("README.md"), "# demo\n", StandardCharsets.UTF_8);
+    try (EvalStubServer treeStub =
+        EvalStubServer.start(DiffSplitter.split(DIFF), "base000", "head000", snapshot)) {
+      JsonNode first = getTree(treeStub);
+      assertThat(first.path("sha").asText()).isEqualTo("head000");
+      assertThat(first.path("truncated").asBoolean()).isFalse();
+      List<String> paths = new ArrayList<>();
+      for (JsonNode entry : first.path("tree")) {
+        paths.add(entry.path("path").asText());
+        assertThat(entry.path("type").asText()).isEqualTo("blob");
+        assertThat(entry.path("mode").asText()).isEqualTo("100644");
+        assertThat(entry.path("sha").asText()).matches("[0-9a-f]{40}");
+      }
+      assertThat(paths)
+          .containsExactly("README.md", "src/main/java/A.java", "src/test/java/ATest.java");
+      assertThat(paths).allSatisfy(p -> assertThat(p).doesNotContain("\\").doesNotStartWith("/"));
+
+      // 消费面：真实 adapter 的两个 glob（ADR-0015 调用点索引 + 03§4.2 测试文件清单）都能看到文件
+      GitPlatformAdapter treeAdapter =
+          GitHubAssembly.createComponents(treeStub.baseUrl(), "stub-token").adapter();
+      RepoRef repo = new RepoRef("cra-eval-fixture", "bad-Demo");
+      assertThat(treeAdapter.listFiles(repo, "head000", "**/*.java"))
+          .containsExactly("src/main/java/A.java", "src/test/java/ATest.java");
+      assertThat(treeAdapter.listFiles(repo, "head000", "**/test/**/*.java"))
+          .containsExactly("src/test/java/ATest.java");
+
+      // 两次请求 sha 相同（路径的确定性 SHA-1，无随机/时间因素）
+      JsonNode second = getTree(treeStub);
+      for (int i = 0; i < paths.size(); i++) {
+        assertThat(second.path("tree").get(i).path("sha").asText())
+            .isEqualTo(first.path("tree").get(i).path("sha").asText());
+      }
+    }
+  }
+
+  private static JsonNode getTree(EvalStubServer stub) throws Exception {
+    HttpRequest request =
+        HttpRequest.newBuilder(
+                URI.create(
+                    stub.baseUrl()
+                        + "/repos/cra-eval-fixture/bad-Demo/git/trees/head000?recursive=1"))
+            .header("Authorization", "token stub-token")
+            .header("Accept", "application/vnd.github+json")
+            .GET()
+            .build();
+    HttpResponse<String> response =
+        HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
+    assertThat(response.statusCode()).isEqualTo(200);
+    return Json.MAPPER.readTree(response.body());
   }
 }

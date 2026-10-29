@@ -9,6 +9,8 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -43,6 +45,9 @@ public final class EvalStubServer implements AutoCloseable {
   private final ConcurrentLinkedQueue<CapturedReview> reviews = new ConcurrentLinkedQueue<>();
   private final ConcurrentLinkedQueue<CapturedSummary> summaries = new ConcurrentLinkedQueue<>();
   private final AtomicLong ids = new AtomicLong(5000);
+
+  /** 快照文件清单缓存（首次 tree 请求构建；同一 run 内 listFiles 可能被多次调用）。 */
+  private volatile List<JsonNode> treeEntries;
 
   private EvalStubServer(Seed seed, HttpServer server) {
     this.seed = seed;
@@ -143,9 +148,9 @@ public final class EvalStubServer implements AutoCloseable {
       exchange.getResponseBody().write(body);
       return;
     }
-    // /repos/{o}/{r}/git/trees/{sha}
+    // /repos/{o}/{r}/git/trees/{sha}[?recursive=1]
     if (path.matches("/repos/[^/]+/[^/]+/git/trees/.+")) {
-      respondJson(exchange, 200, Map.of("sha", seed.headSha(), "tree", List.of()));
+      respondJson(exchange, 200, treeJson());
       return;
     }
     // /user（bot 身份）
@@ -190,6 +195,94 @@ public final class EvalStubServer implements AutoCloseable {
   }
 
   // ---------- 数据面构造 ----------
+
+  /**
+   * git tree 响应：由解包快照的真实文件清单生成（此前恒空 → javaFileIndex / test_index 在评测里从未开火）。
+   *
+   * <p>条目形态对齐 GitHub REST（{@code type=blob} + {@code mode=100644}），sha 取路径的确定性
+   * SHA-1（同输入同输出；无随机/时间因素）。
+   */
+  private JsonNode treeJson() throws IOException {
+    var root = Json.MAPPER.createObjectNode();
+    root.put("sha", seed.headSha());
+    root.put("truncated", false);
+    var tree = root.putArray("tree");
+    for (JsonNode entry : snapshotTree()) {
+      tree.add(entry);
+    }
+    return root;
+  }
+
+  private List<JsonNode> snapshotTree() throws IOException {
+    List<JsonNode> cached = treeEntries;
+    if (cached != null) {
+      return cached;
+    }
+    synchronized (this) {
+      if (treeEntries == null) {
+        treeEntries = buildTreeEntries();
+      }
+      return treeEntries;
+    }
+  }
+
+  /** 遍历快照根收普通文件；`.git` 目录及其下条目不属于仓库工作树（真实 GitHub tree 亦不含），一律跳过。 */
+  private List<JsonNode> buildTreeEntries() throws IOException {
+    Path root = seed.snapshotRoot().normalize();
+    List<JsonNode> entries = new ArrayList<>();
+    try (var walk = Files.walk(root)) {
+      for (Path file : walk.filter(Files::isRegularFile).toList()) {
+        Path relative = root.relativize(file.normalize());
+        if (containsGitSegment(relative)) {
+          continue;
+        }
+        String path = toPosixPath(relative);
+        var node = Json.MAPPER.createObjectNode();
+        node.put("path", path);
+        node.put("type", "blob");
+        node.put("mode", "100644");
+        node.put("sha", pathSha1(path));
+        entries.add(node);
+      }
+    }
+    entries.sort(java.util.Comparator.comparing(e -> e.path("path").asText()));
+    return List.copyOf(entries);
+  }
+
+  private static boolean containsGitSegment(Path relative) {
+    for (Path segment : relative) {
+      if (".git".equals(segment.toString())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** POSIX 相对路径（分隔符恒为 '/'，与 GitHub tree 的 path 形态一致）。 */
+  private static String toPosixPath(Path relative) {
+    StringBuilder out = new StringBuilder();
+    for (Path segment : relative) {
+      if (out.length() > 0) {
+        out.append('/');
+      }
+      out.append(segment);
+    }
+    return out.toString();
+  }
+
+  private static String pathSha1(String path) {
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-1");
+      byte[] hash = digest.digest(path.getBytes(StandardCharsets.UTF_8));
+      StringBuilder hex = new StringBuilder(hash.length * 2);
+      for (byte b : hash) {
+        hex.append(String.format("%02x", b));
+      }
+      return hex.toString();
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-1 不可用", e);
+    }
+  }
 
   private JsonNode compareJson() {
     var root = Json.MAPPER.createObjectNode();
