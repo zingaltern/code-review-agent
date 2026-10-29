@@ -105,3 +105,22 @@
      已知抖动（04§2.4）。
    处置：全部按既有实践重跑（4/4 绿），**未改阈值/扫描面**；标题引述词白名单是否调整、k=1
    哨兵是否升 k≥2 属口径决策，留 owner。
+
+## 五、第二轮：修复 PR 自身的评审跟进（2026-10-30 晚）
+
+四个修复 PR 合并前各自被流水线评审，产生 9 条新发现（#40 4 条、#41 3 条、#42 2 条；
+#43–#46 findings=0）。逐条处置如下，修复落点 PR #47。
+
+| # | 来源 | 发现 | 判定 | 处置 |
+|---|---|---|---|---|
+| 1 | #40 | gate 白名单缺 `--fail-on-red`，可能误拒合法调用 | FALSE_POSITIVE | `--fail-on-red` 是 run/verify 旗标；gate 恒以退出码 5 表示红（GateCommand/05§3 文档化），传它是历史无操作。严格拒绝正是本次新增校验的目的——错误信息会明确列出未知旗标 |
+| 2 | #40 | run_end 统计字段非数字类型时 `asInt/asLong` 静默返回 0 | STILL_PRESENT | **修复**：校验改为 `isNumber()`（非数字/缺失/显式 null 一律 available=false）+ 测试 |
+| 3 | #40 | 取最新 trace 按父目录名比较，深度 1 的 trace 其 parent 是 runRoot | STILL_PRESENT | **修复**：改按 `runRoot.relativize(trace)` 的第一段目录名排序（深度 1 视为最旧单 run）+ 测试 |
+| 4 | #40 | `EvalArgOptions.parse` 会把以 `--` 开头的值吞掉（如 `--tier --l2`），后续旗标丢失且报错误导 | STILL_PRESENT | **修复**：期望值时若下一 token 以 `--` 开头 → 明确报"参数缺值: --tier（下一个 token 看起来是旗标: --l2）" + 测试 |
+| 5 | #41 | fenceCount 把"≤3 空格缩进 + ```"算围栏，"与 CommonMark 不符" | FALSE_POSITIVE | CommonMark 恰允许 0–3 空格缩进的围栏；4+ 空格才是缩进代码块（已有负向测试）——行为正确，补 3 空格正向测试锁定 |
+| 6 | #41 | fenceCount 未处理 CRLF（`\r\n`），行首缩进检测对 CR 失效 | STILL_PRESENT | **修复**：两份解析器统一先归一 `\r\n`/`\r` → `\n` 再逐行扫描 + CRLF 用例 |
+| 7 | #41 | 按 `\n` 拆分遗漏 `\r\n`，4+ 空格缩进的行内反引号串被误判 | 部分（CRLF 见 #6；4+ 空格为 FALSE_POSITIVE） | 4+ 空格不构成围栏在实现与测试中均已正确（#5 说明） |
+| 8 | #42 | 明文密钥仍出现在 PR diff/历史中（本 PR 仅删除了文件内值） | 接受（已声明） | 不重写 main 历史；deployment-server.md 补声明"该值历史存在、仅限已废弃 scratch 环境、未用于生产"，配合"一次性密钥"定性 |
+| 9 | #42 | 验收证据保留 scratch 仓库名/webhook id 等基建细节 | 接受（已声明） | 与第一轮 #24 同一取舍：私有仓库证据链，文档已声明缓解 |
+
+**修复验证**：cra-eval 118 测试、双平台 LedgerMarkerParserTest 各 44 测试全绿；全量 `mvn verify` 绿。

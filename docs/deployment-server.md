@@ -222,7 +222,7 @@ CRA_REPORT_SIGNING_KEY=... cra-eval verify \
 | 非 PR 事件 → 200 ignored | 通过 | 签名 `ping` → `200 {"status":"ignored","event":"ping"}` |
 | 错签 → 401 | 通过 | `X-Hub-Signature-256=sha256:000…` → 401 `{"status":"unauthorized"}` |
 | 非法 payload → 400 | 通过 | 合法 HMAC + `{not-json` → 400 `{"status":"bad_payload"}` |
-| 报告签发 → verify 通过 | 通过 | `POST /api/v1/reports/attest` 200；`cra-eval verify --signature` exit 0（scratch 环境一次性密钥，验收后已弃用；明文不落仓库，密钥仅经 env/file 注入） |
+| 报告签发 → verify 通过 | 通过 | `POST /api/v1/reports/attest` 200；`cra-eval verify --signature` exit 0（scratch 环境一次性密钥，验收后已弃用；明文不落仓库，密钥仅经 env/file 注入；该值历史上曾出现在旧提交与 PR diff 中——不重写历史，仅限已废弃的 scratch 环境，未用于任何生产/长期配置） |
 | 篡改报告 → 退出码 5 | 通过 | 仅改 `generated_at`：门禁仍绿，签名校验失败，exit 5 |
 | 优雅停机排水 | 通过 | `drained=true queued=0 inFlight=0 accepted=3 completed=3 failed=0 rejected=0` |
 

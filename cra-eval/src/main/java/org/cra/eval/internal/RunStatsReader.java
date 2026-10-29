@@ -48,10 +48,22 @@ public final class RunStatsReader {
     Path latest =
         traces.stream()
             .max(
-                Comparator.comparing((Path p) -> p.getParent().getFileName().toString())
+                Comparator.comparing((Path p) -> runDirKey(runRoot, p))
                     .thenComparing(Path::toString))
             .orElseThrow();
     return lastRunEnd(latest);
+  }
+
+  /**
+   * run 目录键：相对 runRoot 的第一段目录名（run_id，时间戳零填充 → 字典序=时间序）；trace 直接位于 runRoot 时为空串（排序最前，视为最旧）。
+   *
+   * @param runRoot trace 根目录
+   * @param trace trace 文件
+   * @return 排序键
+   */
+  private static String runDirKey(Path runRoot, Path trace) {
+    Path rel = runRoot.relativize(trace);
+    return rel.getNameCount() >= 2 ? rel.getName(0).toString() : "";
   }
 
   private static CaseObservation.RunStats lastRunEnd(Path trace) {
@@ -78,12 +90,12 @@ public final class RunStatsReader {
       JsonNode tokensIn = node.path("tokens_in");
       JsonNode tokensOut = node.path("tokens_out");
       JsonNode latencyMs = node.path("latency_ms");
-      if (tokensIn.isMissingNode()
-          || tokensIn.isNull()
+      if (!tokensIn.isNumber()
+          || !tokensOut.isNumber()
+          || !latencyMs.isNumber()
+          || tokensIn.isMissingNode()
           || tokensOut.isMissingNode()
-          || tokensOut.isNull()
-          || latencyMs.isMissingNode()
-          || latencyMs.isNull()) {
+          || latencyMs.isMissingNode()) {
         // run_end 存在但统计不全：宁可不可用，也不以 0 值进均值分母（掩盖采集缺陷）
         found = CaseObservation.RunStats.EMPTY;
         continue;

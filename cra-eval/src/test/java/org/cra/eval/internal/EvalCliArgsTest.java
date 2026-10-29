@@ -376,4 +376,12 @@ class EvalCliArgsTest {
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("stray");
   }
+
+  @Test
+  void valueStartingWithDoubleDashIsReportedAsMissingValue() {
+    assertThatThrownBy(() -> EvalCliArgs.parse(new String[] {"run", "--tier", "--l2"}, Map.of()))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("参数缺值: --tier")
+        .hasMessageContaining("--l2");
+  }
 }

@@ -32,6 +32,10 @@ record EvalArgOptions(String subcommand, Map<String, String> named, List<String>
         if (i + 1 >= args.length) {
           throw new CraConfigException("参数缺值: " + arg);
         }
+        if (args[i + 1].startsWith("--")) {
+          // 下一个 token 是旗标：本旗标缺值（不把 --flag 吞成值，避免后续旗标丢失与误导性拒绝）
+          throw new CraConfigException("参数缺值: " + arg + "（下一个 token 看起来是旗标: " + args[i + 1] + "）");
+        }
         named.put(arg, args[++i]);
       } else {
         positional.add(arg);
