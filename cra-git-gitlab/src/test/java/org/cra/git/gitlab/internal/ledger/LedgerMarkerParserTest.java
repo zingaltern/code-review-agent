@@ -356,4 +356,26 @@ class LedgerMarkerParserTest {
     assertThat(out.marker()).isPresent();
     assertThat(out.suspects()).isEmpty();
   }
+
+  @Test
+  void crlfLineEndingsDoNotBreakFencePairDetection() {
+    String body = "``````\r\n代码\r\n``````\r\nsrc/Foo.java:88\r\n" + findingMarker() + "\r\n";
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isPresent();
+    assertThat(out.suspects()).isEmpty();
+  }
+
+  @Test
+  void indentedFenceWithThreeSpacesStillCountsAsFence() {
+    String body = "   ```\n代码\n   ```\nsrc/Foo.java:89\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isPresent();
+  }
+
+  @Test
+  void indentedFenceWithFourSpacesIsIndentedCodeNotFence() {
+    String body = "    ```\n代码\nsrc/Foo.java:90\n" + findingMarker();
+    var out = PARSER.parse(body);
+    assertThat(out.marker()).isPresent();
+  }
 }

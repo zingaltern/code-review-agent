@@ -136,7 +136,9 @@ public final class LedgerMarkerParser {
    */
   private static int fenceCount(String text) {
     int count = 0;
-    for (String line : text.split("\n", -1)) {
+    // CRLF/CR 统一归一为 LF（GitHub/GitLab 评论可能含 \r\n；CR-only 属历史格式）
+    String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+    for (String line : normalized.split("\n", -1)) {
       int lead = 0;
       while (lead < 3 && lead < line.length() && line.charAt(lead) == ' ') {
         lead++;

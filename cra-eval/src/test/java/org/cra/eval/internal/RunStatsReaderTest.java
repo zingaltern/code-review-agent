@@ -43,6 +43,29 @@ class RunStatsReaderTest {
   }
 
   @Test
+  void nonNumericStatsFieldsYieldUnavailable() throws Exception {
+    Path runRoot = tmp.resolve("run-nonnum");
+    Path runDir = runRoot.resolve("r");
+    Files.createDirectories(runDir);
+    Files.writeString(
+        runDir.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":\"many\",\"tokens_out\":2,\"latency_ms\":3}\n");
+    assertThat(RunStatsReader.read(runRoot).available()).isFalse();
+  }
+
+  @Test
+  void traceDirectlyUnderRunRootIsReadAsSingleRun() throws Exception {
+    Path runRoot = tmp.resolve("run-flat");
+    Files.createDirectories(runRoot);
+    Files.writeString(
+        runRoot.resolve("trace.ndjson"),
+        "{\"event\":\"run_end\",\"tokens_in\":7,\"tokens_out\":8,\"latency_ms\":9}\n");
+    CaseObservation.RunStats stats = RunStatsReader.read(runRoot);
+    assertThat(stats.available()).isTrue();
+    assertThat(stats.tokensIn()).isEqualTo(7);
+  }
+
+  @Test
   void lastRunEndWins() throws Exception {
     Path runRoot = tmp.resolve("run-2");
     Path runDir = runRoot.resolve("r");
