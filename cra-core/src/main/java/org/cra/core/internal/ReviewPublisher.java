@@ -20,6 +20,7 @@ import org.cra.common.git.ReviewItemResult;
 import org.cra.common.run.ReviewMode;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.signoff.SignoffAdvice;
+import org.cra.core.internal.pipeline.Degradations;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.store.api.ReviewLedger;
@@ -89,9 +90,9 @@ final class ReviewPublisher {
                             s.finding().id()))
                 .toList()
             : List.of();
-    if (markerUnsafePath && !degradations.contains("path-marker-unsafe")) {
+    if (markerUnsafePath && !degradations.contains(Degradations.PATH_MARKER_UNSAFE)) {
       // 路径含 |/-->/换行会破坏账本标记（字段顺序严格校验），inline 降级为 Summary，幂等不静默失效
-      degradations.add("path-marker-unsafe");
+      degradations.add(Degradations.PATH_MARKER_UNSAFE);
     }
     String summaryBody =
         ReviewBodyRenderer.summaryBody(
@@ -179,7 +180,7 @@ final class ReviewPublisher {
     if (result.items().stream().anyMatch(i -> i.publishStatus() == PublishStatus.SUMMARY_FALLBACK)
         && !inline.isEmpty()) {
       // 整包 422 逐条降级产生了额外 SUMMARY_FALLBACK（05§2.2），run 降级记录
-      degradations.add("422-per-item-fallback");
+      degradations.add(Degradations.PER_ITEM_FALLBACK_422);
     }
     long publishedActual =
         result.items().stream().filter(i -> i.publishStatus() == PublishStatus.PUBLISHED).count();
@@ -203,15 +204,15 @@ final class ReviewPublisher {
     if (result.summaryCommentId().isEmpty()) {
       // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾，重跑走指纹级补发（02§4.1）
       // 必须显式降级：否则 run 报 SUCCESS、CI 退出 0，用户却看不到 Summary
-      if (!degradations.contains("summary-publish-failed")) {
-        degradations.add("summary-publish-failed");
+      if (!degradations.contains(Degradations.SUMMARY_PUBLISH_FAILED)) {
+        degradations.add(Degradations.SUMMARY_PUBLISH_FAILED);
       }
       return (int) (publishedActual + fallbackActual);
     }
     recordToLedger(request, runId, ordered, result, skippedDuplicate, degraded, templateVersions);
     int supersedeFailures = supersedePreviousSummaries(request, runId, trace);
     if (supersedeFailures > 0) {
-      degradations.add("summary-supersede-failed:x" + supersedeFailures);
+      degradations.add(Degradations.summarySupersedeFailed(supersedeFailures));
     }
     return (int) (publishedActual + fallbackActual);
   }
@@ -265,7 +266,7 @@ final class ReviewPublisher {
             carrierId.isPresent()));
     if (carrierId.isEmpty()) {
       // 载体未返回 id = 无法确认完整发布：不登记账本，重跑重新发布（02§4.1）
-      degradations.add("carrier-publish-no-id");
+      degradations.add(Degradations.CARRIER_PUBLISH_NO_ID);
       return 0;
     }
     recordCarrierToLedger(

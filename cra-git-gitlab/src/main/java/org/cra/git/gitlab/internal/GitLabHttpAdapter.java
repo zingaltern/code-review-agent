@@ -11,6 +11,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.Side;
@@ -21,9 +22,12 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffHunk;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
+import org.cra.common.git.DispositionSupport;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
 import org.cra.common.git.LedgerComment;
+import org.cra.common.git.LedgerMarkerParser;
+import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
 import org.cra.common.git.PostCommitReviewCommand;
 import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
@@ -32,9 +36,8 @@ import org.cra.common.git.PublishStatus;
 import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
+import org.cra.common.text.Texts;
 import org.cra.git.api.GitPlatformAdapter;
-import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser;
-import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser.ParseOutcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,7 +47,8 @@ import org.slf4j.LoggerFactory;
  *
  * <p>与 GitHub 实现的结构差异：GitLab 没有"整包 review"对象，inline 逐条建 discussion；diff 锚定需要 base/head/start
  * 三元组；commit comment 无平台 id（由 {@link GitLabLedgerSupport} 生成稳定合成 id）。 账本标记格式原样移植
- * 05§1.3，解析器在本模块独立复制（实现模块互不依赖，11§4 第 4 条）。
+ * 05§1.3，解析器与处置标签辅助已下沉 cra-common 共享（{@link LedgerMarkerParser} / {@link DispositionSupport}，
+ * ADR-0016；实现模块互不依赖，11§4 第 4 条）。
  */
 public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
 
@@ -149,7 +153,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                 + "/raw?ref="
                 + GitLabPayloadSupport.urlEncode(sha));
     try {
-      return new FileContent(path, GitLabPayloadSupport.strictUtf8(bytes), false);
+      return new FileContent(path, Texts.strictUtf8(bytes), false);
     } catch (CharacterCodingException e) {
       return new FileContent(path, null, true);
     }
@@ -157,7 +161,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   @Override
   public List<String> listFiles(RepoRef repo, String sha, String pathGlob) {
-    java.util.regex.Pattern glob = GitLabPayloadSupport.globToRegex(pathGlob);
+    java.util.regex.Pattern glob = PathGlobs.compile(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry :
         getPagedArray(
@@ -388,7 +392,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                 inline ? LedgerComment.KIND_INLINE : LedgerComment.KIND_ISSUE,
                 login,
                 note.path("body").asText(""),
-                GitLabDispositionSupport.instantOrEpoch(note.path("created_at")),
+                DispositionSupport.instantOrEpoch(note.path("created_at")),
                 inline ? textOrNull(position, "head_sha") : null));
       }
     }
@@ -413,7 +417,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
               LedgerComment.KIND_COMMIT,
               login,
               note,
-              GitLabDispositionSupport.instantOrEpoch(c.path("created_at")),
+              DispositionSupport.instantOrEpoch(c.path("created_at")),
               commitSha));
     }
     return GitLabLedgerSupport.parse(comments, markerParser);
@@ -454,7 +458,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
       }
       boolean reachedOlder = false;
       for (JsonNode issue : root) {
-        Instant updated = GitLabDispositionSupport.instantOrNull(issue.path("updated_at"));
+        Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
         if (since != null && updated != null && updated.isBefore(since)) {
           reachedOlder = true;
           continue;
@@ -472,7 +476,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                 LedgerComment.KIND_ISSUE,
                 login,
                 issue.path("description").asText(""),
-                GitLabDispositionSupport.instantOrEpoch(issue.path("created_at")),
+                DispositionSupport.instantOrEpoch(issue.path("created_at")),
                 null));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
@@ -500,7 +504,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
       }
       boolean reachedOlder = false;
       for (JsonNode mr : root) {
-        Instant updated = GitLabDispositionSupport.instantOrNull(mr.path("updated_at"));
+        Instant updated = DispositionSupport.instantOrNull(mr.path("updated_at"));
         if (since != null && (updated == null || updated.isBefore(since))) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
@@ -535,7 +539,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                     ? PullRequestRef.STATE_OPEN
                     : PullRequestRef.STATE_CLOSED,
                 updated == null ? Instant.EPOCH : updated,
-                GitLabDispositionSupport.instantOrNull(mr.path("merged_at")),
+                DispositionSupport.instantOrNull(mr.path("merged_at")),
                 base));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
@@ -601,7 +605,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
           continue; // 人类自建线程不是处置信号
         }
         String body = note.path("body").asText("");
-        String tag = GitLabDispositionSupport.replyTag(body);
+        String tag = DispositionSupport.replyTag(body);
         if (tag == null) {
           continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
         }
@@ -609,10 +613,10 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
             new DispositionSignal(
                 DispositionSignal.KIND_REPLY_TAG,
                 parentId,
-                GitLabDispositionSupport.instantOrEpoch(note.path("created_at")),
+                DispositionSupport.instantOrEpoch(note.path("created_at")),
                 tag,
                 author,
-                GitLabDispositionSupport.excerpt(body)));
+                DispositionSupport.excerpt(body)));
       }
     }
     for (JsonNode discussion : discussions) {
@@ -645,7 +649,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
               new DispositionSignal(
                   DispositionSignal.KIND_REACTION,
                   noteId,
-                  GitLabDispositionSupport.instantOrEpoch(award.path("created_at")),
+                  DispositionSupport.instantOrEpoch(award.path("created_at")),
                   content,
                   award.path("user").path("username").asText(""),
                   ""));

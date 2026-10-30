@@ -18,6 +18,7 @@ import org.cra.common.git.FileContent;
 import org.cra.core.internal.pipeline.AntiAnchorValidator;
 import org.cra.core.internal.pipeline.CallSiteIndex;
 import org.cra.core.internal.pipeline.CrossFileSlices;
+import org.cra.core.internal.pipeline.Degradations;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.RefuteEvidenceGate;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
@@ -182,6 +183,8 @@ final class VerificationWave {
       byFile.computeIfAbsent(scored.finding().file(), k -> new ArrayList<>()).add(scored);
     }
     List<TaskHandle<BatchOutcome>> futures = new ArrayList<>();
+    // 并发批任务（工作线程）写、主线程在 future 汇合后读——COW 保证汇合前的并发追加不抛
+    // ConcurrentModificationException；失败隔离语义见 02§4.2（批内异常收敛为降级，不炸 run）
     List<String> degradations = new java.util.concurrent.CopyOnWriteArrayList<>();
     for (Map.Entry<String, List<FindingAggregator.Scored>> entry : byFile.entrySet()) {
       String batchFile = entry.getKey();
@@ -226,14 +229,15 @@ final class VerificationWave {
       } catch (java.util.concurrent.TimeoutException e) {
         boolean started = task.started();
         task.cancel();
-        degradations.add(started ? "verifier-timeout" : "verifier-queue-timeout");
+        degradations.add(
+            started ? Degradations.VERIFIER_TIMEOUT : Degradations.VERIFIER_QUEUE_TIMEOUT);
       } catch (InterruptedException e) {
         futures.forEach(TaskHandle::cancel);
         Thread.currentThread().interrupt();
         throw new IllegalStateException("验证波被中断", e);
       } catch (java.util.concurrent.ExecutionException e) {
         Throwable cause = e.getCause() == null ? e : e.getCause();
-        degradations.add("verifier-batch-failed: " + cause.getClass().getSimpleName());
+        degradations.add(Degradations.verifierBatchFailed(cause.getClass().getSimpleName()));
       }
     }
     return new WaveResult(
@@ -259,7 +263,7 @@ final class VerificationWave {
       CrossFileSlices slices) {
     if (budget.phase() == RunBudgetTracker.Phase.STOP) {
       // 100% 预算击穿：验证不可得 → UNVERIFIED（02§4.2），不发布
-      degradations.add("verifier-budget-exhausted");
+      degradations.add(Degradations.VERIFIER_BUDGET_EXHAUSTED);
       trace.emit(
           "verify",
           Map.of(
@@ -302,7 +306,7 @@ final class VerificationWave {
     if (run.llmUnavailable()) {
       // 缩上下文重试 1 次（02§4.2 验证不可得语义的前半段）
       trace.emit("verify_retry", Map.of("file_batch", file, "reason", run.llmError()));
-      degradations.add("verifier-retry-once");
+      degradations.add(Degradations.VERIFIER_RETRY_ONCE);
       VerificationBatchInput reduced = reduceContext(input);
       AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> retry =
           agentRunner.executeParsed(
@@ -311,7 +315,7 @@ final class VerificationWave {
               (json, model) -> adapt(VerdictJsonCodec.parse(json)),
               trace);
       if (retry.llmUnavailable()) {
-        degradations.add("verifier-unavailable");
+        degradations.add(Degradations.VERIFIER_UNAVAILABLE);
         trace.emit(
             "verify",
             Map.of(
@@ -333,7 +337,7 @@ final class VerificationWave {
     }
     if (run.output() == null) {
       // schema 校验重试耗尽：本批无可信判定 → 全部验证不可得（UNVERIFIED 不发布）
-      degradations.add("verifier-schema-violation");
+      degradations.add(Degradations.VERIFIER_SCHEMA_VIOLATION);
       trace.emit(
           "verify",
           Map.of(

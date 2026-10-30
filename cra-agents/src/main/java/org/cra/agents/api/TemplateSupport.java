@@ -1,6 +1,7 @@
 package org.cra.agents.api;
 
 import java.util.Map;
+import org.cra.common.exception.CraConfigException;
 
 /**
  * 模板装载契约（04§4：模板 = classpath 资源，占位符 {var}，引用 {&gt;path} 包含 shared 段； 模板即代码——改动走 PR +
@@ -13,6 +14,9 @@ public interface TemplateSupport {
 
   /** UNTRUSTED 定界闭标记。 */
   String UNTRUSTED_CLOSE = "<<<END_UNTRUSTED_CONTENT>>>";
+
+  /** brief 拆分标记（04§4 模板骨架：System 段与 "# User" 用户段以空行 + 标题行分隔）。 */
+  String BRIEF_SPLIT_MARKER = "\n# User\n";
 
   /**
    * 渲染模板：解析 {@code {>path}} 包含段并替换 {@code {var}} 占位符（缺变量即抛错—— 模板错误在组装期暴露，不带病上线）。
@@ -93,5 +97,41 @@ public interface TemplateSupport {
       list += "\n…（共 " + sorted.size() + " 个文件，仅列前 " + shown + " 个）";
     }
     return tools + " 仅可触达以下文件（相对仓库根，越界请求将被拒绝并终止执行）：\n" + untrusted(list);
+  }
+
+  /**
+   * 渲染结果 → 自包含 brief 的统一拆分（03§2.1/04§4：System 段在标记前、"# User" 用户段在标记后）。
+   *
+   * <p>全部代理定义的 brief 组装收敛于此：{@code systemPrompt} = 标记前的渲染文本（不含标记前的换行）， {@code userPrompt} = 自 "#
+   * User" 标题行起的其余文本。模板缺标记 = 模板骨架被破坏（04§4）——组装期抛 CraConfigException 拒绝带病上线（经派发侧失败隔离收敛为该代理空产出 +
+   * 降级声明，不静默）。
+   *
+   * @param templates 模板装载器（版本号取自同一装载器，保证与渲染同源）
+   * @param templatePath classpath 模板路径（异常文案内嵌，定位模板骨架损坏）
+   * @param rendered {@link #render} 的渲染结果
+   * @param role 代理角色
+   * @param tools 工具白名单
+   * @param budget 预算硬限
+   * @return 自包含简报（standard 档，03§6）
+   * @throws CraConfigException 渲染结果缺少 {@link #BRIEF_SPLIT_MARKER}（模板骨架损坏）
+   */
+  static AgentBrief briefOf(
+      TemplateSupport templates,
+      String templatePath,
+      String rendered,
+      AgentRole role,
+      ToolWhitelist tools,
+      AgentBudget budget) {
+    int splitAt = rendered.indexOf(BRIEF_SPLIT_MARKER);
+    if (splitAt < 0) {
+      throw new CraConfigException(templatePath + " 模板缺少 '# User' 分段");
+    }
+    return new AgentBrief(
+        role,
+        rendered.substring(0, splitAt),
+        rendered.substring(splitAt + 1),
+        templates.versionOf(templatePath),
+        tools,
+        budget);
   }
 }

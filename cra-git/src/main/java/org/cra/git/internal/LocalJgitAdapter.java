@@ -2,14 +2,13 @@ package org.cra.git.internal;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
+import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.git.CommentLedger;
@@ -166,7 +165,8 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
         }
         byte[] bytes = repository.open(tw.getObjectId(0)).getBytes();
         try {
-          return new FileContent(path, strictUtf8(bytes), false);
+          // 严格 UTF-8（Texts，ADR-0016 收敛）：失败降级 binary 语义（text=null），不静默替换
+          return new FileContent(path, Texts.strictUtf8(bytes), false);
         } catch (CharacterCodingException e) {
           return new FileContent(path, null, true);
         }
@@ -180,7 +180,9 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
   public List<String> listFiles(RepoRef repo, String sha, String pathGlob) {
     try (RevWalk walk = new RevWalk(repository)) {
       RevCommit commit = parseCommit(walk, resolve(sha));
-      String glob = pathGlob == null || pathGlob.isBlank() ? null : globToRegex(pathGlob);
+      // PathGlobs.compile 每次调用新编译（ADR-0016 单一实现），树遍历内复用同一实例
+      java.util.regex.Pattern glob =
+          pathGlob == null || pathGlob.isBlank() ? null : PathGlobs.compile(pathGlob);
       List<String> out = new ArrayList<>();
       try (TreeWalk tw = new TreeWalk(repository)) {
         tw.addTree(commit.getTree());
@@ -190,7 +192,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
             continue;
           }
           String path = tw.getPathString();
-          if (glob == null || path.matches(glob)) {
+          if (glob == null || glob.matcher(path).matches()) {
             out.add(path);
           }
         }
@@ -307,41 +309,6 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
       }
     }
     return false;
-  }
-
-  private static String strictUtf8(byte[] bytes) throws CharacterCodingException {
-    return StandardCharsets.UTF_8
-        .newDecoder()
-        .onMalformedInput(CodingErrorAction.REPORT)
-        .onUnmappableCharacter(CodingErrorAction.REPORT)
-        .decode(java.nio.ByteBuffer.wrap(bytes))
-        .toString();
-  }
-
-  private static String globToRegex(String glob) {
-    StringBuilder sb = new StringBuilder();
-    for (int i = 0; i < glob.length(); i++) {
-      char c = glob.charAt(i);
-      if (c == '*') {
-        if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-          if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
-            // `**/` 匹配零或多级目录：**/foo 命中根级 foo，a/**/b 命中 a/b 与 a/x/y/b
-            sb.append("(?:.*/)?");
-            i += 2;
-          } else {
-            sb.append(".*");
-            i++;
-          }
-        } else {
-          sb.append("[^/]*");
-        }
-      } else if (c == '?') {
-        sb.append("[^/]");
-      } else {
-        sb.append(Pattern.quote(String.valueOf(c)));
-      }
-    }
-    return sb.toString();
   }
 
   private static String shortSha(String sha) {

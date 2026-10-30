@@ -12,6 +12,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.finding.Side;
@@ -19,12 +20,17 @@ import org.cra.common.git.CommentLedger;
 import org.cra.common.git.CommentSource;
 import org.cra.common.git.CommitSummary;
 import org.cra.common.git.DiffFile;
+import org.cra.common.git.DiffHunk;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
+import org.cra.common.git.DispositionSupport;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
+import org.cra.common.git.LedgerMarkerParser;
+import org.cra.common.git.LedgerMarkerParser.MarkerParseResult;
+import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostCommitReviewCommand;
 import org.cra.common.git.PostIssueCommand;
@@ -34,10 +40,8 @@ import org.cra.common.git.PublishStatus;
 import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
+import org.cra.common.text.Texts;
 import org.cra.git.api.GitPlatformAdapter;
-import org.cra.git.github.internal.ledger.LedgerMarkerParser;
-import org.cra.git.github.internal.ledger.LedgerMarkerParser.MarkerParseResult;
-import org.cra.git.github.internal.ledger.LedgerMarkerParser.ParseOutcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -46,9 +50,10 @@ import org.slf4j.LoggerFactory;
  * inline，event=COMMENT，commit_id 绑定 head sha）/ issue comments（Summary 载体）/ 账本拉取 （inline 与 issue
  * 两端点合并，只认 bot 自身评论）。
  *
- * <p>传输与退避在 {@link GitHubHttpTransport}，payload 解析在 {@link GitHubPayloadSupport}，处置标签在 {@link
- * GitHubDispositionSupport}；本类只保留端口语义、响应映射与发布 payload 组装。整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link
- * CraIntegrationException} 上抛。
+ * <p>传输与退避在 {@link GitHubHttpTransport}；hunk 解析/严格 UTF-8/路径编码等纯辅助原在 {@link GitHubPayloadSupport}，
+ * 其中可下沉部分已收敛至 cra-common（{@link DiffHunk#parseAll}、{@link Texts#strictUtf8}、{@link
+ * org.cra.common.context.PathGlobs}、{@link DispositionSupport}，ADR-0016）；本类只保留端口语义、响应映射与发布 payload
+ * 组装。整包 422 逐条降级在实现内处理（09§4 边界转换），处理不了的以 {@link CraIntegrationException} 上抛。
  */
 public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
@@ -104,7 +109,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                   : f.path("previous_filename").asText(),
               f.path("status").asText("modified"),
               patch,
-              patch == null ? List.of() : GitHubPayloadSupport.parseHunks(patch)));
+              DiffHunk.parseAll(patch)));
     }
     List<CommitSummary> commits = new ArrayList<>();
     for (JsonNode c : root.path("commits")) {
@@ -125,7 +130,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 + GitHubPayloadSupport.urlEncode(sha),
             "application/vnd.github.raw");
     try {
-      return new FileContent(path, GitHubPayloadSupport.strictUtf8(bytes), false);
+      return new FileContent(path, Texts.strictUtf8(bytes), false);
     } catch (CharacterCodingException e) {
       return new FileContent(path, null, true);
     }
@@ -141,7 +146,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       throw new org.cra.common.exception.CraIntegrationException(
           "GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
     }
-    java.util.regex.Pattern glob = GitHubPayloadSupport.globToRegex(pathGlob);
+    java.util.regex.Pattern glob = PathGlobs.compile(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry : root.path("tree")) {
       if ("blob".equals(entry.path("type").asText())) {
@@ -497,7 +502,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
         if (!issue.path("pull_request").isMissingNode()) {
           continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
         }
-        Instant updated = GitHubDispositionSupport.instantOrNull(issue.path("updated_at"));
+        Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
         if (since != null && updated != null && updated.isBefore(since)) {
           reachedOlder = true;
           continue;
@@ -515,7 +520,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 LedgerComment.KIND_ISSUE,
                 login,
                 issue.path("body").asText(""),
-                GitHubDispositionSupport.instantOrEpoch(issue.path("created_at")),
+                DispositionSupport.instantOrEpoch(issue.path("created_at")),
                 null));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
@@ -552,7 +557,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       }
       boolean reachedOlder = false;
       for (JsonNode pr : root) {
-        Instant updated = GitHubDispositionSupport.instantOrNull(pr.path("updated_at"));
+        Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
         if (updated == null || updated.isBefore(since)) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
@@ -565,7 +570,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
                 pr.path("state").asText(PullRequestRef.STATE_CLOSED),
                 updated,
-                GitHubDispositionSupport.instantOrNull(pr.path("merged_at")),
+                DispositionSupport.instantOrNull(pr.path("merged_at")),
                 pr.path("base").path("sha").asText(null)));
       }
       if (root.size() < PAGE_SIZE || reachedOlder) {
@@ -598,7 +603,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
         continue; // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
       }
       String body = c.path("body").asText("");
-      String tag = GitHubDispositionSupport.replyTag(body);
+      String tag = DispositionSupport.replyTag(body);
       if (tag == null) {
         continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
       }
@@ -606,10 +611,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
           new DispositionSignal(
               DispositionSignal.KIND_REPLY_TAG,
               parent,
-              GitHubDispositionSupport.instantOrEpoch(c.path("created_at")),
+              DispositionSupport.instantOrEpoch(c.path("created_at")),
               tag,
               c.path("user").path("login").asText(""),
-              GitHubDispositionSupport.excerpt(body)));
+              DispositionSupport.excerpt(body)));
     }
     List<JsonNode> issueComments = getPaged(repo, "/issues/" + prNumber + "/comments");
     for (JsonNode c : issueComments) {
@@ -630,7 +635,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
             new DispositionSignal(
                 DispositionSignal.KIND_REACTION,
                 commentId,
-                GitHubDispositionSupport.instantOrEpoch(r.path("created_at")),
+                DispositionSupport.instantOrEpoch(r.path("created_at")),
                 content,
                 r.path("user").path("login").asText(""),
                 ""));

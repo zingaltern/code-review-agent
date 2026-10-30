@@ -1,9 +1,15 @@
 package org.cra.common.text;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
+
 /**
- * 跨模块共享的纯文本辅助（无状态、无依赖）：短 sha、错误信息截断、必填校验与首个非空值。
+ * 跨模块共享的纯文本辅助（无状态、无依赖）：短 sha、错误信息截断、必填校验、首个非空值与严格 UTF-8 解码。
  *
- * <p>集中此前散落在各模块的复制实现，避免同名方法语义漂移（尤其 7/8 位 sha 与 200 字符截断）。
+ * <p>集中此前散落在各模块的复制实现，避免同名方法语义漂移（尤其 7/8 位 sha 与 200 字符截断）； 严格 UTF-8 于 2026-10-31 收敛
+ * （ADR-0016：github/gitlab/jgit 三份逐字节相同实现的第四处收敛点）。
  */
 public final class Texts {
 
@@ -64,5 +70,25 @@ public final class Texts {
       }
     }
     return null;
+  }
+
+  /**
+   * 严格 UTF-8 解码（平台文件内容读取用，05§2.1 {@code readFile}）：malformed/unmappable 一律 {@link
+   * CodingErrorAction#REPORT}，不做任何静默替换。
+   *
+   * <p>降级语义（显式声明）：解码失败抛 {@link CharacterCodingException}，由调用方降级为 binary 语义 （{@code
+   * FileContent.text=null, binary=true}，02§2），绝不产出带 U+FFFD 的伪文本——替换后的文本会污染锚行定位与指纹输入。
+   *
+   * @param bytes 原始字节
+   * @return 解码后的文本
+   * @throws CharacterCodingException 字节序列不是合法 UTF-8
+   */
+  public static String strictUtf8(byte[] bytes) throws CharacterCodingException {
+    return StandardCharsets.UTF_8
+        .newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(bytes))
+        .toString();
   }
 }

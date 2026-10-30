@@ -37,6 +37,7 @@ import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
 import org.cra.core.internal.pipeline.CrossCheckEvents;
 import org.cra.core.internal.pipeline.CrossCheckHistory;
+import org.cra.core.internal.pipeline.Degradations;
 import org.cra.core.internal.pipeline.DepthPlan;
 import org.cra.core.internal.pipeline.DepthPolicy;
 import org.cra.core.internal.pipeline.ExactDedupMerger;
@@ -76,8 +77,6 @@ import org.cra.store.api.ReviewLedger;
  * <p>共享可变状态仅限 run 级预算账目（RunBudgetTracker，run 内单实例）；扇出线程池由 ReviewAgentDispatcher 持有（09§6）。
  */
 public final class ReviewPipeline implements Orchestrator {
-
-  private static final int MAX_PARALLEL_BATCHES = 4;
 
   /** 可疑账本标记的 Summary 告警阈值（05§1.3 规则 2：同一 PR ≥3 次疑似注入尝试）。 */
   private static final int LEDGER_SUSPECT_THRESHOLD = 3;
@@ -458,25 +457,18 @@ public final class ReviewPipeline implements Orchestrator {
       boolean degraded = false;
       if (!outcome.schemaErrors().isEmpty() && outcome.findings().isEmpty()) {
         // 候选全部被 schema 校验丢弃：run 降级收尾（仍发布完成标记，02§4.1 降级完成语义）
-        degradations.add("schema-violation-all-dropped");
+        degradations.add(Degradations.SCHEMA_VIOLATION_ALL_DROPPED);
         degraded = true;
       }
       if (outcome.stoppedByBudget()) {
         degraded = true;
       }
-      if (outcome.degradations().contains("all-review-agents-failed")) {
+      if (outcome.degradations().contains(Degradations.ALL_REVIEW_AGENTS_FAILED)) {
         // 全代理执行失败（非 LLM 不可得）：零候选可信产出，降级收尾并声明（02§4.2 失败隔离语义）
         degraded = true;
       }
       // 02§4.1/§4.2：角色超时/预算击穿/LLM 不可得导致缺失 = DEGRADED；验证侧不可得同理
-      if (outcome.degradations().stream()
-          .anyMatch(
-              d ->
-                  d.startsWith("agent-failed:")
-                      || d.startsWith("agent-budget-exceeded:")
-                      || d.startsWith("llm-unavailable-agents:")
-                      || d.equals("agent-timeout")
-                      || d.equals("agent-queue-timeout"))) {
+      if (outcome.degradations().stream().anyMatch(Degradations::isAgentFailure)) {
         degraded = true;
       }
 
@@ -574,14 +566,7 @@ public final class ReviewPipeline implements Orchestrator {
       int unverifiedCount = promotion.unverifiedCount();
 
       // 验证侧不可得 → DEGRADED（必须在 Summary 渲染/发布前确定，否则正文与 RunStatus 矛盾）
-      if (degradations.stream()
-          .anyMatch(
-              d ->
-                  d.startsWith("verifier-budget-exhausted")
-                      || d.startsWith("verifier-timeout")
-                      || d.startsWith("verifier-queue-timeout")
-                      || d.startsWith("verifier-batch-failed")
-                      || d.equals("verifier-unavailable"))) {
+      if (degradations.stream().anyMatch(Degradations::isVerifierUnavailable)) {
         degraded = true;
       }
 
@@ -642,7 +627,7 @@ public final class ReviewPipeline implements Orchestrator {
               !plan.hasReviewableFiles(),
               outcome.templateVersions(),
               signoff);
-      if (degradations.contains("summary-publish-failed")) {
+      if (degradations.stream().anyMatch(Degradations::isSummaryPublishFailed)) {
         // Summary 未发出 = 无 DONE 标记 = 不完整发布（02§4.1），不得报 SUCCESS
         degraded = true;
       }

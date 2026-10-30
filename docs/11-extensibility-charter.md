@@ -1,5 +1,6 @@
 # 11 · 扩展性契约
 
+> 文档版本：v1.7（2026-10-31，ADR-0016：账本解析器/处置辅助/strictUtf8/glob 下沉 cra-common 单份共享；§2 两行补语义说明）
 > 文档版本：v1.6（2026-10-30，owner 裁决：Gerrit 不做适配（§7 M4e 行同步）；真实 GitLab 写操作验收暂缓（待 token））
 > 文档版本：v1.5（2026-10-28，M4e 池内项"语义索引 / 跨文件上下文"第一版：§2 登记 `SymbolIndex`（**内部接缝**，ADR-0014；不改 ContextAssembler 签名）；§7 M4e 更新为"GitLab 已接线、语义索引已落地（默认关闭）、Gerrit 未做"）
 > 文档版本：v1.4（2026-10-27，M4e 第二半 + M4f-full：两行补 CLI/server 平台选择（ADR-0013）；新增事件源/事件检索/存储登记（ADR-0012）；真实写操作 pending）
@@ -27,10 +28,10 @@
 
 | 扩展点 | 接口或机制 | 稳定性 | 当前实现 | 新增实现的最小集 |
 |---|---|---|---|---|
-| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3）；**M4c/M4d 载体扩展已落地**（commit comment / issue）；**M4e `cra-git-gitlab`**（ADR-0011，不依赖 github）：compare diff / discussions / MR notes / commit comments / issues，端点差异与边界表见 `docs/deployment-gitlab.md`；**第二半已接线（ADR-0013）**：CLI `--platform gitlab` / server `CRA_SERVER_PLATFORM=gitlab` 按平台装配，真实写操作待 owner token | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需；**M4c/M4d 载体（05§2.4/§2.5）**：`postCommitReview` + `postIssueReview` 两个 `default` 方法——默认抛 `UnsupportedOperationException`（不可得显式拒绝，§4 第 5 条），平台不支持 push/夜间形态时不得静默丢发布；接入走 §6 checklist |
+| Git 平台适配 | `GitPlatformAdapter`（05§2.1） | 稳定 | `cra-git-github`：compare diff / PR API / inline comment / 账本解析（02§3、05§2.3）；**M4c/M4d 载体扩展已落地**（commit comment / issue）；**M4e `cra-git-gitlab`**（ADR-0011，不依赖 github）：compare diff / discussions / MR notes / commit comments / issues，端点差异与边界表见 `docs/deployment-gitlab.md`；**第二半已接线（ADR-0013）**：CLI `--platform gitlab` / server `CRA_SERVER_PLATFORM=gitlab` 按平台装配，真实写操作待 owner token | 四方法：`fetchDiff` + `readFile` + `postReview` + `fetchBotComments`（签名出处 05§2.1）；`listFiles` / `fetchDispositionSignals` 按需——`listFiles` 的 `pathGlob` 语义 = `PathGlobs`（cra-common 单份，ADR-0016）：`**/` 匹配零或多级目录（零目录可选）、裸 `**` 跨段、`*` 单段、`?` 单段通配（不匹配 `/`；2026-10-31 起由字面量收紧为通配，现网调用点无 `?` 字面量，行为不变）；**M4c/M4d 载体（05§2.4/§2.5）**：`postCommitReview` + `postIssueReview` 两个 `default` 方法——默认抛 `UnsupportedOperationException`（不可得显式拒绝，§4 第 5 条），平台不支持 push/夜间形态时不得静默丢发布；接入走 §6 checklist |
 | 账本/处置取数端口 | `CommentSource`（05§2.1，v1 基线新增，ADR-0005） | 稳定 | `cra-git-github` 默认实现（适配 adapter 方法）；**M4c/M4d 账本读侧**（commit comment / issue）；**M4e `cra-git-gitlab`** 同步实现 PR/commit/issue 三类账本（ADR-0011），CLI/server 按平台选择注入（ADR-0013） | 两方法：`fetchBotComments` + `fetchDispositionSignals`（common POJO）；**载体账本扩展（05§1.3）**：`fetchCommitBotComments` / `fetchIssueBotComments` / `listBotIssues` 三个 `default` 方法——前两者默认显式拒绝（静默空账本会导致重复发布），`listBotIssues` 默认空列表（不可得语义）；消费方 = store 的 GitHub 账本实现与 eval report；**新平台接入须同步提供本端口实现**（§6 checklist 并入） |
 | 本地仓库上下文 | `LocalRepoContext`（05§2.1） | 稳定 | jgit blame（CI checkout / 本地模式，05§2.1） | `blame` + `localRepoRoot()`；`localRepoRoot()` 为空是**合法形态**——pre-existing 检测降级为不标注 + Summary 声明，不假装有能力（05§2.1）；**M4c：`firstParentChain`**（default 空列表 = 不可得，push 基线解析据此要求显式 `--base`） |
-| 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态，M4b 已落地），按部署形态选择（02§5）；**M4c/M4d 键控扩展**：`ReviewKey`（repo + 形态 + (pr\|commit)）| 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植**；键控方法以 default 加入（05§1.3 v1.4），无 PR 载体粒度 = 载体评论级 |
+| 评审账本 | `ReviewLedger` SPI（02§5、05§1.5） | 稳定 | 三形态：GitHub 评论账本（CI）/ 本地 SQLite（pre-PR）/ PG（服务形态，M4b 已落地），按部署形态选择（02§5）；**M4c/M4d 键控扩展**：`ReviewKey`（repo + 形态 + (pr\|commit)）| 读已发布指纹 + 写 finding 级 / DONE 标记 + 按 commit 查 DONE；标记规范 05§1.3 **平台无关，原样移植**（解析器下沉 cra-common `LedgerMarkerParser` 单份共享 + 100% 分支门禁随迁，ADR-0016）；键控方法以 default 加入（05§1.3 v1.4），无 PR 载体粒度 = 载体评论级 |
 | 报告签名信封 | `ReportSignature`（cra-common，04§2.4、ADR-0008/0009） | 演进（格式约定） | `cra-server` 签发（`/api/v1/reports/attest`，需 `X-CRA-Repo`），`cra-eval verify --signature --repo` 验签 | 行式信封 `cra-report-hmac-sha256-v2`（key_id/report_sha256/repo/commit/tier/issued_at/run_id/signature）；HMAC-SHA256 覆盖版本行至 run_id 行（不含 signature 行）；repo 绑定 owner/name；v1 信封不再接受，格式变更【强制】bump 版本并写 ADR |
 | 评审角色 | `SubAgent<I,O>` 统一抽象（03§1） | 演进 | BugHunter 四视角 + Security / Test / Convention / Perf / CrossChecker（03§3） | 接入走 §5 checklist（8 步：role / schema / 预算 / 触发 / 分型 / 对抗集 / 里程碑 / grep 传播） |
 | Prompt 模板 | classpath 资源 + 版本记录（04§4） | 演进 | `cra-agents/src/main/resources/prompts/` 目录树（04§4） | 新模板落对应子目录，mustache 占位符 + 引用 shared 三件套 + UNTRUSTED 定界（04§3.3）；`prompt_template_versions` 与 run 关联（05§1.2）；改动必过评测回归（06§1.2、04§2.4） |
@@ -71,7 +72,7 @@
 1. 接口**只加 `default` 方法**，不删、不改已有签名；`GitPlatformAdapter` / `LocalRepoContext` / `ReviewLedger` 同一规则；
 2. 破坏性变更（删改签名、语义变化）须 ADR + **全部实现方同步迁移清单**——宁可带 default 方法过渡两个里程碑，不做"一处改三处漏两处"；
 3. SPI 入参与返回类型只允许 cra-common 纯 POJO（02§3 依赖规则"所有模块 → cra-common"），禁止平台特异类型出接口；
-4. **实现模块不得依赖其他实现模块**：`cra-git-github` 不得 import 未来的 `cra-git-gitlab`，账本三实现同理（02§3）——横向依赖一旦出现，"换形态 / 换平台"就从配置退化成改代码；
+4. **实现模块不得依赖其他实现模块**：`cra-git-github` 不得 import 未来的 `cra-git-gitlab`，账本三实现同理（02§3）——横向依赖一旦出现，"换形态 / 换平台"就从配置退化成改代码；实现间逐字节同文的纯辅助不属横向依赖，下沉 `cra-common` 单份共享（LedgerMarkerParser/DispositionSupport/glob/strictUtf8，ADR-0016）；
 5. 新 SPI 方法若非全平台 / 全形态可实现，必须定义**"不可得"语义**（对照先例：`localRepoRoot()` 为空 → pre-existing 降级声明，05§2.1），禁止抛异常假装全平台支持。
 
 正反例对照（扩展 `GitPlatformAdapter` 时）：

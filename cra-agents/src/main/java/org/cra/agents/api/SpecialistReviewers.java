@@ -30,6 +30,8 @@ public final class SpecialistReviewers {
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("test-reviewer", "测试缺口评审");
 
+    private static final String TEMPLATE = "prompts/reviewer/test.md";
+
     private final TemplateSupport templates;
 
     /**
@@ -48,7 +50,7 @@ public final class SpecialistReviewers {
     public AgentBrief buildBrief(ReviewAgentInput input) {
       String rendered =
           templates.render(
-              "prompts/reviewer/test.md",
+              TEMPLATE,
               Map.of(
                   "untrusted_pr_meta",
                   TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
@@ -62,17 +64,7 @@ public final class SpecialistReviewers {
                   input.reviewPolicySection().isBlank()
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
-      int splitAt = rendered.indexOf("\n# User\n");
-      if (splitAt < 0) {
-        throw new IllegalStateException("test.md 模板缺少 '# User' 分段");
-      }
-      return new AgentBrief(
-          ROLE,
-          rendered.substring(0, splitAt),
-          rendered.substring(splitAt + 1),
-          templates.versionOf("prompts/reviewer/test.md"),
-          tools(),
-          budget());
+      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
     }
 
     @Override
@@ -95,6 +87,8 @@ public final class SpecialistReviewers {
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("convention-reviewer", "约定评审");
 
+    private static final String TEMPLATE = "prompts/reviewer/convention.md";
+
     private final TemplateSupport templates;
 
     /**
@@ -114,7 +108,7 @@ public final class SpecialistReviewers {
       // Conventions 清单属 base 分支 REVIEW.md（04§3.2 信任模型内可信内容），经 review_policy_section 注入，不定界
       String rendered =
           templates.render(
-              "prompts/reviewer/convention.md",
+              TEMPLATE,
               Map.of(
                   "untrusted_pr_meta",
                   TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
@@ -124,17 +118,7 @@ public final class SpecialistReviewers {
                   input.reviewPolicySection().isBlank()
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
-      int splitAt = rendered.indexOf("\n# User\n");
-      if (splitAt < 0) {
-        throw new IllegalStateException("convention.md 模板缺少 '# User' 分段");
-      }
-      return new AgentBrief(
-          ROLE,
-          rendered.substring(0, splitAt),
-          rendered.substring(splitAt + 1),
-          templates.versionOf("prompts/reviewer/convention.md"),
-          tools(),
-          budget());
+      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
     }
 
     @Override
@@ -162,6 +146,8 @@ public final class SpecialistReviewers {
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("perf-reviewer", "性能评审");
 
+    private static final String TEMPLATE = "prompts/reviewer/perf.md";
+
     private final TemplateSupport templates;
 
     /**
@@ -180,7 +166,7 @@ public final class SpecialistReviewers {
     public AgentBrief buildBrief(ReviewAgentInput input) {
       String rendered =
           templates.render(
-              "prompts/reviewer/perf.md",
+              TEMPLATE,
               Map.of(
                   "untrusted_pr_meta",
                   TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
@@ -200,17 +186,7 @@ public final class SpecialistReviewers {
                       : input.reviewPolicySection(),
                   "scoped_paths_note",
                   TemplateSupport.scopedPathsNote(input.scopedPaths())));
-      int splitAt = rendered.indexOf("\n# User\n");
-      if (splitAt < 0) {
-        throw new IllegalStateException("perf.md 模板缺少 '# User' 分段");
-      }
-      return new AgentBrief(
-          ROLE,
-          rendered.substring(0, splitAt),
-          rendered.substring(splitAt + 1),
-          templates.versionOf("prompts/reviewer/perf.md"),
-          tools(),
-          budget());
+      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
     }
 
     @Override

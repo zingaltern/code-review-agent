@@ -1,12 +1,6 @@
 package org.cra.server.config;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -15,6 +9,7 @@ import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SemanticContextOptions;
+import org.cra.llm.api.LlmParsing;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.support.CronExpression;
@@ -210,7 +205,7 @@ public record ServerConfig(
         env.getProperty("CRA_GITLAB_BASE_URL", "https://gitlab.com/api/v4"),
         firstNonBlank(
             env.getProperty("CRA_GITLAB_TOKEN"),
-            readTokenFile(env.getProperty("CRA_GITLAB_TOKEN_FILE"))),
+            LlmParsing.readGitLabTokenFile(env.getProperty("CRA_GITLAB_TOKEN_FILE"))),
         blankToNull(env.getProperty("CRA_GITLAB_BOT_USERNAME")),
         env.getProperty("CRA_SERVER_API_TOKEN", ""),
         env.getProperty("CRA_SERVER_SIGNING_KEY", ""),
@@ -256,20 +251,17 @@ public record ServerConfig(
 
   /**
    * 单代理预算覆盖（05§5 {@code agents.budget.<role>.*}；环境变量形如 {@code
-   * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}）。非法值失败于启动期（fail fast）。
+   * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}）。非法值失败于启动期（fail fast）。键构建公共体见 {@link
+   * LlmParsing#agentBudgetValues}（R4：与 CLI 同语义收敛）。
    *
    * @param env Spring Environment
    * @return 覆盖（无配置时为空覆盖）
    */
   static org.cra.agents.api.AgentBudgetOverrides agentBudgetOverrides(Environment env) {
-    java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
-    for (String role : org.cra.agents.api.AgentBudgetOverrides.CONFIGURABLE_ROLES) {
-      String prefix = "CRA_AGENTS_BUDGET_" + role.toUpperCase(Locale.ROOT).replace('-', '_');
-      values.put(
-          "agents.budget." + role + ".input-tokens", env.getProperty(prefix + "_INPUT_TOKENS"));
-      values.put(
-          "agents.budget." + role + ".output-tokens", env.getProperty(prefix + "_OUTPUT_TOKENS"));
-    }
+    Map<String, String> values =
+        LlmParsing.agentBudgetValues(
+            org.cra.agents.api.AgentBudgetOverrides.CONFIGURABLE_ROLES,
+            (flag, envKey) -> env.getProperty(envKey));
     try {
       return org.cra.agents.api.AgentBudgetOverrides.fromConfig(values);
     } catch (IllegalArgumentException e) {
@@ -287,119 +279,54 @@ public record ServerConfig(
   }
 
   /**
-   * API 根归一：接受实例根或已含 `/api/v4` 的地址（与 CLI 同语义）。
+   * API 根归一：接受实例根或已含 `/api/v4` 的地址（与 CLI 同语义；公共体见 {@link LlmParsing#normalizeGitLabApiBase}）。
    *
    * @param raw 用户输入
    * @return 以 `/api/v4` 结尾且无尾随 `/` 的 API 根
    */
   static String normalizeGitLabApiBase(String raw) {
-    String value = raw == null || raw.isBlank() ? "https://gitlab.com/api/v4" : raw.strip();
-    String base = value.replaceAll("/+$", "");
-    if (base.endsWith("/api/v4")) {
-      return base;
-    }
-    int marker = base.indexOf("/api/v4/");
-    if (marker >= 0) {
-      return base.substring(0, marker + "/api/v4".length());
-    }
-    return base + "/api/v4";
+    return LlmParsing.normalizeGitLabApiBase(raw, "https://gitlab.com/api/v4");
   }
 
   /**
-   * CrossChecker 模式解析（非法值组装期拒绝）。
+   * CrossChecker 模式解析（非法值组装期拒绝；公共体见 {@link LlmParsing#parseCsvSet}）。
    *
    * @return 模式集合
    */
   public Set<CrossCheckerOptions.Mode> parsedCrossCheckerModes() {
-    Set<CrossCheckerOptions.Mode> modes = new LinkedHashSet<>();
-    for (String part : crossCheckerModes.split(",")) {
-      if (part.isBlank()) {
-        continue;
-      }
-      try {
-        modes.add(CrossCheckerOptions.Mode.parse(part));
-      } catch (IllegalArgumentException e) {
-        throw new CraConfigException(e.getMessage());
-      }
-    }
-    if (modes.isEmpty()) {
-      throw new CraConfigException("CRA_CROSSCHECKER_MODES 不能为空（assumption|sniff）");
-    }
-    return Set.copyOf(modes);
+    return LlmParsing.parseCsvSet(
+        crossCheckerModes,
+        CrossCheckerOptions.Mode::parse,
+        (raw, e) -> new CraConfigException(e.getMessage()),
+        "CRA_CROSSCHECKER_MODES 不能为空（assumption|sniff）");
   }
 
   /**
-   * 降级链解析（逗号分隔档位名）。
+   * 降级链解析（逗号分隔档位名；公共体见 {@link LlmParsing#parseFallbackChain}）。
    *
    * @return 档位列表
    */
   public List<ModelTier> parsedFallbackChain() {
-    List<ModelTier> chain = new ArrayList<>();
-    for (String part : llmFallbackChain.split(",")) {
-      if (part.isBlank()) {
-        continue;
-      }
-      try {
-        chain.add(ModelTier.valueOf(part.strip().toUpperCase(Locale.ROOT)));
-      } catch (IllegalArgumentException e) {
-        throw new CraConfigException("CRA_LLM_FALLBACK_CHAIN 档位非法: " + part);
-      }
-    }
-    return List.copyOf(chain);
+    return List.copyOf(LlmParsing.parseFallbackChain(llmFallbackChain, "CRA_LLM_FALLBACK_CHAIN"));
   }
 
   /**
-   * per-model RPM 解析（空 = 05§5 默认值）。
+   * per-model RPM 解析（空 = 05§5 默认值；公共体见 {@link LlmParsing#parseRpm}）。
    *
    * @param defaultRpm 默认 RPM 表
    * @return 档位 → RPM
    */
   public Map<ModelTier, Integer> parsedRpm(Map<ModelTier, Integer> defaultRpm) {
-    if (llmRpm == null || llmRpm.isBlank()) {
-      return defaultRpm;
-    }
-    Map<ModelTier, Integer> rpm = new EnumMap<>(ModelTier.class);
-    for (String part : llmRpm.split(",")) {
-      String entry = part.strip();
-      if (entry.isEmpty()) {
-        continue;
-      }
-      int eq = entry.indexOf('=');
-      if (eq <= 0 || eq == entry.length() - 1) {
-        throw new CraConfigException("CRA_LLM_RPM 条目形如 standard=60: " + entry);
-      }
-      try {
-        ModelTier tier = ModelTier.valueOf(entry.substring(0, eq).strip().toUpperCase(Locale.ROOT));
-        int value = Integer.parseInt(entry.substring(eq + 1).strip());
-        if (value <= 0) {
-          throw new NumberFormatException();
-        }
-        rpm.put(tier, value);
-      } catch (IllegalArgumentException e) {
-        throw new CraConfigException("CRA_LLM_RPM 条目非法: " + entry);
-      }
-    }
-    return rpm.isEmpty() ? defaultRpm : Map.copyOf(rpm);
+    return LlmParsing.parseRpm(llmRpm, "CRA_LLM_RPM", defaultRpm);
   }
 
   /**
-   * 采样温度解析。
+   * 采样温度解析（公共体见 {@link LlmParsing#parseTemperature}）。
    *
    * @return 0.0–2.0；null = 不传
    */
   public Double parsedTemperature() {
-    if (llmTemperature == null || llmTemperature.isBlank()) {
-      return null;
-    }
-    try {
-      double value = Double.parseDouble(llmTemperature.strip());
-      if (value < 0 || value > 2) {
-        throw new NumberFormatException();
-      }
-      return value;
-    } catch (NumberFormatException e) {
-      throw new CraConfigException("CRA_LLM_TEMPERATURE 非法（0..2）: " + llmTemperature);
-    }
+    return LlmParsing.parseTemperature(llmTemperature, "CRA_LLM_TEMPERATURE");
   }
 
   private static void requireText(String value, String name) {
@@ -410,24 +337,6 @@ public record ServerConfig(
 
   private static String firstNonBlank(String first, String second) {
     return first != null && !first.isBlank() ? first : second;
-  }
-
-  /**
-   * 密钥文件读取（容器/K8s secret mount）：只返回去空白内容，失败信息不含内容。
-   *
-   * @param path 文件路径（可空）
-   * @return token 或 null
-   */
-  private static String readTokenFile(String path) {
-    if (path == null || path.isBlank()) {
-      return null;
-    }
-    try {
-      String value = Files.readString(Path.of(path.strip()), StandardCharsets.UTF_8);
-      return value.isBlank() ? null : value.strip();
-    } catch (IOException | java.nio.file.InvalidPathException e) {
-      throw new CraConfigException("CRA_GITLAB_TOKEN_FILE 读取失败: " + path);
-    }
   }
 
   private static String blankToNull(String value) {
