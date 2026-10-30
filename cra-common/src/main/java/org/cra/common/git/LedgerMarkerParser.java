@@ -1,4 +1,4 @@
-package org.cra.git.github.internal.ledger;
+package org.cra.common.git;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -9,7 +9,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 账本标记解析器（05§1.3 五规则，finding 级与 run 级同套规则；08§5 场景 3 的承重类）：
+ * 账本标记解析器（05§1.3 五规则，finding 级与 run 级同套规则；08§5 场景 3 的承重类）：产出 {@link LedgerFindingMarker}/ {@link
+ * LedgerRunMarker} 的解析侧同包类型。
  *
  * <ul>
  *   <li>规则 1 仅认末位：只解析 body 末尾、且位于代码围栏之外的 cra: 标记；正文中间/围栏内的 同类标记一律忽略并计 LEDGER_SUSPECT；
@@ -19,7 +20,10 @@ import java.util.regex.Pattern;
  * </ul>
  *
  * <p>发布侧双向防护（规则 3，正文 {@code <!--} 转义）由发布器负责；兜底分层（规则 5）由 消费方依 {@link
- * org.cra.common.git.CommentLedger#hasAnyValidMarker()} 判定。实现侧不抛异常， 一切非法输入归约为"无标记 + 可疑计数"。
+ * CommentLedger#hasAnyValidMarker()} 判定。实现侧不抛异常， 一切非法输入归约为"无标记 + 可疑计数"。
+ *
+ * <p>单一事实源（ADR-0016）：格式被 05§1.3 冻结的前提下，GitHub/GitLab 两个适配器曾各持逐字节相同的复制件， 2026-10-30 单日两轮双写修复
+ * （围栏计数、CRLF 归一）证明双写漂移风险真实，故解析器下沉 common； 08§7 的 100% 分支覆盖门禁随迁至 cra-common（类级白名单不变）。
  */
 public final class LedgerMarkerParser {
 
@@ -34,7 +38,12 @@ public final class LedgerMarkerParser {
   private static final List<String> RUN_FIELDS =
       List.of("v", "run", "commit", "status", "findings", "suppressed");
 
-  /** 解析结果：有效标记 + 可疑原因列表（LEDGER_SUSPECT 逐条入 trace）。 */
+  /**
+   * 解析结果：有效标记 + 可疑原因列表（LEDGER_SUSPECT 逐条入 trace）。
+   *
+   * @param marker 末位且合法的标记；非法/无标记为空
+   * @param suspects 可疑原因列表（与 marker 可同时非空：末位合法但正文中间另有伪造标记）
+   */
   public record ParseOutcome(Optional<MarkerParseResult> marker, List<SuspectReason> suspects) {
 
     public ParseOutcome {
@@ -44,7 +53,17 @@ public final class LedgerMarkerParser {
 
   /** 解析出的有效标记。 */
   public sealed interface MarkerParseResult {
-    /** finding 级标记字段。 */
+    /**
+     * finding 级标记字段。
+     *
+     * @param fingerprint 指纹 v2（规整十六进制）
+     * @param file 文件路径（须与评论正文一致，规则 4b）
+     * @param line 锚行号（正整数）
+     * @param category 类别小写（05§1.1 枚举）
+     * @param findingId finding 标识（{@code f_} 前缀）
+     * @param runId run 标识（{@code run_} 前缀）
+     * @param commitSha 发布时的 head sha（7–40 位十六进制）
+     */
     record FindingMark(
         String fingerprint,
         String file,
@@ -55,7 +74,15 @@ public final class LedgerMarkerParser {
         String commitSha)
         implements MarkerParseResult {}
 
-    /** run 完成级标记字段。 */
+    /**
+     * run 完成级标记字段。
+     *
+     * @param runId run 标识（{@code run_} 前缀）
+     * @param commitSha 发布时的 head sha（7–40 位十六进制）
+     * @param status 完成状态（仅 DONE/DEGRADED）
+     * @param findings 本 run 发布的 finding 数
+     * @param suppressed 压制数
+     */
     record RunMark(String runId, String commitSha, String status, int findings, int suppressed)
         implements MarkerParseResult {}
   }

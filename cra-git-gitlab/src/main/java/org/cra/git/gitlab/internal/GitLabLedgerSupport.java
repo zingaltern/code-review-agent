@@ -9,12 +9,16 @@ import java.util.List;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
+import org.cra.common.git.LedgerMarkerParser;
+import org.cra.common.git.LedgerMarkerParser.MarkerParseResult;
+import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
 import org.cra.common.git.LedgerRunMarker;
-import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser;
-import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser.MarkerParseResult;
-import org.cra.git.gitlab.internal.ledger.LedgerMarkerParser.ParseOutcome;
 
-/** 账本标记解析与 commit comment 合成 id 的纯辅助（05§1.3 规则原样移植，ADR-0011 决策 7）。 */
+/**
+ * 账本标记解析与 commit comment 合成 id 的纯辅助（05§1.3 规则原样移植，ADR-0011 决策 7）。
+ *
+ * <p>标记解析下沉 cra-common 共享（ADR-0016）：本类只保留 GitLab 特有的评论→账本映射与合成 id。
+ */
 final class GitLabLedgerSupport {
 
   private GitLabLedgerSupport() {}

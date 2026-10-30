@@ -1,10 +1,10 @@
 # ADR-0011 GitLab 平台适配（M4e 第一半：新实现模块，不改 SPI 签名）
 
-- 状态：accepted（2026-10-27，M4e 第一半实现随本 ADR 落地；Gerrit 与语义索引不在本 ADR 范围；CLI/server 平台选择由后续 ADR-0013 完成接线，真实写操作 pending）
+- 状态：accepted（2026-10-27，M4e 第一半实现随本 ADR 落地；Gerrit 与语义索引不在本 ADR 范围；CLI/server 平台选择由后续 ADR-0013 完成接线，真实写操作 pending。**修订 2026-10-31：决策 2 中"解析器以本模块自有包复制一份"的条款被 ADR-0016 取代**——解析器下沉 cra-common 单份共享，门禁随迁；本 ADR 其余决策不变）
 - 背景：11§2 已把 Git 平台适配登记为稳定扩展点，05§2.1 的 `GitPlatformAdapter` 与 `CommentSource` 只约束 common POJO。GitLab 与 GitHub 在 diff 端点、评论载体、锚定参数、分页与限流上均不同；照抄 GitHub 实现会产出"看起来能跑、锚定全错"的适配器。本 ADR 先钉死平台事实与差异，再落 `cra-git-gitlab`（11§6 checklist 第 3 步）。
 - 决策：
   1. **新模块 `cra-git-gitlab`（包 `org.cra.git.gitlab`），不依赖 `cra-git-github`**。实现 `GitPlatformAdapter` 四方法 + `listFiles` / `fetchDispositionSignals`，以及 `CommentSource` 的 PR / commit / issue 三类账本方法（11§4 第 4 条：实现模块互不依赖）。组合根可按部署选择装配；本半未改 CLI/server 的平台选择。
-  2. **账本标记格式原样移植 05§1.3**：`v=2.1`、finding 级与 run 级两类标记、末位规则、转义规则、DONE|DEGRADED 语义全部不变；解析器以本模块自有包复制一份（不跨实现模块 import），并保留 08§7 的 100% 分支覆盖门禁。键控沿用 05§1.3 v1.4：PR 形态 `(repo, mr iid, commit)`，commit/issue 形态 `(repo, commit)`。
+  2. **账本标记格式原样移植 05§1.3**：`v=2.1`、finding 级与 run 级两类标记、末位规则、转义规则、DONE|DEGRADED 语义全部不变；解析器以本模块自有包复制一份（不跨实现模块 import），并保留 08§7 的 100% 分支覆盖门禁。**（2026-10-31 修订：解析器下沉 `cra-common` 单份共享、门禁随迁——ADR-0016；格式语义本身不变。）** 键控沿用 05§1.3 v1.4：PR 形态 `(repo, mr iid, commit)`，commit/issue 形态 `(repo, commit)`。
   3. **认证与项目标识**：`PRIVATE-TOKEN` 头；API 根默认 `https://gitlab.com/api/v4`；项目路径 URL 编码为 `group%2Fproject`；bot 身份取 `GET /user` 的 `username`，CI job token 不可读 `/user` 时回退到显式 `botUsername`（缺省则抛出，绝不把人类评论当账本）。
   4. **端点映射与差异**（均为 GitLab REST v4 文档核查结果）：
 

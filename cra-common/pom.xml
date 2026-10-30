@@ -11,9 +11,13 @@
 
   <artifactId>cra-common</artifactId>
   <name>cra-common</name>
-  <description>纯 POJO 公共契约：数据模型（05§1）与 SPI 入参出参（05§2）；不依赖任何模块（10§2 矩阵底座）</description>
+  <description>纯 POJO 公共契约：数据模型（05§1）与 SPI 入参出参 POJO；不依赖任何内部模块（10§2 矩阵底座）。唯一编译依赖 jackson-databind（DispositionSupport 平台时间字段容错用，ADR-0016；01§5.2 白名单内）</description>
 
   <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -25,4 +29,39 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>check-ledger-parser</id>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <!-- 08§7：账本标记解析器 100% 分支覆盖（静默故障类，白名单唯一强制项）；
+                   解析器下沉 cra-common 后门禁随迁（ADR-0016），github/gitlab 两份合并为此一份 -->
+              <includes>
+                <include>org/cra/common/git/LedgerMarkerParser*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>1.00</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <haltOnFailure>true</haltOnFailure>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

@@ -2,10 +2,12 @@ package org.cra.common.text;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.charset.CharacterCodingException;
 import org.junit.jupiter.api.Test;
 
-/** 跨模块文本/校验辅助的边界单测（7/8 位 sha、200 字符截断、空白校验）。 */
+/** 跨模块文本/校验辅助的边界单测（7/8 位 sha、200 字符截断、空白校验、严格 UTF-8）。 */
 class TextsTest {
 
   @Test
@@ -45,5 +47,14 @@ class TextsTest {
     assertThat(Texts.firstNonBlank(null, "", "  ", "token")).isEqualTo("token");
     assertThat(Texts.firstNonBlank(null, "", "  ")).isNull();
     assertThat(Texts.firstNonBlank()).isNull();
+  }
+
+  @Test
+  void strictUtf8DecodesValidBytesAndRejectsMalformed() throws CharacterCodingException {
+    // ADR-0016 收敛：合法 UTF-8 原样解码；malformed 抛 CharacterCodingException（调用方降级 binary 语义）
+    assertThat(Texts.strictUtf8("中文 ascii".getBytes(java.nio.charset.StandardCharsets.UTF_8)))
+        .isEqualTo("中文 ascii");
+    assertThatThrownBy(() -> Texts.strictUtf8(new byte[] {(byte) 0xff, (byte) 0xfe, 0x00}))
+        .isInstanceOf(CharacterCodingException.class);
   }
 }

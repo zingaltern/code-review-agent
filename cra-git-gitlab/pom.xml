@@ -54,38 +54,4 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.jacoco</groupId>
-        <artifactId>jacoco-maven-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>check-ledger-parser</id>
-            <goals><goal>check</goal></goals>
-            <configuration>
-              <!-- 08§7：账本标记解析器 100% 分支覆盖（静默故障类，白名单唯一强制项） -->
-              <includes>
-                <include>org/cra/git/gitlab/internal/ledger/LedgerMarkerParser*</include>
-              </includes>
-              <rules>
-                <rule>
-                  <element>BUNDLE</element>
-                  <limits>
-                    <limit>
-                      <counter>BRANCH</counter>
-                      <value>COVEREDRATIO</value>
-                      <minimum>1.00</minimum>
-                    </limit>
-                  </limits>
-                </rule>
-              </rules>
-              <haltOnFailure>true</haltOnFailure>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
-    </plugins>
-  </build>
 </project>

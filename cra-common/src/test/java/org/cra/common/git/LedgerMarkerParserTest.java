@@ -1,12 +1,17 @@
-package org.cra.git.github.internal.ledger;
+package org.cra.common.git;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import org.cra.git.github.internal.ledger.LedgerMarkerParser.MarkerParseResult;
-import org.cra.git.github.internal.ledger.LedgerMarkerParser.SuspectReason;
+import org.cra.common.git.LedgerMarkerParser.MarkerParseResult;
+import org.cra.common.git.LedgerMarkerParser.SuspectReason;
 import org.junit.jupiter.api.Test;
 
-/** 账本标记解析器逐规则单测（05§1.3、08§5 场景 3；JaCoCo 100% 分支门禁的承重测试，08§7）。 */
+/**
+ * 账本标记解析器逐规则单测（05§1.3、08§5 场景 3；JaCoCo 100% 分支门禁的承重测试，08§7）。
+ *
+ * <p>单一事实源（ADR-0016）：原 cra-git-github / cra-git-gitlab 两份仅 package 不同的同文用例合并于此， 平台差异由各适配器的 WireMock
+ * 契约测试覆盖，本类只锁规则本身。
+ */
 class LedgerMarkerParserTest {
 
   private static final LedgerMarkerParser PARSER = new LedgerMarkerParser();
