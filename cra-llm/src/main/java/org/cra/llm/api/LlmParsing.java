@@ -153,6 +153,10 @@ public final class LlmParsing {
       BiFunction<String, IllegalArgumentException, CraConfigException> invalidError,
       String emptyMessage) {
     Set<T> out = new LinkedHashSet<>();
+    if (raw == null) {
+      // null 视同未配置：与空串同走 emptyMessage（组装期 CraConfigException），不得 NPE
+      throw new CraConfigException(emptyMessage);
+    }
     for (String part : raw.split(",")) {
       if (part.isBlank()) {
         continue;
