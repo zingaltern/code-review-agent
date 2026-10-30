@@ -138,12 +138,9 @@ public final class EvalStubServer implements AutoCloseable {
         respondJson(exchange, 405, Map.of("message", "method not allowed"));
       }
     } catch (RuntimeException e) {
-      // 非法请求是协议面事实（400），不是"网络故障"：必须回响应，否则 CLI 端只能看到连接被关
-      try {
-        respondJson(exchange, 400, Map.of("message", "bad request: " + e.getMessage()));
-      } catch (IOException ignored) {
-        // 响应头已发出/连接已断：无可恢复动作
-      }
+      // 非法请求是协议面事实（400），不是"网络故障"：必须回响应，否则 CLI 端只能看到连接被关。
+      // 响应已发出时 write 会抛 IOException，交由 HttpServer 关闭连接（不在此静默吞掉）。
+      respondJson(exchange, 400, Map.of("message", "bad request: " + e.getMessage()));
     } finally {
       exchange.close();
     }
