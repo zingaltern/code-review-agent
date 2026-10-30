@@ -2,6 +2,7 @@ package org.cra.core.internal.pipeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.finding.AnchorStatus;
@@ -191,6 +192,20 @@ class M1PipelinePoliciesTest {
     assertThat(plan.hasReviewableFiles()).isFalse();
     assertThat(plan.skippedTestCount()).isEqualTo(1);
     assertThat(plan.skippedTestPaths()).containsExactly("src/test/java/demo/ATest.java");
+  }
+
+  @Test
+  void testEvidenceListIsBoundedForLargePullRequests() {
+    // 02§4.4：测试清单必须口语有界——数百个测试文件不得吃穿 TestReviewer 的 12k 输入预算
+    List<DiffFile> files = new ArrayList<>();
+    for (int i = 0; i < 70; i++) {
+      files.add(file("src/test/java/demo/Case" + i + "Test.java"));
+    }
+    ChunkPlanner.Plan plan = ChunkPlanner.plan(files, ReviewPolicy.empty(), false, false);
+    String section = ReviewPromptSections.testExtraSection(plan);
+    assertThat(section).contains("…等 10 个（共 70 个测试文件，超出清单上限 60");
+    long listed = section.lines().filter(l -> l.startsWith("- ")).count();
+    assertThat(listed).isEqualTo(60);
   }
 
   @Test
