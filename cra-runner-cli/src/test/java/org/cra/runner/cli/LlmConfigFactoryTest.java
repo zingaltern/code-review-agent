@@ -109,6 +109,21 @@ class LlmConfigFactoryTest {
         .isInstanceOf(CraConfigException.class);
   }
 
+  @Test
+  void rpmInvalidEntriesKeepCliKeyNamesInMessages() {
+    // R4 文案参数化：CLI 侧错误前缀保留 "--rpm" key 名（server 侧对应 CRA_LLM_RPM，见 ServerConfigPlatformTest）
+    assertThatThrownBy(() -> LlmConfigFactory.parseRpm("standard"))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--rpm 条目形如 standard=60: standard");
+    assertThatThrownBy(() -> LlmConfigFactory.parseRpm("standard=60,mega=10"))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--rpm 条目非法")
+        .hasMessageContaining("mega=10");
+    assertThatThrownBy(() -> LlmConfigFactory.parseRpm("standard=0"))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("--rpm 条目非法");
+  }
+
   /** 测试辅助：用指定 baseUrl 构造网关（其余沿用既有 config 默认）。 */
   static final class LlmConfigFactoryTestSupport {
     org.cra.llm.api.LlmGatewayConfig createWithBaseUrl(String baseUrl) {

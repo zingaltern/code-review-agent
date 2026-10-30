@@ -19,7 +19,7 @@ import org.cra.git.gitlab.api.GitLabAssembly;
 import org.cra.llm.api.LlmAssembly;
 import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmGatewayConfig;
-import org.cra.llm.api.LlmGatewayConfig.ModelEndpoint;
+import org.cra.llm.api.LlmParsing;
 import org.cra.server.attest.AttestationService;
 import org.cra.server.attest.AttestationStore;
 import org.cra.server.attest.KnownCommitChecker;
@@ -86,7 +86,8 @@ public class ServerBeans {
   }
 
   /**
-   * LLM 网关（三档路由；缺失配置即拒绝启动）。
+   * LLM 网关（三档路由；缺失配置即拒绝启动）。三档装配与 opencode 适配的公共体见 {@link LlmParsing#threeTierConfig}（R4：与 CLI
+   * 同语义收敛）。
    *
    * @param config 服务配置
    * @return LlmGateway
@@ -99,57 +100,16 @@ public class ServerBeans {
       throw new CraConfigException(
           "CRA_LLM_API_KEY / CRA_LLM_BASE_URL / CRA_LLM_MODEL 未配置（服务端评审需要 LLM）");
     }
-    ModelEndpoint standard =
-        new ModelEndpoint(config.llmModel(), config.llmBaseUrl(), config.llmApiKey());
-    ModelEndpoint strong =
-        new ModelEndpoint(
-            modelOrInherit(config.llmModelStrong(), config.llmModel()),
-            config.llmBaseUrl(),
-            config.llmApiKey());
-    ModelEndpoint light =
-        new ModelEndpoint(
-            modelOrInherit(config.llmModelLight(), config.llmModel()),
-            config.llmBaseUrl(),
-            config.llmApiKey());
     return LlmAssembly.createGateway(
-        new LlmGatewayConfig(
-            LlmGatewayConfig.models(standard, strong, light),
+        LlmParsing.threeTierConfig(
+            config.llmBaseUrl(),
+            config.llmApiKey(),
+            config.llmModel(),
+            config.llmModelStrong(),
+            config.llmModelLight(),
             config.parsedFallbackChain(),
             config.parsedRpm(LlmGatewayConfig.defaultRpm()),
-            LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
-            LlmGatewayConfig.DEFAULT_MAX_RETRIES,
-            30_000,
-            120_000,
-            1_000,
-            8_000,
-            config.parsedTemperature(),
-            extraHeadersFor(config.llmBaseUrl()),
-            reasoningEffortFor(config.llmBaseUrl())));
-  }
-
-  /**
-   * 附加请求头（v1.3.2 opencode-go 适配）：与 CLI 同语义——base-url 指向 opencode 时自动附加 {@code
-   * x-opencode-session}（缺失时 opencode-go 返回 MissingSessionID）。
-   *
-   * @param baseUrl LLM 端点根地址
-   * @return 附加头（非 opencode 端点为空 map）
-   */
-  private static java.util.Map<String, String> extraHeadersFor(String baseUrl) {
-    if (baseUrl != null && baseUrl.contains("opencode.ai")) {
-      return java.util.Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());
-    }
-    return java.util.Map.of();
-  }
-
-  /**
-   * 推理力度（v1.3.2 opencode 适配）：与 CLI 同语义——opencode 端点自动 none。reasoning token 计入 max_tokens，评审任务的 1–2k
-   * 输出预算会被推理吃光（M3 冒烟实测 budget_exceeded）。
-   *
-   * @param baseUrl LLM 端点根地址
-   * @return "none" 或 null（不传）
-   */
-  private static String reasoningEffortFor(String baseUrl) {
-    return baseUrl != null && baseUrl.contains("opencode.ai") ? "none" : null;
+            config.parsedTemperature()));
   }
 
   /**
@@ -195,32 +155,27 @@ public class ServerBeans {
   }
 
   /**
-   * 编排参数（05§5 默认值 + 服务端 run 预算）。
+   * 编排参数（05§5 默认值 + 服务端 run 预算）：阈值/预算默认值单源于 {@link PipelineOptions#defaults()}，服务端只覆写 run 级预算。
    *
    * @param config 服务配置
    * @return PipelineOptions
    */
   @Bean
   public PipelineOptions pipelineOptions(ServerConfig config) {
+    PipelineOptions defaults = PipelineOptions.defaults();
     return new PipelineOptions(
         config.runTotalTokens(),
-        0.70,
-        0.85,
+        defaults.degradeAtFirst(),
+        defaults.degradeAtSecond(),
         PipelineOptions.DEFAULT_LARGE_DIFF_LINES,
         PipelineOptions.DEFAULT_HARD_CAP_LINES,
-        3,
-        "never",
+        defaults.nitBudgetDefault(),
+        defaults.publishUnverified(),
         PipelineOptions.DEFAULT_SPOTCHECK_PERCENT,
         // 02§4.4：测试文件默认不进入评审范围（服务端暂无独立开关，与 CLI 默认一致）
         PipelineOptions.DEFAULT_INCLUDE_TEST_FILES);
   }
 
-  /**
-   * CrossChecker 配置（默认关闭，05§5）。
-   *
-   * @param config 服务配置
-   * @return CrossCheckerOptions
-   */
   /**
    * 语义上下文配置（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片。
    *
@@ -247,6 +202,12 @@ public class ServerBeans {
     return org.cra.git.api.GitAssembly.createSymbolIndex(config.workspace());
   }
 
+  /**
+   * CrossChecker 配置（默认关闭，05§5）。
+   *
+   * @param config 服务配置
+   * @return CrossCheckerOptions
+   */
   @Bean
   public CrossCheckerOptions crossCheckerOptions(ServerConfig config) {
     Set<CrossCheckerOptions.Mode> modes = config.parsedCrossCheckerModes();
@@ -482,9 +443,5 @@ public class ServerBeans {
     registration.addUrlPatterns("/api/v1/*");
     registration.setOrder(Ordered.HIGHEST_PRECEDENCE + 10);
     return registration;
-  }
-
-  private static String modelOrInherit(String model, String standard) {
-    return model == null || model.isBlank() ? standard : model;
   }
 }
