@@ -63,6 +63,22 @@ class AgentBudgetOverridesTest {
   }
 
   @Test
+  void fromConfigNormalizesRoleKeyCaseAndWhitespace() {
+    // PR #64 评审跟进：fromConfig 与 of() 同一归一化口径——大小写/首尾空白不静默丢弃
+    AgentBudgetOverrides overrides =
+        AgentBudgetOverrides.fromConfig(
+            Map.of(
+                " agents.budget.VERIFIER.input-tokens ", " 16000 ",
+                "agents.budget. Judge .output-tokens", "1500"));
+
+    SubAgent<VerificationBatchInput> verifier = overrides.apply(AgentsAssembly.createVerifier());
+    assertThat(verifier.budget()).isEqualTo(new AgentBudget(16_000, 2_000, 2, 240_000));
+
+    SubAgent<JudgeCaseInput> judge = overrides.apply(AgentsAssembly.createJudge());
+    assertThat(judge.budget()).isEqualTo(new AgentBudget(20_000, 1_500, 2, 240_000));
+  }
+
+  @Test
   void crewAndSingleAgentOverridesAreComposable() {
     AgentBudgetOverrides overrides =
         AgentBudgetOverrides.fromConfig(
