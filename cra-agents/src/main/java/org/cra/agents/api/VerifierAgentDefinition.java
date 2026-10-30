@@ -56,7 +56,11 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
                 input.followupContext().isBlank()
                     ? ""
                     : "## 补查材料（你申请的 followup 文件全文）\n"
-                        + TemplateSupport.untrusted(input.followupContext())));
+                        + TemplateSupport.untrusted(input.followupContext()),
+                "untrusted_test_file_index",
+                input.testFileIndex().isBlank()
+                    ? "（本批无 test 类结论或测试清单不可得）"
+                    : TemplateSupport.untrusted(input.testFileIndex())));
     int splitAt = rendered.indexOf("\n# User\n");
     if (splitAt < 0) {
       throw new IllegalStateException("balanced-review.md 模板缺少 '# User' 分段");

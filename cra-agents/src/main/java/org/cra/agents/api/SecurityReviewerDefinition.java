@@ -87,10 +87,6 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   }
 
   private static String scopedPathsNote(ReviewAgentInput input) {
-    if (input.scopedPaths().isEmpty()) {
-      return "（本代理无工具白名单：全部上下文已内联，不可请求工具）";
-    }
-    return "read_file/grep_pattern 仅可触达以下文件（相对仓库根，越界请求将被拒绝并终止执行）：\n"
-        + String.join("\n", input.scopedPaths().stream().sorted().toList());
+    return TemplateSupport.scopedPathsNote(input.scopedPaths(), "read_file/grep_pattern");
   }
 }

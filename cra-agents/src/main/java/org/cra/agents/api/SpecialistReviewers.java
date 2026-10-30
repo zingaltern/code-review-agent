@@ -192,7 +192,9 @@ public final class SpecialistReviewers {
                   "review_policy_section",
                   input.reviewPolicySection().isBlank()
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
-                      : input.reviewPolicySection()));
+                      : input.reviewPolicySection(),
+                  "scoped_paths_note",
+                  TemplateSupport.scopedPathsNote(input.scopedPaths())));
       int splitAt = rendered.indexOf("\n# User\n");
       if (splitAt < 0) {
         throw new IllegalStateException("perf.md 模板缺少 '# User' 分段");

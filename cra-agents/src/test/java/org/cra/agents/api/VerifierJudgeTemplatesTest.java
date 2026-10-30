@@ -21,6 +21,7 @@ class VerifierJudgeTemplatesTest {
           "untrusted_code_context", TemplateSupport.untrusted("file content"),
           "untrusted_cited_evidence", TemplateSupport.untrusted("commit diff"),
           "policy_sections", "必须引用 diff 行号",
+          "untrusted_test_file_index", TemplateSupport.untrusted("- src/test/A.java"),
           "followup_section", "");
 
   private static final Map<String, String> REFUTE_VARS =

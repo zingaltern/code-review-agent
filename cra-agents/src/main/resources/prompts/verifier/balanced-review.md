@@ -61,4 +61,7 @@ REFUTED 的 rationale 必须给出具体反证位置，并附下方 refutation �
 ## 证据要求（base 分支 REVIEW.md）
 {{policy_sections}}
 
+## 仓库测试文件清单
+{{untrusted_test_file_index}}
+
 {{followup_section}}
