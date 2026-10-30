@@ -64,4 +64,6 @@ REFUTED 的 rationale 必须给出具体反证位置，并附下方 refutation �
 ## 仓库测试文件清单
 {{untrusted_test_file_index}}
 
+{{layer_contract_section}}
+
 {{followup_section}}

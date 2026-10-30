@@ -523,12 +523,15 @@ cra:
         v1: { model: strong,  template: balanced-review }
         v2: { model: "<异构>", template: refute-oriented }
       important-refuted-spotcheck: 0.20       # 拒真保险丝（03§4.3）
-    budget: { run-total-tokens: 500000, degrade-at: [0.70, 0.85] }   # v1.2.1：500k + 阈值重校（02§4.4）
+    budget: { run-total-tokens: 800000, degrade-at: [0.70, 0.85] }   # 2026-10-30：800k（原 500k）；阈值不变（02§4.4）
+      # .<role>.input-tokens / .<role>.output-tokens 可覆盖单代理预算（03§6 默认值）：
+      #   bug-hunter 24k/4k、security-reviewer 24k/2k、test-reviewer 16k/4k、convention-reviewer 8k/1k、
+      #   perf-reviewer 16k/1k、cross-checker 16k/4k、verifier 16k/2k、judge 20k/1.5k
     semantic-context:              # M4e（ADR-0014）：L2 跨文件切片；默认关闭
       enabled: false               # CRA_SEMANTIC_CONTEXT_ENABLED / --semantic-context
       max-files: 2000              # 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES）
       max-file-bytes: 262144       # 单文件字节上限（CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES）
-      slice-tokens: 4000           # 单 brief 切片 token 上限，从 L1 预算扣除（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS）
+      slice-tokens: 6000           # 单 brief 切片 token 上限，从 L1 预算扣除（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS；2026-10-30：4000→6000）
   review:
     default-depth: standard
     large-diff-lines: 2000
@@ -554,8 +557,12 @@ cra:
 | `CRA_SEMANTIC_CONTEXT_ENABLED` / `--semantic-context` | 语义上下文（L2 跨文件切片，ADR-0014）：开启后 standard/deep 档对 dataflow/security/verifier 注入切片 | `false` |
 | `CRA_SEMANTIC_CONTEXT_MAX_FILES` / `--semantic-context-max-files` | 索引扫描 Java 文件数上限（升序截断并声明） | `2000` |
 | `CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES` / `--semantic-context-max-file-bytes` | 单文件字节上限（超限跳过并声明） | `262144` |
-| `CRA_SEMANTIC_CONTEXT_SLICE_TOKENS` / `--semantic-context-slice-tokens` | 单 brief 切片 token 上限（500–12000；从 L1 预算扣除） | `4000` |
+| `CRA_SEMANTIC_CONTEXT_SLICE_TOKENS` / `--semantic-context-slice-tokens` | 单 brief 切片 token 上限（500–12000；从 L1 预算扣除） | `6000` |
 | `CRA_REVIEW_TESTS` / `--review-tests` | 评审范围是否含测试文件（02§4.4）：`false` 时 `src/test/**`、`*Test.java`、`*Tests.java` 不进评审计划（Summary 声明跳过数）；`sweep` 无独立 flag，只认该环境变量 | `false` |
+| `CRA_AGENTS_BUDGET_<ROLE>_INPUT_TOKENS` / `--<role>-input-tokens` | 单代理输入预算覆盖（03§6 默认值；`<role>` ∈ `bug-hunter`/`security-reviewer`/`test-reviewer`/`convention-reviewer`/`perf-reviewer`/`cross-checker`/`verifier`/`judge`） | 见 03§6 |
+| `CRA_AGENTS_BUDGET_<ROLE>_OUTPUT_TOKENS` / `--<role>-output-tokens` | 单代理输出预算覆盖（未覆盖的维度沿用定义默认；input 必须大于 output） | 见 03§6 |
+| `CRA_SERVER_RUN_TOTAL_TOKENS` / `--run-total-tokens` | run 级 token 预算（02§4.4） | `800000` |
+| `--large-diff-lines` / `--hard-cap-lines` | 大 diff 降档线与硬上限（行数口径 04§2.2） | `4000` / `16000` |
 
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 

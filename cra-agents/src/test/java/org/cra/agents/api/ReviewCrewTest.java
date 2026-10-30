@@ -42,7 +42,7 @@ class ReviewCrewTest {
     assertThat(crew.securityReviewer().budget())
         .isEqualTo(new AgentBudget(24_000, 2_000, 3, 240_000));
     assertThat(crew.testReviewer().role().id()).isEqualTo("test-reviewer");
-    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(12_000, 4_000, 2, 120_000));
+    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(16_000, 4_000, 2, 120_000));
     assertThat(crew.conventionReviewer().role().id()).isEqualTo("convention-reviewer");
     assertThat(crew.conventionReviewer().modelTier()).isEqualTo(AgentTier.LIGHT);
     assertThat(crew.conventionReviewer().tools()).isEqualTo(ToolWhitelist.NONE);

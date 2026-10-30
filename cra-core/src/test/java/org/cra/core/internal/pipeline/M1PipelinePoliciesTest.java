@@ -49,7 +49,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void largeDiffDowngradesQualityRegardlessOfDepth() {
-    DepthPlan plan = DepthPolicy.resolve(Depth.DEEP, 2001, OPTIONS);
+    DepthPlan plan = DepthPolicy.resolve(Depth.DEEP, 4001, OPTIONS);
     assertThat(plan.windowLines()).isEqualTo(15);
     assertThat(plan.conditionalFullText()).isFalse();
     assertThat(plan.notes()).anyMatch(n -> n.contains("降为 Quick 质量"));
@@ -57,7 +57,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void hardCapEnablesPriorityOnly() {
-    DepthPlan plan = DepthPolicy.resolve(Depth.STANDARD, 8001, OPTIONS);
+    DepthPlan plan = DepthPolicy.resolve(Depth.STANDARD, 16001, OPTIONS);
     assertThat(plan.priorityOnly()).isTrue();
   }
 
@@ -246,11 +246,35 @@ class M1PipelinePoliciesTest {
         .containsExactly("src/test/java/demo/ATest.java");
   }
 
+  @Test
+  void largeDiffAndHardCapBoundariesFollowRelaxedDefaults() {
+    // AI Coding 放宽档（ADR-0015 §2.2 修订）：4000/16000 为边界值，严格大于才降档
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_000, OPTIONS).windowLines()).isEqualTo(30);
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_000, OPTIONS).conditionalFullText()).isTrue();
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_001, OPTIONS).windowLines()).isEqualTo(15);
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_001, OPTIONS).conditionalFullText()).isFalse();
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 16_000, OPTIONS).priorityOnly()).isFalse();
+    assertThat(DepthPolicy.resolve(Depth.STANDARD, 16_001, OPTIONS).priorityOnly()).isTrue();
+  }
+
+  @Test
+  void budgetDefaultsRaiseOnlyBudgetsNotLadderThresholds() {
+    assertThat(OPTIONS.runTotalTokens()).isEqualTo(800_000L);
+    assertThat(OPTIONS.largeDiffLines()).isEqualTo(4_000);
+    assertThat(OPTIONS.hardCapLines()).isEqualTo(16_000);
+    // 门禁/降档阈值不动：70% / 85%
+    assertThat(OPTIONS.degradeAtFirst()).isEqualTo(0.70);
+    assertThat(OPTIONS.degradeAtSecond()).isEqualTo(0.85);
+  }
+
   // ---------- RunBudgetTracker ----------
 
   @Test
   void ladderPhasesFollowConsumedRatio() {
-    RunBudgetTracker tracker = new RunBudgetTracker(OPTIONS); // 500k
+    // 阶梯阈值（70%/85%/100%）与 run 预算默认值解耦：用显式 500k 验证阶段语义本身
+    RunBudgetTracker tracker =
+        new RunBudgetTracker(
+            new PipelineOptions(500_000, 0.70, 0.85, 4_000, 16_000, 3, "never", 20));
     assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.NORMAL);
     tracker.record(349_000, 0); // 69.8%
     assertThat(tracker.phase()).isEqualTo(RunBudgetTracker.Phase.NORMAL);

@@ -16,6 +16,12 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 
   private static final String TEMPLATE = "prompts/judge/arbitrate.md";
 
+  /** 默认输入预算（03§6 JudgeAgent 行；agents.budget.judge.input-tokens 可覆盖）。 */
+  public static final long DEFAULT_INPUT_TOKENS = 20_000;
+
+  /** 默认输出预算（agents.budget.judge.output-tokens 可覆盖）。 */
+  public static final long DEFAULT_OUTPUT_TOKENS = 1_500;
+
   private final TemplateSupport templates;
 
   /**
@@ -78,7 +84,8 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 
   @Override
   public AgentBudget budget() {
-    return new AgentBudget(16_000, 1_000, 2, 240_000);
+    // AI Coding 放宽档（ADR-0015 §2.2 修订）：16k/1k → 20k/1.5k——案件上下文 ≤3 文件 + 调用点索引
+    return new AgentBudget(DEFAULT_INPUT_TOKENS, DEFAULT_OUTPUT_TOKENS, 2, 240_000);
   }
 
   private static String renderCase(JudgeCaseInput input) {

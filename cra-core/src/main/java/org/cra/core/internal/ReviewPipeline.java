@@ -535,7 +535,8 @@ public final class ReviewPipeline implements Orchestrator {
                       batch,
                       reviewDiff,
                       javaFileIndex,
-                      path -> dataLoader.contentOf(path, request.headSha(), request, contentCache)),
+                      path -> dataLoader.contentOf(path, request.headSha(), request, contentCache),
+                      semanticContext.snapshot()),
               semanticContext,
               verificationWaitTimeoutMs);
       // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）

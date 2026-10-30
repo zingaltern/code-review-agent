@@ -659,8 +659,8 @@ class ReviewPipelineTest {
 
   @Test
   void largeDiffDowngradedAndDeclaredInSummary() {
-    // 07§2 验收 4：2000+ 行 diff 正常完成且降档、覆盖范围在 Summary 如实声明
-    String patch = bigPatch(2100);
+    // 07§2 验收 4：4000+ 行 diff 正常完成且降档、覆盖范围在 Summary 如实声明（AI Coding 放宽档）
+    String patch = bigPatch(4100);
     when(adapter.fetchDiff(any(), anyString(), anyString()))
         .thenReturn(
             new DiffResult(
@@ -668,7 +668,7 @@ class ReviewPipelineTest {
                 HEAD,
                 List.of(
                     new DiffFile(
-                        FILE, null, "modified", patch, List.of(new DiffHunk(1, 2100, 1, 2100)))),
+                        FILE, null, "modified", patch, List.of(new DiffHunk(1, 4100, 1, 4100)))),
                 List.of()));
     when(adapter.readFile(any(), anyString(), anyString()))
         .thenAnswer(
@@ -677,7 +677,7 @@ class ReviewPipelineTest {
               if ("REVIEW.md".equals(path)) {
                 throw new org.cra.common.exception.CraIntegrationException("404 no review md");
               }
-              return FileContent.ofText(FILE, "x\n".repeat(2100));
+              return FileContent.ofText(FILE, "x\n".repeat(4100));
             });
     gatewayReturns(findingsJson("越界", 4, "bug"));
     ReviewResult result = pipeline.run(request(false));
@@ -695,18 +695,18 @@ class ReviewPipelineTest {
 
   @Test
   void hardCapRestrictsToPriorityPathsWithDeclaration() {
-    // 02§4.4：>8k 行只评审 priority_paths 并声明覆盖范围
-    String patch = bigPatch(4100);
+    // 02§4.4：>16k 行只评审 priority_paths 并声明覆盖范围（AI Coding 放宽档）
+    String patch = bigPatch(16100);
     DiffFile billing =
         new DiffFile(
             "billing/Charge.java",
             null,
             "modified",
             patch,
-            List.of(new DiffHunk(1, 4100, 1, 4100)));
+            List.of(new DiffHunk(1, 16100, 1, 16100)));
     DiffFile other =
         new DiffFile(
-            "misc/Other.java", null, "modified", patch, List.of(new DiffHunk(1, 4100, 1, 4100)));
+            "misc/Other.java", null, "modified", patch, List.of(new DiffHunk(1, 16100, 1, 16100)));
     when(adapter.fetchDiff(any(), anyString(), anyString()))
         .thenReturn(new DiffResult(BASE, HEAD, List.of(billing, other), List.of()));
     when(adapter.readFile(any(), anyString(), anyString()))

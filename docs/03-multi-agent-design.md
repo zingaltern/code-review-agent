@@ -147,7 +147,7 @@ owner 在 REVIEW.md `## Sniff tests` 段落沉淀经验性检查（数量级/口
 **输入（v1.3.1：按 category 分型组装）**：
 
 - **代码类**（bug/security/test/convention/performance）：finding 全文（含发现者论证——不假装盲）+ 所在文件全文 + 该文件相关切片 + REVIEW.md 证据要求段；
-- **bug 类调用点索引（v1.4，ADR-0015）**：上述代码类输入 + 确定性预取的**受影响符号调用点索引**（finding 文本标识符 ∩ 被改动文件文本，≤3 个符号；head 侧 `listFiles("**/*.java")` 的同目录候选文件，≤30 个文件、≤30 条命中、渲染 ≤700 token，从 codeContext 预算内预留）。不可得（仓库树为空/无符号）→ trace `call_site_index{available=false}` 并在 brief 如实声明，不静默。索引是**近似**：只扫同目录候选，跨包调用者可能不可见；验证者可对可见索引中的调用方/测试文件发起 `followup_file` 补查（受控一次、预算内）。
+- **bug 类调用点索引（v1.4，ADR-0015；2026-10-30 跨层版）**：上述代码类输入 + 确定性预取的**受影响符号调用点索引**（finding 文本标识符 ∩ 被改动文件文本，≤3 个符号）。候选集 = **同目录文件 + 通过 `import` / `import static` 引用变更符号所属类型的文件**（有语义索引时用其 import 关系；无则退回同目录并声明"调用链不完整"）。上限：候选文件 **≤60**、条目 **≤40**、渲染 **≤1000 token**（从 codeContext 预算内预留；原 30/30/700）。条目标注方向 `caller` / `self`；候选截断、条目截断、import 不可得都写声明，不静默。不可得（仓库树为空/无符号）→ trace `call_site_index{available=false}` 并在 brief 如实声明。索引是**近似**：词法级匹配（不区分重载、不做 DI/运行期装配还原），Spring 运行期注入调用无法 100% 覆盖；验证者可对可见索引中的调用方/测试文件发起 `followup_file` 补查（受控一次、预算内）。索引可用时 brief 增**分层核对契约**固定段（controller→service→DAO；未列出的层级视为不可见），BH-dataflow 与 verifier 共用同一段文本（04§2.6）。
 - **context 类**：finding 全文 + **finding 引用的矛盾证据原文**——被引 commit 的 diff 节选（jgit show，编排器预取内联，每 commit ≤1k token）+ 被引事件史条目（M4f-full，ADR-0012：按 `event <id>` 预取摘要/类型/时间/来源/commit_refs/paths，每批 ≤5 条、≤1.5k token）+ REVIEW.md 对应 Product context/Known incidents 条目 + 变更文件全文（矛盾最终作用于代码）。context 类证据在代码之外，若按代码类模板组装，verifier 必然 INSUFFICIENT → Judge 同样失明 → 拒杀——**分型组装是 CrossChecker（03§3.1）能在验证管线里活下来的前提**；Judge brief 同规则分型。
 
 - **test 类（v1.3.2 新增分型）**：finding 全文 + 变更文件上下文 + **仓库测试文件清单**（head 侧 `listFiles("**/test/**/*.java")`，≤80 行，超出注明总数）。理由（M3 取证）：test 类 finding 的核心主张「某行为无测试覆盖」是**负向/全局主张**——验证上下文只有 main 文件时无法证否 → 必然 INSUFFICIENT → Judge 按证据不足拒（L3 实测 judge 的 53 条 REJECTED 中 48 条为此类）。注入清单后验证者能核对「是否已有覆盖」，未列出的行为走 followup_file 受控补查。清单不可得（listFiles 失败）→ 降级为空并记 trace `test_index`（available=false），验证按原形态进行、结论如实标注。
@@ -247,11 +247,11 @@ for (var e : byFile.entrySet()) {
 |---|---|---|---|---|---|---|
 | BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤4k（v1.3.2：2k→4k） | 3 |
 | SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤24k/chunk | ≤2k | 3 |
-| TestReviewer | 条件触发 | 标准 | read_file | ≤12k | ≤4k（v1.3.2：1k→2k→4k） | 2 |  
+| TestReviewer | 条件触发 | 标准 | read_file | ≤16k（2026-10-30：12k→16k） | ≤4k（v1.3.2：1k→2k→4k） | 2 |  
 | ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
 | PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
-| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | ≤12k/文件批次（代码类）；context 类 +引用证据 ≤14k；**bug 类调用点索引从 codeContext 预算内预留 ≤700 token（v1.4，ADR-0015）** | ≤1.5k（含 refutation 对象） | 2 |
-| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | ≤16k/案件（分型组装同 verifier；**bug 类 + 调用点索引 ≤500 token**） | ≤1k | 2 |
+| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | **≤16k/文件批次**（代码类；context 类与索引在同一预算内裁剪，2026-10-30：12k→16k）；**bug 类调用点索引从 codeContext 预算内预留 ≤1000 token（v1.4.2，ADR-0015 修订）** | **≤2k**（含 refutation 对象；2026-10-30：1.5k→2k） | 2 |
+| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | **≤20k/案件**（分型组装同 verifier；**bug 类 + 调用点索引 ≤500 token**；2026-10-30：16k→20k） | **≤1.5k**（2026-10-30：1k→1.5k） | 2 |
 | **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k；v1.4 事件史） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。

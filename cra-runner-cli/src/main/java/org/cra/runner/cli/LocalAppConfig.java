@@ -56,18 +56,18 @@ class LocalAppConfig {
 
   @Bean
   ReviewCrew reviewCrew() {
-    // T2.2/T2.3：M2 评审班组（BugHunter 四视角 + 专角色）
-    return AgentsAssembly.createReviewCrew();
+    // T2.2/T2.3：M2 评审班组（BugHunter 四视角 + 专角色）；05§5 agents.budget.<role>.* 在此施加
+    return config.agentBudgets().apply(AgentsAssembly.createReviewCrew());
   }
 
   @Bean
   SubAgent<VerificationBatchInput> verifier() {
-    return AgentsAssembly.createVerifier();
+    return config.agentBudgets().apply(AgentsAssembly.createVerifier());
   }
 
   @Bean
   SubAgent<JudgeCaseInput> judge() {
-    return AgentsAssembly.createJudge();
+    return config.agentBudgets().apply(AgentsAssembly.createJudge());
   }
 
   @Bean

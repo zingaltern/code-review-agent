@@ -83,9 +83,9 @@ class VerificationAgentDefinitionTest {
 
   @Test
   void verifierBudgetMatchesSpecRow() {
-    // 03§6：VerifierAgent ≤12k 输入 / ≤1.5k 输出 / 2 轮
-    assertThat(verifier.budget().maxInputTokens()).isEqualTo(12_000);
-    assertThat(verifier.budget().maxOutputTokens()).isEqualTo(1_500);
+    // 03§6（AI Coding 放宽档，ADR-0015 §2.2 修订）：VerifierAgent ≤16k 输入 / ≤2k 输出 / 2 轮
+    assertThat(verifier.budget().maxInputTokens()).isEqualTo(16_000);
+    assertThat(verifier.budget().maxOutputTokens()).isEqualTo(2_000);
     assertThat(verifier.budget().maxTurns()).isEqualTo(2);
     assertThat(verifier.tools().tools()).isEmpty();
   }
@@ -118,9 +118,9 @@ class VerificationAgentDefinitionTest {
 
   @Test
   void judgeBudgetMatchesSpecRow() {
-    // 03§6：JudgeAgent ≤16k 输入 / ≤1k 输出 / 2 轮
-    assertThat(judge.budget().maxInputTokens()).isEqualTo(16_000);
-    assertThat(judge.budget().maxOutputTokens()).isEqualTo(1_000);
+    // 03§6（AI Coding 放宽档）：JudgeAgent ≤20k 输入 / ≤1.5k 输出 / 2 轮
+    assertThat(judge.budget().maxInputTokens()).isEqualTo(20_000);
+    assertThat(judge.budget().maxOutputTokens()).isEqualTo(1_500);
     assertThat(judge.budget().maxTurns()).isEqualTo(2);
   }
 

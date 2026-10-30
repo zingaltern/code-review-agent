@@ -21,7 +21,7 @@
 |---|---|---|
 | L0 | 变更 diff（unified，带 hunk 头与行号） | 总是，全部角色 |
 | L1 | **默认：hunk ±30 行窗口**；仅当满足条件才注入文件全文：文件 ≤200 行、或角色为 Security/Perf/Judge/Verifier（这些角色的判断依赖完整文件结构，但仍受预算约束） | 条件注入，预算裁决 |
-| L2 | 依赖切片：**变更符号**的定义行 + 跨文件引用位置（file:line + 行摘录）+ import 关联（谁 import 了本 PR 变更的类型）——数据面 = 确定性语义索引（`SymbolIndex`，jgit 树读取 + Java 词法抽取，**ADR-0014**；默认关闭） | 条件注入：`CRA_SEMANTIC_CONTEXT_ENABLED=true` 且 standard/deep 档时，按角色默认注入 **BH-dataflow、Security、Verifier**；quick 不触发；单 brief ≤4k token 且**从 L1 预算扣除**，超预算截断并写声明（关闭时 brief 与开关引入前逐字节一致） |
+| L2 | 依赖切片：**变更符号**的定义行 + 跨文件引用位置（file:line + 行摘录）+ import 关联（谁 import 了本 PR 变更的类型）——数据面 = 确定性语义索引（`SymbolIndex`，jgit 树读取 + Java 词法抽取，**ADR-0014**；默认关闭） | 条件注入：`CRA_SEMANTIC_CONTEXT_ENABLED=true` 且 standard/deep 档时，按角色默认注入 **BH-dataflow、Security、Verifier**；quick 不触发；单 brief ≤6k token（2026-10-30 放宽，原 4k）且**从 L1 预算扣除**，超预算截断并写声明（关闭时 brief 与开关引入前逐字节一致） |
 | L3 | 仓库规范：**base 分支的** `REVIEW.md`、`AGENTS.md`/`CLAUDE.md` 相关目录段、依赖清单（安全用） | 相关时注入；见 §3 信任模型 |
 | L4 | 账本记忆：该 PR 已发布 finding 指纹、pre-existing 复核结果 | 用于收敛控制；**不注入**给新 reviewer（防锚定） |
 | L5（v1.3.1） | **外部证据**（仅 category=context 的候选）：finding 引用的 commit diff 节选（jgit show 预取内联，每 commit ≤1k）+ REVIEW.md Product context/Known incidents 对应条目 + **产品事件史条目**（M4f-full，ADR-0012：按 `event <id>` 从 PG 预取摘要/类型/时间/来源，每批 ≤5 条、≤1.5k token） | 注入 verifier/judge brief（03§4.2 分型组装）与 CrossChecker 输入（03§3.1）——context 类证据在代码之外，不预取则验证层失明 |
@@ -32,9 +32,8 @@
 
 ### 2.1 预算参数（默认，配置可覆盖）
 
-- run 级总预算 **500k token**（Standard，v1.2.1 从 400k 上调——见下）；降档阶梯 **70%/85%**（02§4.4）；
-- 评审范围默认**不含测试文件**（`review.include-test-files: false`，`--review-tests` / `CRA_REVIEW_TESTS=true` 打开，02§4.4）——下方算术中的"文件数"只计生产代码与文档，测试文件不消耗评审 token；
-- LLM 并发默认 8（02§4.5）；
+- run 级总预算 **800k token**（Standard；2026-10-30 AI Coding 放宽档从 500k 上调——见下）；降档阶梯 **70%/85%**（阈值不变，02§4.4）；
+- 评审范围默认**不含测试文件**（`review.include-test-files: false`，`--review-tests` / `CRA_REVIEW_TESTS=true` 打开，02§4.4）——下方算术中的"文件数"只计生产代码与文档，测试文件不消耗评审 token；- LLM 并发默认 8（02§4.5）；
 - token 估算：字符数 / 3.5 近似。
 
 ### 2.2 Standard 档中型 PR 算术（假设：10 文件、2k diff 行、文件均 250 行）
@@ -43,15 +42,15 @@
 
 **Security/Perf（v1.2 补，chunk 化）**：与 BH 同构按 chunk 扇出（03§6）。Security 4 chunk × 1 实例，其中含 priority/敏感文件的 chunk 注入该 chunk 文件全文（+3–4k/文件），单 chunk 18–24k ≈ **4 次 ≈ 85k in / 6k out**；Perf 条件触发（Deep 或命中 perf 路径）2–4 chunk ≈ 40k。**v1.1 的"Security 独享全量 brief"方案 ≈55k，超预算 2 倍，已废弃**。
 
-**验证段**：假设 12 条候选分布 4 文件 → 4 个文件批次。每批 brief = 文件全文（250 行 ≈ 3k）+ 切片 2k + 断言集 1k ≈ **6–8k**（符合 ≤12k）。M2 单验证者：4 次 ≈ 30k in / 5k out。
+**验证段**：假设 12 条候选分布 4 文件 → 4 个文件批次。每批 brief = 文件全文（250 行 ≈ 3k）+ 切片 2k + 断言集 1k + 调用点索引 ≤1k ≈ **7–9k**（符合 ≤16k）。M2 单验证者：4 次 ≈ 32k in / 6k out。
 
 **仲裁段（Judge 按案件，v1.2 界定）**：每案件 brief = finding + 判定证据 + 涉事文件全文（≤3 文件）≈ 10–14k；INSUFFICIENT + 抽查 ≤2 案件 ≈ **28k**。
 
-**合计 ≈ 305k in / 24k out ≈ 330k**——占 500k 预算的 **66%**，位于 70% 降档档位之下（v1.2.1 校准：v1.2 曾按 400k 计为 82.5%，恰好坐在 80% 截断档之上，会使每个标准 PR 例行触发 top-10 截断、`suppressed_by_truncation>0` 常态报警——护栏"狼来了"；修法为预算上调至 500k + 阶梯重校 70%/85%，02§4.4）。大 diff 与复杂 PR 的超预算场景仍由阶梯兜底。对照 v1.0 的错误：按"base+head 全文总是注入 + 验证上下文与 reviewer 同级或更全"，同一 PR 仅验证段就需要 12×2×8k=192k，超过 v1.0 示例 run 的全部输入预算——该算术不可行，已废弃。
+**合计 ≈ 305k in / 24k out ≈ 330k**——占 800k 预算的 **41%**（按放宽前的 500k 计为 66%），位于 70% 降档档位之下（v1.2.1 校准：v1.2 曾按 400k 计为 82.5%，恰好坐在 80% 截断档之上，会使每个标准 PR 例行触发 top-10 截断、`suppressed_by_truncation>0` 常态报警——护栏"狼来了"；修法为预算上调至 500k + 阶梯重校 70%/85%，02§4.4；2026-10-30 进一步上调至 800k，阶梯阈值不变）。大 diff 与复杂 PR 的超预算场景仍由阶梯兜底。对照 v1.0 的错误：按"base+head 全文总是注入 + 验证上下文与 reviewer 同级或更全"，同一 PR 仅验证段就需要 12×2×8k=192k，超过 v1.0 示例 run 的全部输入预算——该算术不可行，已废弃。
 
 **CrossChecker 增量（v1.3.1 补，M4f 触发时才计入；v1.3.2 按实现校准；v1.3.3 事件史共享预算）**：1 次调用 ≤16k in（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k；实测 ≈12.6k = diff 7.2k + 变更史 2.7k + 产品段 1.8k + 提示余量，无事件史时）/ ≤4k out（v1.3.2：1.5k→4k，`8a5c9de`）；其候选的 context 类验证走分型 brief（§1 L5），每文件批次增量 ≤2k（含事件条目 ≤1.5k）。**触发时 run 总增量：按预算上限 ≈22k（16k in + 4k out + 2k 分型 brief；330k → ≈352k，70.4%，已越 70% 降档线）；按实测输入 ≈18.6k（12.6k + 4k + 2k；≈349k，69.7%，恰在线上）**——故 M4f 开启的仓库建议同步上调预算或降一档视角；默认关闭时不改变 Standard 基线算术。（2026-10-27 修订：原按 14k in / 1.5k out 计的 ≈20k / 70% 为文档估算，预算口径与实测值以本行为准；事件史不扩大 16k 输入上限，只与 commit 变更史竞争同一 4k 槽。）
 
-**L2 跨文件切片（v1.4 补，ADR-0014；仅 `CRA_SEMANTIC_CONTEXT_ENABLED=true` 时计入）**：单 brief ≤4k token（默认 4000，可配 500–12000），且**从该代理的 L1 预算中扣除**（`ReviewAgentDispatcher.buildContextInput` / `VerificationBatchAssembler.buildBatch`），不扩大单代理输入硬限。注入面 = dataflow（每 chunk 1 次）+ security（每 chunk 1 次）+ 验证批次（每文件批次 1 次）。Standard 中型 PR 最坏情况 8 × 4k = 32k 名义上限，但由于从 L1 扣除，**只有 L1 已被压到 1k 下限时总输入才会上升**；实测（486 个 Java 文件仓库、单符号 6 处引用）切片 ≈352 token，8 符号上限对应 ≈1–3k。索引构建 0.56s（冷）/0.16s（热）。关闭时（默认）本节不计入任何算术，04§2.2 基线不变。
+**L2 跨文件切片（v1.4 补，ADR-0014；仅 `CRA_SEMANTIC_CONTEXT_ENABLED=true` 时计入；2026-10-30 上限放宽到 6k）**：单 brief ≤6k token（默认 6000，可配 500–12000），且**从该代理的 L1 预算中扣除**（`ReviewAgentDispatcher.buildContextInput` / `VerificationBatchAssembler.buildBatch`），不扩大单代理输入硬限。注入面 = dataflow（每 chunk 1 次）+ security（每 chunk 1 次）+ 验证批次（每文件批次 1 次）。Standard 中型 PR 最坏情况 8 × 6k = 48k 名义上限，但由于从 L1 扣除，**只有 L1 已被压到 1k 下限时总输入才会上升**；实测（486 个 Java 文件仓库、单符号 6 处引用）切片 ≈352 token，8 符号上限对应 ≈1–3k。索引构建 0.56s（冷）/0.16s（热）。关闭时（默认）本节不计入任何算术，04§2.2 基线不变。
 
 **大 PR 降档**：>2k diff 行 → 窗口 ±15、视角降 1、验证 top-10 候选；>8k 行 → priority_paths only + 覆盖声明。
 
@@ -71,7 +70,7 @@
 
 **数据集与成本口径校准（2026-10-27）**：L2 数据集已由 M1 基线（bad 12 + clean 8）扩至 M3 的 bad 30 + clean 20，k=2 → **60/40 观测**；表中「≈9M」按原 ~90k/用例规划上限线性推算，「≈1.7M」为最近一次真实 L2（`eval/l2/report.json`，commit `9eb4a82`，k=2 quick）实测：≈1.71M in / 0.15M out，单观测均值 ≈17k in / ≈1.5k out，观测耗时合计 ≈22min。真实成本以报告 `run_metrics` 为准。
 
-**验证层反证纪律的增量成本（v1.4，ADR-0015）**：verifier 输入/输出/轮次预算均不变（调用点索引 ≤700 token 从 codeContext 预留；refutation 对象计入既有 1.5k 输出预算）；judge 案件对 bug 类附索引 ≤500 token（16k 案件预算内）。新增成本只有**bug/test 类无有效反证 REFUTED 的降级仲裁**（test 类于 v1.4.1 纳入，ADR-0015 §6）：每次 ≤16k in / ≤1k out，上界 = 每 run bug/test 类 REFUTED 候选数（L3 实测单 case 该类 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
+**验证层反证纪律的增量成本（v1.4，ADR-0015；2026-10-30 放宽档）**：verifier 输入预算 12k→16k、输出 1.5k→2k（调用点索引 ≤1000 token 从 codeContext 预留；refutation 对象仍计入既有输出预算）；judge 案件 16k→20k、输出 1k→1.5k，对 bug 类附索引 ≤500 token。新增成本只有**bug/test 类无有效反证 REFUTED 的降级仲裁**（test 类于 v1.4.1 纳入，ADR-0015 §6）：每次 ≤16k in / ≤1k out，上界 = 每 run bug/test 类 REFUTED 候选数（L3 实测单 case 该类 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
 
 **L1 判定语义（v1.3.1 修正——"固定种子=确定性"假设不成立：OpenAI 兼容生态的 `seed` 是 best-effort，多数兼容端点忽略该参数，语义不跨 provider/模型版本稳定，而本项目恰是多模型路由架构）**：
 
@@ -95,6 +94,24 @@
 - **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。
 
 配套约束：评测 fixture 的快照裁剪到相关模块（06§3 fixture 规格）；评测 run 用 standard 以下档位跑；L2/L3 报告以 `cra-eval run --json` 输出提交进 PR。**门禁权威优先于门禁频率**：宁可 L2 降档到本地跑，不可让强制 CI 全量门禁因成本被绕过——被绕过的门禁等于没有门禁。
+
+### 2.5 跨层调用点索引（2026-10-30，ADR-0015 §2.2 修订）
+
+验证 brief 的"受影响符号的调用点索引"从**同目录**扩到**跨包有界**：
+
+- **候选集** = 同目录文件 + 通过 `import` / `import static` 引用变更符号所属类型的文件（有语义索引时用其 import 关系；无则退回同目录并声明"调用链不完整"）；
+- **上限**：候选文件 ≤60、条目 ≤40、渲染 ≤1000 token（从 `codeContext` 预算内预留；原 30/30/700）；
+- **方向标注**：`self`（变更文件自身）/ `caller`（其他文件）；
+- **声明**：候选截断、条目截断、import 不可得都写一行声明（不静默）；近似性（词法级、不区分重载、不做 DI/运行期装配还原）随段渲染；
+- **预算算术**：`VerificationBatchAssembler` 先扣固定段（findings + 1.2k 余量 + 测试清单 + 被引证据 + 策略段），再按优先级分配索引（≤1000）与 L2 切片（≤6000）——verifier 16k 下两者合计不越界；超预算按"索引优先、切片次之"截断，任一段落被跳过都在 `codeContext` 内声明。
+
+### 2.6 分层核对契约（提示词固定段；不新增 agent）
+
+索引可用时，`bug-hunter/dataflow` 与 `verifier` 的 brief 注入同一段可信指令（`LayerContract.SECTION`，未可用时整段不出现）：
+
+> 按 controller→service→DAO 核对：变更方法的调用方是否依赖其返回值/空值/事务边界；简报未列出的层级视为不可见，不得据此臆断。
+
+纪律来源：ADR-0015 §1.2 的误拒形态——验证者/评审者把"简报里看不到的层"当作"不存在"；该段把"不可见 ≠ 不存在"写成硬约束，并要求需要证据时走 `followup_file`（verifier）或 `read_file`（BH-dataflow）补查。
 
 ## 3. REVIEW.md 规范与信任模型（v1.1 重写）
 

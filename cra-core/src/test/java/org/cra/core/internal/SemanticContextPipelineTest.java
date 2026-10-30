@@ -186,7 +186,11 @@ class SemanticContextPipelineTest {
         .contains("### 符号 `shouldKeepAlive`")
         .contains("定义 `" + KEEP_ALIVE + ":8`")
         .contains("`" + CALLER + ":9`")
-        .contains("keepAlive.shouldKeepAlive(age)");
+        .contains("keepAlive.shouldKeepAlive(age)")
+        // 分层核对契约（04§2.6）：仅索引可用时随 dataflow brief 注入
+        .contains("分层核对契约")
+        .contains("controller→service→DAO")
+        .contains("视为不可见");
     assertThat(dataflowPrompt).doesNotContain("（无切片）");
 
     // 语义索引事件进 trace（可观测性），覆盖声明含索引范围
@@ -289,7 +293,8 @@ class SemanticContextPipelineTest {
         .isNotEmpty()
         .allSatisfy(prompt -> assertThat(prompt).contains("（无切片）"));
     assertThat(scripted.reviewCalls)
-        .noneSatisfy(call -> assertThat(call.userPrompt()).contains("L2 跨文件上下文"));
+        .noneSatisfy(call -> assertThat(call.userPrompt()).contains("L2 跨文件上下文"))
+        .noneSatisfy(call -> assertThat(call.userPrompt()).contains("分层核对契约"));
     assertThat(traceOf(result)).doesNotContain("\"event\":\"semantic_context\"");
   }
 

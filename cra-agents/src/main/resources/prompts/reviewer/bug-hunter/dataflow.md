@@ -27,5 +27,7 @@
 ## 相关切片（L2）
 {{untrusted_slices}}
 
+{{layer_contract_section}}
+
 ## 受限工具范围
 {{scoped_paths_note}}

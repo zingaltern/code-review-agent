@@ -100,7 +100,9 @@ public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
                     ? "（本仓库未配置 REVIEW.md 评审策略）"
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
-                scopedPathsNote(input)));
+                scopedPathsNote(input),
+                "layer_contract_section",
+                input.layerContractSection()));
     int splitAt = rendered.indexOf("\n# User\n");
     if (splitAt < 0) {
       throw new IllegalStateException("模板缺少 '# User' 分段: " + templatePath);

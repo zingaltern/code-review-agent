@@ -105,7 +105,7 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | 4 | 兜底分层：无任何有效标记 → 退 commit 闸，**永不**退到空账本全量重发 | 单测 | 05§1.3 规则 5；02§4.1 |
 | 5 | 锚定 422 逐条降级：整包 422 → 逐条提交 → 仍失败进 Summary 列表，`anchor_status=SUMMARY_FALLBACK` 回写 | 集成（WireMock 状态机） | 07§1 验收 1；05§2.2 |
 | 6 | 注入**负向不变量判定器**单测：mock 发布集含"skip-all / artificial-approve"→ 判红；正常输出 → 判绿；不做快照全等（seed 是 best-effort）。判定器即 L1 快检的承重代码，必须先于评测集被测 | 单测（cra-eval 判定器） | 04§2.4；06§1.2 对抗集②；07§2 验收 6 |
-| 7 | 预算硬限与降档阶梯：`BudgetEnforcer` 纯函数——<70% 不降档（含 330k/500k=66% 算术回归锚点）、≥70% 砍 light 角色与 1 视角、≥85% top-10 验证、100% 终止记 `BUDGET_EXCEEDED`/`suppressed_by_truncation` 计数 | 单测 | 02§4.4；07§3 验收 5/6；04§2.2 |
+| 7 | 预算硬限与降档阶梯：`BudgetEnforcer` 纯函数——<70% 不降档（含 330k/800k=41% 算术回归锚点；放宽前 500k=66%）、≥70% 砍 light 角色与 1 视角、≥85% top-10 验证、100% 终止记 `BUDGET_EXCEEDED`/`suppressed_by_truncation` 计数 | 单测 | 02§4.4；07§3 验收 5/6；04§2.2 |
 | 8 | 滑窗去重三连漂移：上方插 10 行（锚行内容不变→抑制）、改锚行 ±2 内非锚行（滑窗 ±5 命中→抑制）、改锚行本身（内容已变→重发） | 单测（去重纯函数） | 07§2 验收 1；02§4.1 |
 | 9 | 滑窗未命中但同 file 同 category 且行区间重叠 → 只记 `possible_duplicate` 入 trace，不自动抑制 | 单测 + trace 事件断言 | 02§4.1；05§1.4 |
 | 10 | REVIEW.md 投毒：PR 内改 `Skip paths: src/**` → 仍按 base 版策略评审 + Summary 警告 | 集成 | 07§2 验收 5；04§3.2 |

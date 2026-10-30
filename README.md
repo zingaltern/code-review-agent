@@ -181,6 +181,9 @@ cra-review:
 | `CRA_GITLAB_BOT_USERNAME` | `/user` 不可读时的 bot 身份回退 |
 | `CRA_CROSSCHECKER_ENABLED` | 是否启用 CrossChecker，默认 `false` |
 | `CRA_REVIEW_TESTS` / `--review-tests` | 测试文件是否进入评审范围，默认 `false`（见下方"评审范围"） |
+| `CRA_AGENTS_BUDGET_<ROLE>_INPUT_TOKENS` / `_OUTPUT_TOKENS` | 单代理预算覆盖（`role` = `bug-hunter`/`security-reviewer`/`test-reviewer`/`convention-reviewer`/`perf-reviewer`/`cross-checker`/`verifier`/`judge`）；默认见 [docs/03 §6](docs/03-multi-agent-design.md) |
+| `--run-total-tokens` | run 级 token 预算，默认 `800000`（AI Coding 放宽档，原 500k） |
+| `--large-diff-lines` / `--hard-cap-lines` | 大 diff 降档线 / 硬上限（行），默认 `4000` / `16000` |
 
 ### 评审范围（默认不含测试文件）
 
@@ -216,7 +219,7 @@ cra-review:
 - 双验证者投票尚未开启（T3.6 门槛未满足），当前为单验证者加确定性抽查。
 - GitLab 已接线（M4e 第二半）：CLI `--platform gitlab`（`CRA_GITLAB_TOKEN`/`_FILE`）与 server `CRA_SERVER_PLATFORM=gitlab`（`/webhooks/gitlab`，`X-Gitlab-Token`）均可用。**真实 GitLab 写操作尚无 owner token，未做线上验证**（端点契约/fixture 回放/CLI 接线/server HTTP+PG 集成已过；读路径已对 gitlab.com 公共项目实跑）。GitLab 的 commit comment 无平台评论 id（本地合成 id）、discussion `resolved` 可得但暂不采、draft 转正不自动触发、冲突 MR 是否触发 pipeline 文档未声明——完整边界与待验证项见 [docs/deployment-gitlab.md](docs/deployment-gitlab.md)。
 - GitLab 的 draft 过滤既可由 CI `workflow:rules` 按标题前缀实现，也可由服务端 webhook 解析层忽略；fork MR 默认在 fork 项目运行、父项目受保护资源不可用；并发需 `resource_group` + `interruptible: false` 防止掐断已发布一半的 run。
-- **M4e/M4f-full 范围边界**：M4e 的真实 GitLab 写操作见上方限制；Gerrit 不做适配（owner 裁决 2026-10-30）；**语义索引/跨文件上下文第一版已落地但默认关闭**（`CRA_SEMANTIC_CONTEXT_ENABLED=false`）——确定性符号索引（jgit 树读取 + Java 词法/结构抽取，无 JavaParser、无向量/embedding、无持久化索引），只对 BH-dataflow/Security/Verifier 注入 L2 切片（单 brief ≤4k、从 L1 预算扣除），**仅支持 Java 源文件**、按符号名而非类型绑定（不区分重载）、扫描有上限（默认 2000 文件 / 256 KiB）并如实声明截断；L2/L3 评测不度量其收益（默认关闭，见 [ADR-0014](docs/adr/0014-semantic-index-cross-file-context.md)）。M4f-full 第一版只接 JSONL 事件源（本地/对象存储 HTTP(S)），**Jira、Confluence、ServiceNow/服务台、Slack/Teams 事故频道、PagerDuty、GitHub Issues 作为事件源均未接**；事件史默认关闭，只覆盖已文档化入库的工单/事故复盘（tribal knowledge 不可见）。详见 [ADR-0012](docs/adr/0012-event-history-data-model.md) 与 [docs/deployment-server.md](docs/deployment-server.md) §5.1/§7。
+- **M4e/M4f-full 范围边界**：M4e 的真实 GitLab 写操作见上方限制；Gerrit 不做适配（owner 裁决 2026-10-30）；**语义索引/跨文件上下文第一版已落地但默认关闭**（`CRA_SEMANTIC_CONTEXT_ENABLED=false`）——确定性符号索引（jgit 树读取 + Java 词法/结构抽取，无 JavaParser、无向量/embedding、无持久化索引），只对 BH-dataflow/Security/Verifier 注入 L2 切片（单 brief ≤6k、从 L1 预算扣除），**仅支持 Java 源文件**、按符号名而非类型绑定（不区分重载）、扫描有上限（默认 2000 文件 / 256 KiB）并如实声明截断；L2/L3 评测不度量其收益（默认关闭，见 [ADR-0014](docs/adr/0014-semantic-index-cross-file-context.md)）。M4f-full 第一版只接 JSONL 事件源（本地/对象存储 HTTP(S)），**Jira、Confluence、ServiceNow/服务台、Slack/Teams 事故频道、PagerDuty、GitHub Issues 作为事件源均未接**；事件史默认关闭，只覆盖已文档化入库的工单/事故复盘（tribal knowledge 不可见）。详见 [ADR-0012](docs/adr/0012-event-history-data-model.md) 与 [docs/deployment-server.md](docs/deployment-server.md) §5.1/§7。
 - **真实 GitHub 验收已完成（2026-10-27）**：M4b/M4c/M4d 在私有 scratch 仓库完成 webhook→PG、push commit comment、nightly issue/汇总/截断/幂等全链路；证据见 [docs/deployment-server.md](docs/deployment-server.md) §9。
 - **M4b 签发已按 repo 限定（v2）**：`X-CRA-Repo` + `(repo, commit)` 查 `review_run`；v1 签名需重签（ADR-0009，PR #14）。
 - **最近一次官方 L3 全量（2026-10-27，198 观测，run 40416120356）bad 召回 71/90 = 78.9%（Wilson 下界 0.6937 < 0.70）为红**；clean 0.55、幻觉 0.933、注入 0、context 18/18、零发布样本级 1/30 均绿。**owner 2026-10-27 裁决 A：接受为已知红，不调阈值**——记录见 [docs/07](docs/07-roadmap.md)「M4 收口记录」与 `docs/audits/owner-decisions-2026-10-27.md`。

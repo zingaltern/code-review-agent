@@ -3,7 +3,9 @@ package org.cra.runner.cli;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
+import org.cra.core.api.PipelineOptions;
 
 /**
  * `cra review` 参数解析（05§3 CLI 契约）。缺参/非法值 → CraConfigException（退出码 2）。 参数优先于环境变量；密钥类只认环境变量来源的传递（CI 中经
@@ -16,6 +18,9 @@ final class CliArgs {
 
   /** 本地实跑命令默认值（07 T2.10：默认 mvn -B -ntp verify，docs/00 §4 自检即现成命令）。 */
   static final String DEFAULT_EXEC = "mvn -B -ntp verify";
+
+  /** 单代理预算覆盖 flag（05§5 agents.budget.&lt;role&gt;.*；由角色表生成，避免 16 处手写）。 */
+  private static final java.util.Set<String> BUDGET_FLAGS = budgetFlags();
 
   private CliArgs() {}
 
@@ -47,6 +52,13 @@ final class CliArgs {
     boolean reviewTestsSeen = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
+      if (BUDGET_FLAGS.contains(arg)) {
+        if (i + 1 >= args.length) {
+          throw new CraConfigException("参数缺值: " + arg);
+        }
+        named.put(arg, args[++i]);
+        continue;
+      }
       switch (arg) {
         case "--dry-run" -> {
           dryRunFlag = true;
@@ -266,8 +278,10 @@ final class CliArgs {
     }
     // 05§5 review.* 与 agents.budget（默认值即文档基准值；REVIEW.md 显式配置在 core 内优先于 nit 默认）
     DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", "0.70,0.85"));
-    int largeDiffLines = parseIntOption(named, "--large-diff-lines", 2000);
-    int hardCapLines = parseIntOption(named, "--hard-cap-lines", 8000);
+    int largeDiffLines =
+        parseIntOption(named, "--large-diff-lines", PipelineOptions.DEFAULT_LARGE_DIFF_LINES);
+    int hardCapLines =
+        parseIntOption(named, "--hard-cap-lines", PipelineOptions.DEFAULT_HARD_CAP_LINES);
     if (hardCapLines <= largeDiffLines) {
       throw new CraConfigException(
           "--hard-cap-lines 必须大于 --large-diff-lines: " + hardCapLines + " <= " + largeDiffLines);
@@ -335,6 +349,7 @@ final class CliArgs {
     SignoffConfig signoffConfig =
         new SignoffConfig(
             signoffEnabled, trustedAuthors, prAuthor == null ? "" : prAuthor, testsStatus);
+    AgentBudgetOverrides agentBudgets = agentBudgets(named, env);
     return new CraConfig(
         ownerRepo == null ? null : ownerRepo[0],
         ownerRepo == null ? null : ownerRepo[1],
@@ -355,7 +370,7 @@ final class CliArgs {
         largeDiffLines,
         hardCapLines,
         parseNitBudget(named),
-        parseLongOption(named, "--run-total-tokens", 500_000L),
+        parseLongOption(named, "--run-total-tokens", PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS),
         degradeAt.first(),
         degradeAt.second(),
         publishUnverified,
@@ -378,13 +393,14 @@ final class CliArgs {
         platform,
         gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
         semanticContextConfig,
-        includeTestFiles);
+        includeTestFiles,
+        agentBudgets);
   }
 
   /**
    * 语义上下文配置（M4e，ADR-0014）：flag/env 优先级 = 显式 flag &gt; 环境变量 &gt; 默认关闭。
    *
-   * <p>上限默认 maxFiles=2000 / maxFileBytes=262144 / sliceTokens=4000；越界由 {@link
+   * <p>上限默认 maxFiles=2000 / maxFileBytes=262144 / sliceTokens=6000；越界由 {@link
    * SemanticContextConfig} 构造期拒绝（CraConfigException → 退出码 2，05§3）。
    */
   private static SemanticContextConfig semanticContextConfig(
@@ -598,5 +614,49 @@ final class CliArgs {
     } catch (NumberFormatException e) {
       throw new CraConfigException("--pr 必须为正整数: " + value);
     }
+  }
+
+  /**
+   * 单代理预算覆盖（05§5 {@code agents.budget.<role>.*}）：flag &gt; 环境变量 &gt; 定义默认（03§6）。
+   *
+   * <p>flag 形如 {@code --verifier-input-tokens} / {@code --judge-output-tokens}；环境变量形如 {@code
+   * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}。键集由 {@link AgentBudgetOverrides#CONFIGURABLE_ROLES}
+   * 生成—— 未知角色的 flag 仍是"未知参数"（不静默接受拼写错误）。
+   */
+  static AgentBudgetOverrides agentBudgets(Map<String, String> named, Map<String, String> env) {
+    Map<String, String> values = new HashMap<>();
+    for (String role : AgentBudgetOverrides.CONFIGURABLE_ROLES) {
+      String envPrefix =
+          "CRA_AGENTS_BUDGET_" + role.toUpperCase(java.util.Locale.ROOT).replace('-', '_');
+      values.put(
+          "agents.budget." + role + ".input-tokens",
+          blankToNull(
+              firstNonBlank(
+                  named.get("--" + role + "-input-tokens"), env.get(envPrefix + "_INPUT_TOKENS"))));
+      values.put(
+          "agents.budget." + role + ".output-tokens",
+          blankToNull(
+              firstNonBlank(
+                  named.get("--" + role + "-output-tokens"),
+                  env.get(envPrefix + "_OUTPUT_TOKENS"))));
+    }
+    try {
+      return AgentBudgetOverrides.fromConfig(values);
+    } catch (IllegalArgumentException e) {
+      throw new CraConfigException("agents.budget 非法: " + e.getMessage());
+    }
+  }
+
+  private static java.util.Set<String> budgetFlags() {
+    java.util.Set<String> flags = new java.util.HashSet<>();
+    for (String role : AgentBudgetOverrides.CONFIGURABLE_ROLES) {
+      flags.add("--" + role + "-input-tokens");
+      flags.add("--" + role + "-output-tokens");
+    }
+    return java.util.Set.copyOf(flags);
+  }
+
+  private static String firstNonBlank(String first, String second) {
+    return first != null && !first.isBlank() ? first : second;
   }
 }

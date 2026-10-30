@@ -7,7 +7,7 @@ import java.util.Objects;
  * Test/Convention/Perf 三专角色定义（T2.3，03§3 角色表 + 03§6 预算行）。 条件触发判定在编排器（ReviewStage）；本类只做模板装载与 brief
  * 组装。
  *
- * <p>预算（03§6）：Test 12k/1k/2 轮 read_file 标准档；Convention 8k/1k/1 轮 无工具 轻档； Perf 16k/1k/2 轮 read_file
+ * <p>预算（03§6）：Test 16k/4k/2 轮 read_file 标准档；Convention 8k/1k/1 轮 无工具 轻档； Perf 16k/1k/2 轮 read_file
  * 标准档（按 chunk）。
  */
 public final class SpecialistReviewers {
@@ -20,7 +20,12 @@ public final class SpecialistReviewers {
     /** 预算（03§6 TestReviewer 行）。 */
     // v1.3.2：输出 1k→2k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
     // M3 实测 90 观测中 11 次输出预算击穿（12%）导致该角色零产出
-    private static final AgentBudget BUDGET = new AgentBudget(12_000, 4_000, 2, 120_000);
+    /** 默认输入预算（03§6 TestReviewer 行；agents.budget.test-reviewer.input-tokens 可覆盖）。 */
+    public static final long DEFAULT_INPUT_TOKENS = 16_000;
+
+    // AI Coding 放宽档（ADR-0015 §2.2 修订）：输入 12k → 16k（输出 4k 不变）
+    private static final AgentBudget BUDGET =
+        new AgentBudget(DEFAULT_INPUT_TOKENS, 4_000, 2, 120_000);
 
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("test-reviewer", "测试缺口评审");

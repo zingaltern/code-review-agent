@@ -2,6 +2,7 @@
 
 - 状态：accepted（2026-10-28，设计随实现落地；有界对比结果为验收证据，见 PR）
 - 修订：2026-10-30 §6——机械校验适用范围 bug → bug/test（security 明确暂不扩，理由见 §6）；降级逻辑、原因枚举、阈值与 trace 语义不变
+- 修订：2026-10-30 §2.2——调用点索引跨包有界（候选 30→60、条目 30→40、渲染 700→1000 token；import/import static 关联 + 方向标注 + 声明），并新增分层核对契约（04§2.6）；verifier 12k/1.5k→16k/2k、judge 16k/1k→20k/1.5k（AI Coding 放宽档，03§6）
 - 关联：03§4.2/§4.3/§6、04§2.4/§4.2、06§1.2、07§6.0、docs/audits/l3-flip-audit-2026-10-27.md、docs/audits/l3-stability-2026-10-27.md
 - 影响面：`cra-core`（VerdictJsonCodec、VerificationWave、VerificationBatchAssembler、CallSiteIndexer、FindingPromoter、PipelineDataLoader、ReviewPipeline）；`cra-agents` 模板（verifier/balanced-review.md、judge/arbitrate.md）；docs/03/04/06/07
 
@@ -90,16 +91,21 @@ CrossChecker 默认关闭不变；验证层预算与轮次不得无上限增长�
 
 - 符号抽取：bug 类 finding 的 evidence/title/failureMode 中出现的标识符 ∩ 该文件 diff 补丁中出现的
   标识符，去停用词，按出现顺序取 ≤3 个（确定性）；
-- 扫描范围：head 侧 `listFiles("**/*.java")` 返回的、与批次文件**同目录**的候选文件（≤30 个），
-  逐文件读取（复用 run 级 `path|sha` 内容缓存），按 `\b符号\b` 匹配行，条目 ≤30、渲染 ≤700 token；
+- 扫描范围（2026-10-30 修订：跨层有界）：候选集 = head 侧 `listFiles("**/*.java")` 返回的、与批次文件
+  **同目录**的文件 + 通过 `import` / `import static` 引用变更符号所属类型的文件（有语义索引时用其 import 关系；
+  无则退回同目录并声明"调用链不完整"）；候选文件 ≤60、条目 ≤40、渲染 ≤1000 token；
+  条目标注方向 `caller` / `self`；候选/条目截断与 import 不可得都写声明；
 - 不可得（无仓库树/无符号/读取失败）→ 记 trace `call_site_index{available=false, reason}`，
   简报如实声明"索引不可得"，**不静默**；
 - 索引文本属不可信内容（来自被评审仓库），随代码上下文一起 UNTRUSTED 定界；
-- 开销：一次 tree 调用 + ≤30 次文件读取/批次（命中缓存则更少）；**token 预算从 codeContext 预留**，
-  verifier 输入预算不变（≤12k）。
+- 近似性如实声明：词法级（不区分重载、不做 DI/运行期装配还原），Spring 运行期注入无法 100% 覆盖；
+- 索引可用时 verifier brief 追加**分层核对契约**固定段（controller→service→DAO；未列出的层级视为不可见），
+  与 BH-dataflow 共用同一段文本（04§2.6）；
+- 开销：一次 tree 调用 + ≤60 次文件读取/批次（命中缓存则更少，import 关系来自内存快照不额外读盘）；
+  **token 预算从 codeContext 预留**；verifier 输入预算 16k（2026-10-30 放宽），索引 ≤1000 计入预留。
 
 同时保留并显式提示既有能力：验证者可对**任意仓库内文件**发起 `followup_file` 补查（含调用方/测试），
-受控一次、预算内（03§6 轮次 2）。Judge 案件对 bug 类同样注入该索引（≤500 token，16k 案件预算内）。
+受控一次、预算内（03§6 轮次 2）。Judge 案件对 bug 类同样注入该索引（≤500 token，20k 案件预算内）。
 
 ### 2.3 提示词校准（verifier/judge）
 
