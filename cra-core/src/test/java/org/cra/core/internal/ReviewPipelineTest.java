@@ -784,7 +784,7 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("因预算截断丢弃 2 条候选（未发布）");
+    assertThat(summary).contains("因预算截断丢弃 2 条候选（未验证、未发布；02§4.4）");
     assertThat(summary).containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
     assertThat(result.stats().degradations()).contains("budget-truncate-85");
   }

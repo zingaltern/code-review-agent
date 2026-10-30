@@ -65,7 +65,10 @@ final class ReviewPublisher {
     boolean markerUnsafePath =
         pullRequest
             && ordered.stream()
-                .anyMatch(s -> !ReviewBodyRenderer.markerSafePath(s.finding().file()));
+                .anyMatch(
+                    s ->
+                        s.anchor() == AnchorStatus.INLINE
+                            && !ReviewBodyRenderer.markerSafePath(s.finding().file()));
     List<FindingAggregator.Scored> fallbacks =
         pullRequest
             ? ordered.stream()

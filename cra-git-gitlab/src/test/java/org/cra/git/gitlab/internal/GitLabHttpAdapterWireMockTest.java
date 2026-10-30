@@ -668,4 +668,52 @@ class GitLabHttpAdapterWireMockTest {
     wm.verify(0, putRequestedFor(anyUrl()));
     wm.verify(0, patchRequestedFor(anyUrl()));
   }
+
+  @Test
+  void listFilesAllowsExactlyPaginationLimitAndRejectsOverflow() {
+    // 边界：前 100 页各 100 条（10k），第 101 页为空 → 正常返回；
+    // 第 101 页仍有数据 → 显式失败（不静默截断）
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  PROJECT + "/repository/tree?ref=head9&recursive=true&per_page=100&page=" + page))
+              .willReturn(
+                  okJson(treePage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(PROJECT + "/repository/tree?ref=head9&recursive=true&per_page=100&page=101"))
+            .willReturn(okJson("[]")));
+    assertThat(adapter.listFiles(REPO, "head9", "**")).hasSize(10_000);
+
+    wm.resetAll();
+    for (int page = 1; page <= 101; page++) {
+      var stub =
+          get(
+              urlEqualTo(
+                  PROJECT
+                      + "/repository/tree?ref=head10&recursive=true&per_page=100&page="
+                      + page));
+      wm.stubFor(
+          stub.willReturn(
+              okJson(treePage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+    }
+    assertThatThrownBy(() -> adapter.listFiles(REPO, "head10", "**"))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("分页超过上限");
+  }
+
+  private static String treePage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"path\":\"p")
+          .append(page)
+          .append("_")
+          .append(i)
+          .append(".java\",\"type\":\"blob\"}");
+    }
+    return sb.append(']').toString();
+  }
 }

@@ -32,9 +32,17 @@ public record DiffResult(
       if (f.patch() == null) {
         continue;
       }
+      boolean inHunk = false;
       for (String line : f.patch().split("\n", -1)) {
-        if (line.startsWith("+++") || line.startsWith("---")) {
+        if (line.startsWith("@@")) {
+          inHunk = true;
           continue;
+        }
+        if (!inHunk) {
+          continue; // 文件头/元数据（--- a/、+++ b/、diff --git…）只在首个 hunk 之前
+        }
+        if (line.startsWith("\\")) {
+          continue; // "\ No newline at end of file"
         }
         if (line.startsWith("+") || line.startsWith("-")) {
           total++;

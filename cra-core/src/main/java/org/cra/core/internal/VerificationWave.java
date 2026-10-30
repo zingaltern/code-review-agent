@@ -180,6 +180,7 @@ final class VerificationWave {
     long tokensOut = 0;
     int batches = 0;
     for (Future<BatchOutcome> future : futures) {
+      batches++;
       try {
         // 09§6 强制：带超时 Future；单批卡住/异常收敛为该批验证不可得（UNVERIFIED），不炸穿整个 run
         BatchOutcome outcome =

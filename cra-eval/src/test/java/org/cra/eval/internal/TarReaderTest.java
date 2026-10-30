@@ -35,6 +35,22 @@ class TarReaderTest {
   }
 
   @Test
+  void paxSizeOverrideControlsPayloadLength() throws Exception {
+    // ustar 头 size 写 0，真实长度由 PAX size 覆盖：忽略覆盖会把负载当下一块头部
+    byte[] pax = paxRecord("size", "11");
+    byte[] content = "class B {}\n".getBytes(StandardCharsets.UTF_8);
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("B.java", 0, '0'), content);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.files()).isEqualTo(1);
+    assertThat(out.resolve("B.java")).hasContent("class B {}\n");
+  }
+
+  @Test
   void rejectsParentTraversalForFilesAndDirectories() throws Exception {
     Path out = Files.createDirectories(tmp.resolve("out"));
     assertThatThrownBy(

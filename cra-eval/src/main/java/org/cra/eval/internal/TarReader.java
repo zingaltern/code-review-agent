@@ -46,6 +46,7 @@ public final class TarReader {
     Path root = targetDir.toAbsolutePath().normalize();
     byte[] header = new byte[BLOCK];
     String pendingPathOverride = null;
+    Long pendingSizeOverride = null;
     while (true) {
       int read = readFully(tar, header);
       if (read == 0) {
@@ -74,9 +75,12 @@ public final class TarReader {
         }
         skipFully(tar, padded - size);
         if (type == 'x') {
-          String override = paxPath(payload);
-          if (override != null) {
-            pendingPathOverride = override;
+          PaxHeader pax = paxHeader(payload);
+          if (pax.path() != null) {
+            pendingPathOverride = pax.path();
+          }
+          if (pax.size() != null) {
+            pendingSizeOverride = pax.size();
           }
         } else if (type == 'L') {
           pendingPathOverride =
@@ -85,7 +89,15 @@ public final class TarReader {
         continue;
       }
       String path = pendingPathOverride != null ? pendingPathOverride : fullName;
+      if (type != 'x' && type != 'g' && type != 'L' && pendingSizeOverride != null) {
+        // PAX size 覆盖 ustar 头的 size 字段（大文件/非 ASCII 元数据时 GNU/bsdtar 会这样写）
+        size = pendingSizeOverride;
+        if (size < 0 || size > MAX_ENTRY_BYTES) {
+          throw new CraIntegrationException("PAX 覆盖的条目大小非法: " + size + "（" + path + "）");
+        }
+      }
       pendingPathOverride = null;
+      pendingSizeOverride = null;
       if (type == '5') {
         if (isAppleDouble(path)) {
           skipped++;
@@ -176,7 +188,9 @@ public final class TarReader {
    * POSIX PAX 记录：{@code "<length> <key>=<value>\n"}，length 为整条记录字节数；value 可含换行。 旧实现按 {@code
    * startsWith("path=")} 匹配，永远不命中——长路径/非 ASCII 路径会被按 ustar 截断名落盘。
    */
-  private static String paxPath(byte[] payload) {
+  private static PaxHeader paxHeader(byte[] payload) {
+    String path = null;
+    Long size = null;
     int position = 0;
     while (position < payload.length) {
       int space = position;
@@ -199,19 +213,31 @@ public final class TarReader {
       }
       int recordEnd = position + (int) recordLength;
       int contentEnd = recordEnd;
-      while (contentEnd > space + 1 && (payload[contentEnd - 1] == '\n')) {
+      while (contentEnd > space + 1 && payload[contentEnd - 1] == '\n') {
         contentEnd--;
       }
       String record =
           new String(payload, space + 1, contentEnd - (space + 1), StandardCharsets.UTF_8);
       int eq = record.indexOf('=');
-      if (eq > 0 && "path".equals(record.substring(0, eq))) {
-        return record.substring(eq + 1);
+      if (eq > 0) {
+        String key = record.substring(0, eq);
+        String value = record.substring(eq + 1);
+        if ("path".equals(key)) {
+          path = value;
+        } else if ("size".equals(key)) {
+          try {
+            size = Long.parseLong(value.strip());
+          } catch (NumberFormatException e) {
+            throw new CraIntegrationException("PAX size 非法: " + value);
+          }
+        }
       }
       position = recordEnd;
     }
-    return null;
+    return new PaxHeader(path, size);
   }
+
+  private record PaxHeader(String path, Long size) {}
 
   private static void verifyChecksum(byte[] header) {
     long stored = readOctalAllowZero(header, 148, 8);

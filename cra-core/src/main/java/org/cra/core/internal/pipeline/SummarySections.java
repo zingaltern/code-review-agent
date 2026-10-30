@@ -62,7 +62,7 @@ public final class SummarySections {
     }
     if (input.suppressedByTruncation() > 0) {
       // 02§4.4：截断必须可见——"发 N 条丢 M 条"不允许对护栏 invisible
-      out.add("因预算截断丢弃 " + input.suppressedByTruncation() + " 条候选（未发布）");
+      out.add("因预算截断丢弃 " + input.suppressedByTruncation() + " 条候选（未验证、未发布；02§4.4）");
     }
     return out;
   }

@@ -560,6 +560,17 @@ public final class ReviewPipeline implements Orchestrator {
       int rejectedCount = promotion.rejectedCount();
       int unverifiedCount = promotion.unverifiedCount();
 
+      // 验证侧不可得 → DEGRADED（必须在 Summary 渲染/发布前确定，否则正文与 RunStatus 矛盾）
+      if (degradations.stream()
+          .anyMatch(
+              d ->
+                  d.startsWith("verifier-budget-exhausted")
+                      || d.startsWith("verifier-timeout")
+                      || d.startsWith("verifier-batch-failed")
+                      || d.equals("verifier-unavailable"))) {
+        degraded = true;
+      }
+
       // T1.7/T1.6：severity 排序 + nit 预算 + 阶梯截断 top-10（02§4.4；只对确认集执行）
       FindingAggregator.Aggregation rawAggregation =
           FindingAggregator.aggregate(
@@ -616,15 +627,6 @@ public final class ReviewPipeline implements Orchestrator {
               unverifiedCount,
               outcome.templateVersions(),
               signoff);
-      if (degradations.stream()
-          .anyMatch(
-              d ->
-                  d.startsWith("verifier-budget-exhausted")
-                      || d.startsWith("verifier-timeout")
-                      || d.startsWith("verifier-batch-failed")
-                      || d.equals("verifier-unavailable"))) {
-        degraded = true;
-      }
       if (degradations.contains("summary-publish-failed")) {
         // Summary 未发出 = 无 DONE 标记 = 不完整发布（02§4.1），不得报 SUCCESS
         degraded = true;

@@ -11,10 +11,19 @@ class DiffResultTest {
   @Test
   void countsOnlyAddedAndRemovedContentLines() {
     String patch =
-        "@@ -1,3 +1,4 @@\n context one\n+added\n-removed\n+++not-a-header\n---not-a-header\n";
+        "@@ -1,3 +1,4 @@\n context one\n+added\n-removed\n"
+            + "++++ content starting with ++\n---- content starting with --\n";
     DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
     DiffResult diff = new DiffResult("base", "head", List.of(file), List.of());
-    assertThat(diff.totalPatchLines()).isEqualTo(2);
+    assertThat(diff.totalPatchLines()).isEqualTo(4);
+  }
+
+  @Test
+  void skipsFileHeadersBeforeFirstHunk() {
+    String patch = "--- a/A.java\n+++ b/A.java\n@@ -1 +1 @@\n-old\n+new\n";
+    DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
+    assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines())
+        .isEqualTo(2);
   }
 
   @Test
