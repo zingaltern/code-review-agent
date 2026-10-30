@@ -12,6 +12,17 @@ import org.junit.jupiter.api.io.TempDir;
 /** {@code cra-eval report} 端到端（离线回放）：参数 → 取数 → 聚合 → 文本/JSON（T3.4 验收 2）。 */
 class ReportCommandTest {
 
+  @org.junit.jupiter.api.BeforeAll
+  static void pinReplayTime() {
+    // fixture 的合并日期是固定的；不钉住"现在"，2026-10-30 起 PR-104 越过 7 天 ignored 窗口，分母会漂移
+    System.setProperty("cra.eval.replayNow", "2026-10-24T00:00:00Z");
+  }
+
+  @org.junit.jupiter.api.AfterAll
+  static void clearReplayTime() {
+    System.clearProperty("cra.eval.replayNow");
+  }
+
   @TempDir Path tmp;
 
   @Test

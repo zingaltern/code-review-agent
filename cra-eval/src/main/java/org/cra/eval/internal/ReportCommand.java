@@ -26,13 +26,29 @@ public final class ReportCommand {
   private ReportCommand() {}
 
   /**
+   * 回放时点：默认当前时间；系统属性 {@code cra.eval.replayNow}（ISO-8601）可固定， 使"合并满 7 天"等时点判定在测试与历史回放中可复现（fixture
+   * 合并日期是固定的）。
+   */
+  static Instant replayNow() {
+    String fixed = System.getProperty("cra.eval.replayNow");
+    if (fixed == null || fixed.isBlank()) {
+      return Instant.now();
+    }
+    try {
+      return Instant.parse(fixed.strip());
+    } catch (java.time.format.DateTimeParseException e) {
+      throw new CraConfigException("cra.eval.replayNow 非法（ISO-8601）: " + fixed);
+    }
+  }
+
+  /**
    * 执行 report。
    *
    * @param args 已解析参数
    * @param env 环境变量（token 兜底）
    */
   public static void execute(EvalCliArgs.ReportArgs args, Map<String, String> env) {
-    Instant now = Instant.now();
+    Instant now = replayNow();
     Duration windowLength = DurationSpec.parse(args.since());
     Instant since = now.minus(windowLength);
     ReportWindowSource source;
@@ -118,16 +134,26 @@ public final class ReportCommand {
       if (text == null || !text.matches("\\d+[dhw]")) {
         throw new CraConfigException("--since 非法: " + text + "（示例: 7d / 12h / 2w）");
       }
-      long value = Long.parseLong(text.substring(0, text.length() - 1));
+      long value;
+      try {
+        value = Long.parseLong(text.substring(0, text.length() - 1));
+      } catch (NumberFormatException e) {
+        // 超长数字曾是未捕获 NFE（退出码 1 + 栈），契约要求参数故障退出 2
+        throw new CraConfigException("--since 数字越界: " + text);
+      }
       if (value <= 0) {
         throw new CraConfigException("--since 必须为正: " + text);
       }
-      return switch (text.charAt(text.length() - 1)) {
-        case 'h' -> Duration.ofHours(value);
-        case 'd' -> Duration.ofDays(value);
-        case 'w' -> Duration.ofDays(value * 7);
-        default -> throw new CraConfigException("--since 非法: " + text);
-      };
+      try {
+        return switch (text.charAt(text.length() - 1)) {
+          case 'h' -> Duration.ofHours(value);
+          case 'd' -> Duration.ofDays(value);
+          case 'w' -> Duration.ofDays(Math.multiplyExact(value, 7));
+          default -> throw new CraConfigException("--since 非法: " + text);
+        };
+      } catch (ArithmeticException e) {
+        throw new CraConfigException("--since 超出可表示范围: " + text);
+      }
     }
   }
 }

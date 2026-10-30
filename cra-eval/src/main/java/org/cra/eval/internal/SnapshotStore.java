@@ -43,9 +43,14 @@ public final class SnapshotStore {
               + actualSha
               + "（快照与 meta 不匹配，请再生成）");
     }
-    Path target = cacheDir.resolve("snapshots").resolve(meta.caseId());
+    Path snapshotsRoot = cacheDir.resolve("snapshots").toAbsolutePath().normalize();
+    Path target = snapshotsRoot.resolve(meta.caseId()).normalize();
+    if (!target.startsWith(snapshotsRoot) || target.equals(snapshotsRoot)) {
+      // meta.json 来自数据集（外部输入）：case_id 必须落在缓存根内，否则 deleteRecursively 会删到树外
+      throw new CraConfigException("case_id 非法（路径逃逸缓存目录）: " + meta.caseId());
+    }
     Path marker = target.resolve(".cra-eval-snapshot-sha256");
-    if (Files.isRegularFile(target) && isMarker(marker, actualSha)) {
+    if (Files.isDirectory(target) && isMarker(marker, actualSha)) {
       return target;
     }
     try {
@@ -53,8 +58,12 @@ public final class SnapshotStore {
         deleteRecursively(target);
       }
       Files.createDirectories(target);
+      TarReader.Result result;
       try (InputStream in = new GZIPInputStream(Files.newInputStream(tgz))) {
-        TarReader.untar(in, target);
+        result = TarReader.untar(in, target);
+      }
+      if (result.files() == 0) {
+        throw new CraConfigException("快照为空（tar 内无常规文件，可能生成失败或被截断）: " + tgz);
       }
       Files.writeString(marker, actualSha, StandardCharsets.UTF_8);
       return target;

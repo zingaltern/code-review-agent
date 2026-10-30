@@ -96,15 +96,16 @@ final class TarWriter {
     put(header, 257, 6, "ustar");
     header[262] = 0;
     put(header, 263, 2, "00");
+    if (!prefix.isEmpty()) {
+      put(header, 345, 155, prefix);
+    }
+    // 校验和必须覆盖含 prefix 的完整头（先算后写 prefix 会产出校验和不匹配的 tar）
     int checksum = 0;
     for (byte b : header) {
       checksum += b & 0xff;
     }
     String sum = String.format("%06o", checksum);
     put(header, 148, 8, sum + "\0 ");
-    if (!prefix.isEmpty()) {
-      put(header, 345, 155, prefix);
-    }
     return header;
   }
 
