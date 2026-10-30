@@ -35,8 +35,17 @@ import org.cra.core.internal.pipeline.FindingAggregator;
  */
 final class VerificationBatchAssembler {
 
-  /** 补查文件内容的 token 上限（03§6 verifier 12k 输入预算内为补查预留）。 */
+  /** 补查文件内容的 token 上限（verifier 输入预算内为补查预留；按预算二次收缩）。 */
   private static final long FOLLOWUP_TOKEN_CAP = 6_000;
+
+  /** 固定预留：系统提示、UNTRUSTED 定界、输出契约与估算误差余量（不可裁剪）。 */
+  private static final long MISC_RESERVE = 1_200;
+
+  /** 代码上下文最小配额（低于此值验证者无从核对代码行——预留超限时优先让代码可见）。 */
+  private static final long MIN_CODE_CONTEXT = 1_000;
+
+  /** 可裁剪段（调用点索引/切片）的最小注入配额（更小只够写截断声明，不如明确声明未注入）。 */
+  private static final long MIN_APPEND_BUDGET = 200;
 
   /** 被引 commit diff 节选上限（03§4.2：每 commit ≤1k token，至多 3 个 commit）。 */
   private static final long CITED_COMMIT_TOKEN_CAP = 1_000;
@@ -176,36 +185,63 @@ final class VerificationBatchAssembler {
       CallSiteIndex callSiteIndex,
       String crossFileContext) {
     List<VerificationItem> items = batch.stream().map(s -> toItem(s.finding())).toList();
-    String findingsText = renderFindingsText(batch);
+    String findingsText = renderItemsText(items);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
     String slices = crossFileContext == null ? "" : crossFileContext;
     String citedEvidence = renderCitedEvidence(batch, citedResolver, repo);
     String policySections = renderPolicySections(policy, batch);
-    long indexReserve = callSiteIndex == null ? 0 : CallSiteIndex.RENDER_TOKEN_CAP;
-    long sliceTokens = TokenMath.estimateTokens(slices);
     // 预留必须覆盖最终 brief 的全部非代码段（含被引证据、策略、测试清单与系统提示余量），
-    // 否则 context 类批次会在 AgentRunner 发送前被 12k 硬限杀掉 → UNVERIFIED 不发布
-    long reserved =
+    // 否则 context 类批次会在 AgentRunner 发送前被输入硬限杀掉 → UNVERIFIED 不发布。
+    // 索引（≤1000）与切片（≤6000 默认）是"可裁剪"预留：合计不超过 预算 − 固定段 − 最小代码上下文，
+    // 保证 verifier 16k 下不越界（ADR-0015 §2.2 修订、04§2.2）。
+    // 分层核对契约：仅调用点索引可用时注入（可信指令段，不进 UNTRUSTED 定界；04§2.6）
+    String layerContract =
+        callSiteIndex != null && callSiteIndex.available()
+            ? org.cra.agents.api.LayerContract.SECTION
+            : "";
+    long fixedReserved =
         TokenMath.estimateTokens(findingsText)
             + TokenMath.estimateTokens(citedEvidence)
             + TokenMath.estimateTokens(policySections)
             + TokenMath.estimateTokens(testIndex)
-            + 2_000
-            + indexReserve
-            + sliceTokens;
-    long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
+            + TokenMath.estimateTokens(layerContract)
+            + MISC_RESERVE;
+    long discretionary = Math.max(0, budget.maxInputTokens() - fixedReserved - MIN_CODE_CONTEXT);
+    String indexText = "";
+    if (callSiteIndex != null) {
+      indexText =
+          discretionary >= MIN_APPEND_BUDGET
+              ? callSiteIndex.render(Math.min(CallSiteIndex.RENDER_TOKEN_CAP, discretionary))
+              : "## 受影响符号的调用点索引\n（验证预算不足，索引未注入；如需调用方证据可用 followup_file 补查）\n";
+    }
+    long indexTokens = TokenMath.estimateTokens(indexText);
+    long sliceTokens = TokenMath.estimateTokens(slices);
+    long availableForSlice = Math.max(0, discretionary - indexTokens);
+    String sliceText = "";
+    if (!slices.isBlank()) {
+      if (sliceTokens <= availableForSlice) {
+        sliceText = slices;
+        sliceTokens = TokenMath.estimateTokens(sliceText);
+      } else if (availableForSlice >= MIN_APPEND_BUDGET) {
+        sliceText = capLines(slices, availableForSlice);
+        sliceTokens = TokenMath.estimateTokens(sliceText);
+      } else {
+        sliceText = "（L2 跨文件切片因验证预算不足未注入）";
+        sliceTokens = TokenMath.estimateTokens(sliceText);
+      }
+    }
+    long contextBudget =
+        Math.max(
+            MIN_CODE_CONTEXT, budget.maxInputTokens() - fixedReserved - indexTokens - sliceTokens);
     String codeContext = renderCodeContext(file, batch, headFiles, diff, contextBudget);
     if (callSiteIndex != null) {
-      codeContext =
-          codeContext.isBlank()
-              ? callSiteIndex.render()
-              : codeContext + "\n" + callSiteIndex.render();
+      codeContext = codeContext.isBlank() ? indexText : codeContext + "\n" + indexText;
     }
-    if (!slices.isBlank()) {
-      codeContext = codeContext.isBlank() ? slices : codeContext + "\n\n" + slices;
+    if (!sliceText.isBlank()) {
+      codeContext = codeContext.isBlank() ? sliceText : codeContext + "\n\n" + sliceText;
     }
     return new VerificationBatchInput(
-        file, items, codeContext, citedEvidence, policySections, "", testIndex);
+        file, items, codeContext, citedEvidence, policySections, "", testIndex, layerContract);
   }
 
   /**
@@ -242,15 +278,27 @@ final class VerificationBatchAssembler {
   /**
    * 组装第二轮补查输入（03§4.2 受控补查：至多一次）。
    *
+   * <p>补查文本追加在既有代码上下文之上；代码上下文按剩余预算等量收缩，保证第二轮 brief 仍在验证者输入硬限内 （预算可取覆盖值， 不再按固定 9k 估算——05§5
+   * agents.budget.verifier.*）。
+   *
    * @param base 第一轮输入
-   * @param followupText 补查文件全文（截到 FOLLOWUP_TOKEN_CAP）
+   * @param followupText 补查文件全文（先截到 {@link #FOLLOWUP_TOKEN_CAP}）
+   * @param budget 验证者输入预算
    * @return 第二轮输入
    */
-  static VerificationBatchInput withFollowup(VerificationBatchInput base, String followupText) {
+  static VerificationBatchInput withFollowup(
+      VerificationBatchInput base, String followupText, AgentBudget budget) {
     String followup = capLines(followupText, FOLLOWUP_TOKEN_CAP);
-    // 补查文本追加在既有代码上下文之上：等量收缩上下文，保证第二轮 brief 仍在 verifier 输入硬限内
     long followupTokens = TokenMath.estimateTokens(followup);
-    long contextCap = Math.max(1_000, 9_000 - followupTokens);
+    long fixedReserved =
+        TokenMath.estimateTokens(renderItemsText(base.items()))
+            + TokenMath.estimateTokens(base.citedEvidence())
+            + TokenMath.estimateTokens(base.policySections())
+            + TokenMath.estimateTokens(base.testFileIndex())
+            + TokenMath.estimateTokens(base.layerContractSection())
+            + MISC_RESERVE
+            + followupTokens;
+    long contextCap = Math.max(MIN_CODE_CONTEXT, budget.maxInputTokens() - fixedReserved);
     return new VerificationBatchInput(
         base.file(),
         base.items(),
@@ -258,7 +306,8 @@ final class VerificationBatchAssembler {
         base.citedEvidence(),
         base.policySections(),
         followup,
-        base.testFileIndex());
+        base.testFileIndex(),
+        base.layerContractSection());
   }
 
   /**
@@ -378,8 +427,12 @@ final class VerificationBatchAssembler {
   }
 
   private static String renderFindingsText(List<FindingAggregator.Scored> batch) {
-    return batch.stream()
-        .map(s -> toItem(s.finding()))
+    return renderItemsText(batch.stream().map(s -> toItem(s.finding())).toList());
+  }
+
+  /** 待复核结论渲染（批次组装与预算回算共用同一形态，避免两处格式漂移）。 */
+  private static String renderItemsText(List<VerificationItem> items) {
+    return items.stream()
         .map(
             item ->
                 "### id="

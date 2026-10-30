@@ -13,6 +13,8 @@ import java.util.Map;
 import java.util.Set;
 import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
+import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.support.CronExpression;
@@ -62,12 +64,13 @@ import org.springframework.scheduling.support.CronExpression;
  * @param eventHistoryRetryBackoffMillis 重试退避基数（毫秒）
  * @param eventHistoryMaxBytes 事件源单次读取字节上限
  * @param eventHistoryMaxEvents 单次入库事件上限
- * @param runTotalTokens run 级 token 预算（02§4.4，默认 500k）
+ * @param runTotalTokens run 级 token 预算（02§4.4，默认 800k）
  * @param semanticContextEnabled 语义上下文（L2 跨文件切片）开关（M4e，ADR-0014；CRA_SEMANTIC_CONTEXT_ENABLED，默认
  *     false——关闭不动基线行为）
  * @param semanticContextMaxFiles 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES，默认 2000）
  * @param semanticContextMaxFileBytes 单文件字节上限（CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES，默认 262144）
- * @param semanticContextSliceTokens 单 brief 切片 token 上限（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS，默认 4000）
+ * @param semanticContextSliceTokens 单 brief 切片 token 上限（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS，默认 6000）
+ * @param agentBudgets 单代理预算覆盖（05§5 agents.budget.&lt;role&gt;.*；空 = 各定义默认，03§6）
  */
 public record ServerConfig(
     String webhookSecret,
@@ -112,7 +115,8 @@ public record ServerConfig(
     boolean semanticContextEnabled,
     int semanticContextMaxFiles,
     long semanticContextMaxFileBytes,
-    long semanticContextSliceTokens) {
+    long semanticContextSliceTokens,
+    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
@@ -182,6 +186,8 @@ public record ServerConfig(
     if (eventHistoryCron == null || eventHistoryCron.isBlank()) {
       throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_CRON 不能为空");
     }
+    agentBudgets =
+        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
     eventHistoryCron = eventHistoryCron.strip();
     try {
       CronExpression.parse(eventHistoryCron);
@@ -239,11 +245,36 @@ public record ServerConfig(
         longValue(env, "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS", 500),
         longValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_BYTES", 67_108_864L),
         intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS", 5_000),
-        longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", 500_000L),
+        longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS),
         bool(env, "CRA_SEMANTIC_CONTEXT_ENABLED", false),
         intValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILES", 2_000),
         longValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", 262_144L),
-        longValue(env, "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS", 4_000L));
+        longValue(
+            env, "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS", SemanticContextOptions.DEFAULT_SLICE_TOKENS),
+        agentBudgetOverrides(env));
+  }
+
+  /**
+   * 单代理预算覆盖（05§5 {@code agents.budget.<role>.*}；环境变量形如 {@code
+   * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}）。非法值失败于启动期（fail fast）。
+   *
+   * @param env Spring Environment
+   * @return 覆盖（无配置时为空覆盖）
+   */
+  static org.cra.agents.api.AgentBudgetOverrides agentBudgetOverrides(Environment env) {
+    java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+    for (String role : org.cra.agents.api.AgentBudgetOverrides.CONFIGURABLE_ROLES) {
+      String prefix = "CRA_AGENTS_BUDGET_" + role.toUpperCase(Locale.ROOT).replace('-', '_');
+      values.put(
+          "agents.budget." + role + ".input-tokens", env.getProperty(prefix + "_INPUT_TOKENS"));
+      values.put(
+          "agents.budget." + role + ".output-tokens", env.getProperty(prefix + "_OUTPUT_TOKENS"));
+    }
+    try {
+      return org.cra.agents.api.AgentBudgetOverrides.fromConfig(values);
+    } catch (IllegalArgumentException e) {
+      throw new CraConfigException("agents.budget 非法: " + e.getMessage());
+    }
   }
 
   /**

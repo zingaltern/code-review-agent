@@ -85,13 +85,15 @@ final class ReviewAgentDispatcher {
         policySection,
         runId,
         trace,
-        CrossFileSlices.empty());
+        CrossFileSlices.empty(),
+        "");
   }
 
   /**
    * 按 chunk 派发（含 L2 跨文件切片；ADR-0014：仅 BH-dataflow / Security 注入，切片 token 从 L1 预算扣除）。
    *
    * @param slices 本 chunk 的 L2 切片（未启用/不可得为 {@link CrossFileSlices#empty()}）
+   * @param layerContractSection 分层核对契约（仅索引可用时非空；模板未引用该段则无副作用）
    */
   TaskHandle<DispatchOutcome> submitChunk(
       SubAgent<ReviewAgentInput> agent,
@@ -105,7 +107,8 @@ final class ReviewAgentDispatcher {
       String policySection,
       String runId,
       TraceWriter trace,
-      CrossFileSlices slices) {
+      CrossFileSlices slices,
+      String layerContractSection) {
     Map<String, FileContent> scoped = scopedFiles(chunk, headFiles);
     boolean sliceRole = CrossFileSliceAssembler.isSliceRole(agent.role().id());
     long sliceTokens = sliceRole ? slices.estimatedTokens() : 0L;
@@ -132,7 +135,8 @@ final class ReviewAgentDispatcher {
                 policySection,
                 runId,
                 trace,
-                sliceRole ? slices : CrossFileSlices.empty()));
+                sliceRole ? slices : CrossFileSlices.empty(),
+                sliceRole ? layerContractSection : ""));
   }
 
   /** 全 PR 级专角色派发（Test/Convention：仅 L0 diff，无窗口/全文；scope = 全部 chunk 文件）。 */
@@ -161,7 +165,8 @@ final class ReviewAgentDispatcher {
                 policySection,
                 runId,
                 trace,
-                CrossFileSlices.empty()));
+                CrossFileSlices.empty(),
+                ""));
   }
 
   /**
@@ -195,7 +200,8 @@ final class ReviewAgentDispatcher {
                           "",
                           materials.historyText(),
                           materials.trustedSections(),
-                          hasTools ? whole.scoped().keySet() : EMPTY_PATHS);
+                          hasTools ? whole.scoped().keySet() : EMPTY_PATHS,
+                          "");
                   long estimated =
                       TokenMath.estimateTokens(
                           materials.diffDigest()
@@ -224,7 +230,8 @@ final class ReviewAgentDispatcher {
       String policySection,
       String runId,
       TraceWriter trace,
-      CrossFileSlices slices) {
+      CrossFileSlices slices,
+      String layerContractSection) {
     return executeGuarded(
         agent,
         scope,
@@ -240,7 +247,8 @@ final class ReviewAgentDispatcher {
                   slices.text(), // L2 跨文件切片（04§1；ADR-0014，仅 dataflow/security 注入）
                   extraSection,
                   policySection,
-                  hasTools ? scoped.keySet() : EMPTY_PATHS);
+                  hasTools ? scoped.keySet() : EMPTY_PATHS,
+                  layerContractSection);
           return new Prepared(
               input,
               hasTools,

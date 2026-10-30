@@ -51,6 +51,7 @@ import org.cra.common.run.ReviewMode;
  * @param gitlab GitLab 连接设置（仅 platform=gitlab 时生效；密钥只从环境/文件读，05§6）
  * @param semanticContext 语义上下文（L2 跨文件切片）配置（M4e，ADR-0014；默认关闭）
  * @param includeTestFiles 测试文件是否进入评审范围（02§4.4；`--review-tests` / `CRA_REVIEW_TESTS`，默认 false）
+ * @param agentBudgets 单代理预算覆盖（05§5 agents.budget.&lt;role&gt;.*；空 = 各定义默认，03§6）
  */
 public record CraConfig(
     String repoOwner,
@@ -93,11 +94,14 @@ public record CraConfig(
     String platform,
     GitLabSettings gitlab,
     SemanticContextConfig semanticContext,
-    boolean includeTestFiles) {
+    boolean includeTestFiles,
+    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
     semanticContext = semanticContext == null ? SemanticContextConfig.defaults() : semanticContext;
+    agentBudgets =
+        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
     platform =
         platform == null || platform.isBlank()
             ? "github"
@@ -228,7 +232,8 @@ public record CraConfig(
         "github",
         GitLabSettings.none(),
         SemanticContextConfig.defaults(),
-        false);
+        false,
+        org.cra.agents.api.AgentBudgetOverrides.none());
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -340,7 +345,8 @@ public record CraConfig(
         "github",
         GitLabSettings.none(),
         SemanticContextConfig.defaults(),
-        false);
+        false,
+        org.cra.agents.api.AgentBudgetOverrides.none());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -387,7 +393,8 @@ public record CraConfig(
         platform(),
         gitlab(),
         semanticContext(),
-        includeTestFiles());
+        includeTestFiles(),
+        agentBudgets());
   }
 
   /**
@@ -438,6 +445,7 @@ public record CraConfig(
         platform(),
         gitlab(),
         semanticContext(),
-        includeTestFiles());
+        includeTestFiles(),
+        agentBudgets());
   }
 }

@@ -318,14 +318,14 @@ class VerifierAntiRefutePipelineTest {
         .contains("调用点索引")
         .contains("JsonParser.java:7")
         .contains("getTextBuffer")
-        .contains("索引不完整");
+        .contains("调用链不完整");
     long inputTokens =
         TokenMath.estimateTokens(
             scripted.verifierCalls.get(0).systemPrompt()
                 + scripted.verifierCalls.get(0).userPrompt());
     System.out.println(
         "MEASURED verifier input tokens (bug brief + call-site index) = " + inputTokens);
-    assertThat(inputTokens).isLessThanOrEqualTo(12_000);
+    assertThat(inputTokens).isLessThanOrEqualTo(16_000);
     assertThat(traceOf(result))
         .contains("\"event\":\"call_site_index\"")
         .contains("\"available\":true");

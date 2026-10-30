@@ -23,12 +23,12 @@ class CliArgsTest {
 
   @Test
   void m1ReviewAndBudgetOptionsWithDefaults() {
-    // 05§5 review.* 与 agents.budget：缺省即文档基准值
+    // 05§5 review.* 与 agents.budget：缺省即文档基准值（AI Coding 放宽档：4000/16000/800k）
     CraConfig config = CliArgs.parse(baseArgs(), ENV);
-    assertThat(config.largeDiffLines()).isEqualTo(2000);
-    assertThat(config.hardCapLines()).isEqualTo(8000);
+    assertThat(config.largeDiffLines()).isEqualTo(4_000);
+    assertThat(config.hardCapLines()).isEqualTo(16_000);
     assertThat(config.nitBudget()).isEqualTo(3);
-    assertThat(config.runTotalTokens()).isEqualTo(500_000L);
+    assertThat(config.runTotalTokens()).isEqualTo(800_000L);
     assertThat(config.degradeAtFirst()).isEqualTo(0.70);
     assertThat(config.degradeAtSecond()).isEqualTo(0.85);
     assertThat(config.publishUnverified()).isEqualTo("never");
@@ -254,7 +254,7 @@ class CliArgsTest {
     assertThat(defaults.semanticContext().enabled()).isFalse();
     assertThat(defaults.semanticContext().maxFiles()).isEqualTo(2_000);
     assertThat(defaults.semanticContext().maxFileBytes()).isEqualTo(262_144L);
-    assertThat(defaults.semanticContext().sliceTokens()).isEqualTo(4_000L);
+    assertThat(defaults.semanticContext().sliceTokens()).isEqualTo(6_000L);
 
     CraConfig enabled =
         CliArgs.parse(
@@ -396,6 +396,62 @@ class CliArgsTest {
             () -> CliArgs.parse(new String[] {"--local", "--repo", "bad-format"}, EMPTY_ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("owner/name");
+  }
+
+  @Test
+  void agentBudgetOverridesFromEnvAndFlags() {
+    // 05§5 agents.budget.<role>.*：flag > 环境变量 > 定义默认（03§6）
+    assertThat(CliArgs.parse(baseArgs(), ENV).agentBudgets().isEmpty()).isTrue();
+
+    java.util.Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS", "18000");
+    env.put("CRA_AGENTS_BUDGET_VERIFIER_OUTPUT_TOKENS", "2500");
+    CraConfig fromEnv = CliArgs.parse(baseArgs(), env);
+    assertThat(
+            fromEnv
+                .agentBudgets()
+                .apply(org.cra.agents.api.AgentsAssembly.createVerifier())
+                .budget()
+                .maxInputTokens())
+        .isEqualTo(18_000L);
+    assertThat(
+            fromEnv
+                .agentBudgets()
+                .apply(org.cra.agents.api.AgentsAssembly.createVerifier())
+                .budget()
+                .maxOutputTokens())
+        .isEqualTo(2_500L);
+
+    CraConfig fromFlag = CliArgs.parse(concat(baseArgs(), "--judge-input-tokens", "24000"), env);
+    assertThat(
+            fromFlag
+                .agentBudgets()
+                .apply(org.cra.agents.api.AgentsAssembly.createJudge())
+                .budget()
+                .maxInputTokens())
+        .isEqualTo(24_000L);
+    // flag 覆盖环境变量（同角色另一维度仍取环境值）
+    CraConfig flagWins = CliArgs.parse(concat(baseArgs(), "--verifier-input-tokens", "20000"), env);
+    assertThat(
+            flagWins
+                .agentBudgets()
+                .apply(org.cra.agents.api.AgentsAssembly.createVerifier())
+                .budget()
+                .maxInputTokens())
+        .isEqualTo(20_000L);
+
+    assertThatThrownBy(
+            () -> CliArgs.parse(concat(baseArgs(), "--verifier-input-tokens", "abc"), ENV))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("agents.budget");
+    assertThatThrownBy(
+            () -> CliArgs.parse(concat(baseArgs(), "--verifier-output-tokens", "100"), ENV))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("agents.budget");
+    // 未知角色的 flag 仍是未知参数（不静默接受拼写错误）
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--nope-input-tokens", "1"), ENV))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("未知参数");
   }
 
   private static String[] concat(String[] a, String... b) {

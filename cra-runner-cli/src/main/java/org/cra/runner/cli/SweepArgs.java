@@ -149,10 +149,10 @@ final class SweepArgs {
             llmModel,
             named.getOrDefault("--run-root", ".cra/runs"),
             named.getOrDefault("--workspace", "."),
-            2000,
-            8000,
+            org.cra.core.api.PipelineOptions.DEFAULT_LARGE_DIFF_LINES,
+            org.cra.core.api.PipelineOptions.DEFAULT_HARD_CAP_LINES,
             3,
-            500_000L,
+            org.cra.core.api.PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS,
             0.70,
             0.85,
             "never",
@@ -175,7 +175,8 @@ final class SweepArgs {
             gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
             SemanticContextConfig.defaults(),
             // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
-            Boolean.parseBoolean(envOr(env, "CRA_REVIEW_TESTS", "false")));
+            Boolean.parseBoolean(envOr(env, "CRA_REVIEW_TESTS", "false")),
+            CliArgs.agentBudgets(named, env));
     return new Parsed(config, since, maxPrs);
   }
 

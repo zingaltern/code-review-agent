@@ -134,9 +134,10 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 
 ### 4.4 成本与预算
 
-- 预算三层：子代理级（token/轮次/时间）→ chunk 级 → run 级（默认 **500k**）；LlmGateway 硬性执行，超限杀代理记 `BUDGET_EXCEEDED`；
-- **run 级降档阶梯（v1.2.1 阈值重校）**：消耗 <70% 正常（旗舰算术示例 330k/500k = 66%，正常 PR 不触发任何降档——v1.2 的 400k 预算下该示例为 82.5%，坐在旧 80% 档之上，会使 top-10 截断与 `suppressed_by_truncation>0` 报警常态化，属护栏"狼来了"）；≥70% → 砍 light 角色与 1 个视角；≥85% → 候选 finding 按 severity 排序只验证 top-10；100% → 终止剩余代理，DEGRADED 收尾；
+- 预算三层：子代理级（token/轮次/时间）→ chunk 级 → run 级（默认 **800k**；2026-10-30 AI Coding 放宽档，原 500k）；LlmGateway 硬性执行，超限杀代理记 `BUDGET_EXCEEDED`；单代理预算默认见 03§6（可用 `agents.budget.<role>.*` 覆盖，05§5）；
+- **run 级降档阶梯（阈值不变：70%/85%/100%）**：消耗 <70% 正常（旗舰算术示例 330k/800k = 41%，正常 PR 不触发任何降档——v1.2 的 400k 预算下该示例为 82.5%，坐在旧 80% 档之上，会使 top-10 截断与 `suppressed_by_truncation>0` 报警常态化，属护栏"狼来了"；v1.2.1 上调至 500k 后为 66%）；≥70% → 砍 light 角色与 1 个视角；≥85% → 候选 finding 按 severity 排序只验证 top-10（**截断数 top-10 不变**）；100% → 终止剩余代理，DEGRADED 收尾；
 - **截断必须可见（梯度沉默护栏）**：top-10 截断与预算终止产生的**丢弃候选数**计入 run stats（`suppressed_by_truncation`）并在 Summary 中逐条声明"因预算截断未验证 N 条候选"；该计数进入 L3 健康度（06§1.3）与门禁趋势监控——"发 1 条丢 9 条"不允许对护栏 invisible；
+- 大 diff 策略（2026-10-30 放宽档）：>4000 行自动降为 Quick 质量（原 2000）；>16000 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围（原 8000）。两项阈值均可配（`review.large-diff-lines` / `review.hard-cap-lines`），行数口径见 04§2.2。
 - 大 diff 策略：>2k 行自动降为 Quick 质量；>8k 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围。
 - **评审范围默认不含测试文件（v1.4.1 产品默认）**：`src/test/**` 与 `*Test.java` / `*Tests.java` 默认不进入评审计划——单测正确性由 `mvn verify` 与测试自身保障，评审只为生产代码与文档投入 token。Summary 覆盖声明写明"测试文件按策略不评审：N 个"；`--review-tests` / `CRA_REVIEW_TESTS=true`（`review.include-test-files`）恢复评审，REVIEW.md 的 `Skip paths` 与其**叠加**生效（开关打开也不绕过 skip 段）。三条边界：① TestReviewer 触发比例固定按**过滤前全量 diff** 统计（否则"生产+测试同改"的 PR 会误触发）；② TestReviewer brief 仍列出按策略跳过的测试文件（"缺测试覆盖"结论的输入面不变）；③ 纯测试 PR（无任何可评审文件）Summary 明确"仅测试文件/无可评审变更，按策略不评审"，RunStatus `SUCCESS`、DONE 标记照旧（幂等语义不变）。
 

@@ -9,6 +9,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.cra.agents.api.BugHunterDefinition;
+import org.cra.agents.api.LayerContract;
 import org.cra.agents.api.ReviewAgentInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
@@ -362,6 +363,8 @@ public final class ReviewStage {
           ChunkPlanner.Chunk chunk = chunks.get(chunkIndex++);
           // M4e（ADR-0014）：本 chunk 的 L2 跨文件切片（关闭/不可得时为空，不产生声明）
           CrossFileSlices slices = semanticContext.slicesFor(chunk.files());
+          // 分层核对契约（04§2.6）：仅跨层索引可用时注入（dataflow 模板引用该段，其余模板无占位符）
+          String layerContract = semanticContext.available() ? LayerContract.SECTION : "";
           sliceNotes.addAll(slices.notes());
           for (BugHunterDefinition.Perspective perspective : effective) {
             SubAgent<ReviewAgentInput> agent = agentOf(perspective);
@@ -378,7 +381,8 @@ public final class ReviewStage {
                     policySection,
                     runId,
                     trace,
-                    slices));
+                    slices,
+                    layerContract));
           }
           if (securityEnabled) {
             futures.add(
@@ -394,7 +398,8 @@ public final class ReviewStage {
                     policySection,
                     runId,
                     trace,
-                    slices));
+                    slices,
+                    layerContract));
           }
           if (perfEnabled) {
             futures.add(
@@ -410,7 +415,8 @@ public final class ReviewStage {
                     policySection,
                     runId,
                     trace,
-                    slices));
+                    slices,
+                    layerContract));
           }
         }
         if (futures.isEmpty()) {

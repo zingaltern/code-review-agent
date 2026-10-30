@@ -373,7 +373,8 @@ final class VerificationWave {
           followupAttempted = true;
           followupText = followupContent.get();
           AgentBrief followupBrief =
-              verifier.buildBrief(VerificationBatchAssembler.withFollowup(input, followupText));
+              verifier.buildBrief(
+                  VerificationBatchAssembler.withFollowup(input, followupText, verifier.budget()));
           trace.persistBrief(followupBrief, briefSuffix(file) + "-fu");
           AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> followupRun =
               agentRunner.executeParsed(
@@ -525,6 +526,9 @@ final class VerificationWave {
             "available", index.available(),
             "reason", index.reason(),
             "files_scanned", index.filesScanned(),
+            "candidate_files", index.candidateFiles(),
+            "imports_available", index.importsAvailable(),
+            "callers", index.callerCandidates(),
             "entries", index.entries().size()));
     return index;
   }
@@ -558,7 +562,9 @@ final class VerificationWave {
         "（首轮上下文超限，已缩减为锚行窗口；请基于结论自带证据判定）",
         input.citedEvidence(),
         input.policySections(),
-        input.followupContext());
+        input.followupContext(),
+        input.testFileIndex(),
+        input.layerContractSection());
   }
 
   private static Map<String, PerFinding> allUnavailable(List<FindingAggregator.Scored> batch) {

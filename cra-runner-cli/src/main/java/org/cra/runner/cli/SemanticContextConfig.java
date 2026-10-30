@@ -11,7 +11,7 @@ import org.cra.core.api.SemanticContextOptions;
  * @param enabled 总开关（CRA_SEMANTIC_CONTEXT_ENABLED；默认 false）
  * @param maxFiles 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES；默认 2000）
  * @param maxFileBytes 单文件字节上限（CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES；默认 256 KiB）
- * @param sliceTokens 单 brief 切片 token 上限（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS；默认 4000）
+ * @param sliceTokens 单 brief 切片 token 上限（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS；默认 6000）
  */
 record SemanticContextConfig(boolean enabled, int maxFiles, long maxFileBytes, long sliceTokens) {
 
@@ -36,7 +36,8 @@ record SemanticContextConfig(boolean enabled, int maxFiles, long maxFileBytes, l
    * @return 默认配置
    */
   static SemanticContextConfig defaults() {
-    return new SemanticContextConfig(false, 2_000, 262_144L, 4_000L);
+    return new SemanticContextConfig(
+        false, 2_000, 262_144L, SemanticContextOptions.DEFAULT_SLICE_TOKENS);
   }
 
   /**

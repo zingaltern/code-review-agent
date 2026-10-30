@@ -21,6 +21,7 @@ import org.cra.common.text.Texts;
  * @param policySections REVIEW.md 证据要求段 + Product context/Known incidents 相关条目（可信）
  * @param followupContext 补查文件全文（不可信；第一轮为空串）
  * @param testFileIndex 仓库测试文件清单（仅 test 类批次；不可信；无则空串）
+ * @param layerContractSection 分层核对契约（编排器注入的可信指令段；仅调用点索引可用时非空，04§2.6）
  */
 public record VerificationBatchInput(
     String file,
@@ -29,7 +30,8 @@ public record VerificationBatchInput(
     String citedEvidence,
     String policySections,
     String followupContext,
-    String testFileIndex) {
+    String testFileIndex,
+    String layerContractSection) {
 
   public VerificationBatchInput {
     Texts.requireNonBlank(file, "file");
@@ -42,6 +44,37 @@ public record VerificationBatchInput(
     policySections = policySections == null ? "" : policySections;
     followupContext = followupContext == null ? "" : followupContext;
     testFileIndex = testFileIndex == null ? "" : testFileIndex;
+    layerContractSection = layerContractSection == null ? "" : layerContractSection;
+  }
+
+  /**
+   * 兼容构造（无分层核对契约）。
+   *
+   * @param file 批次文件路径
+   * @param items 待复核结论
+   * @param codeContext 所在文件全文 + 相关切片（不可信）
+   * @param citedEvidence context 类结论的被引证据原文（不可信）
+   * @param policySections REVIEW.md 证据要求段（可信）
+   * @param followupContext 补查文件全文（不可信；第一轮为空串）
+   * @param testFileIndex 仓库测试文件清单（不可信；无则空串）
+   */
+  public VerificationBatchInput(
+      String file,
+      List<VerificationItem> items,
+      String codeContext,
+      String citedEvidence,
+      String policySections,
+      String followupContext,
+      String testFileIndex) {
+    this(
+        file,
+        items,
+        codeContext,
+        citedEvidence,
+        policySections,
+        followupContext,
+        testFileIndex,
+        "");
   }
 
   /** 兼容构造（无测试文件清单）。 */

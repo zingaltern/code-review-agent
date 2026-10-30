@@ -10,14 +10,14 @@ import org.cra.common.semantic.SymbolIndexOptions;
  * 注入（04§1 L2 的按角色默认注入集）。
  *
  * @param enabled 总开关（CRA_SEMANTIC_CONTEXT_ENABLED；默认 false）
- * @param sliceTokens 单 brief 切片 token 上限（默认 4000；超预算截断并写覆盖声明）
+ * @param sliceTokens 单 brief 切片 token 上限（默认 6000；超预算截断并写覆盖声明）
  * @param indexOptions 索引构建选项（maxFiles/maxFileBytes/include/exclude/超限策略）
  */
 public record SemanticContextOptions(
     boolean enabled, long sliceTokens, SymbolIndexOptions indexOptions) {
 
-  /** 单 brief 切片默认上限（04§1 L2；04§2.2 算术中从 L1 预算扣除）。 */
-  public static final long DEFAULT_SLICE_TOKENS = 4_000;
+  /** 单 brief 切片默认上限（04§1 L2；04§2.2 算术中从 L1 预算扣除；AI Coding 放宽档：4000 → 6000）。 */
+  public static final long DEFAULT_SLICE_TOKENS = 6_000;
 
   /** 切片预算下限（更小的值无实用意义，按配置错误拒绝）。 */
   private static final long MIN_SLICE_TOKENS = 500;

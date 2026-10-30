@@ -17,6 +17,7 @@ import java.util.Set;
  * @param reviewPolicySection base 分支 REVIEW.md 适用段（可信，04§3.2；CrossChecker=Product context/Known
  *     incidents/Sniff tests 段）
  * @param scopedPaths 受限工具可触达的文件集合（03§2.1：白名单在 brief 生成时确定；空集 = 无工具）
+ * @param layerContractSection 分层核对契约（编排器注入的可信指令段；仅索引可用时非空，04§2.6）
  */
 public record ReviewAgentInput(
     String prTitle,
@@ -26,7 +27,8 @@ public record ReviewAgentInput(
     String slicesText,
     String extraSection,
     String reviewPolicySection,
-    Set<String> scopedPaths) {
+    Set<String> scopedPaths,
+    String layerContractSection) {
 
   public ReviewAgentInput {
     Objects.requireNonNull(prTitle, "prTitle");
@@ -39,5 +41,39 @@ public record ReviewAgentInput(
     extraSection = extraSection == null ? "" : extraSection;
     reviewPolicySection = reviewPolicySection == null ? "" : reviewPolicySection;
     scopedPaths = Set.copyOf(scopedPaths == null ? Set.of() : scopedPaths);
+    layerContractSection = layerContractSection == null ? "" : layerContractSection;
+  }
+
+  /**
+   * 兼容构造（无分层核对契约）。
+   *
+   * @param prTitle PR 标题（不可信）
+   * @param commitMessages commit message 全文拼接（不可信）
+   * @param diffText L0 unified diff（不可信）
+   * @param windowText L1 变更上下文（可空）
+   * @param slicesText L2 依赖切片（可空）
+   * @param extraSection 角色专属段（可空）
+   * @param reviewPolicySection base 分支 REVIEW.md 适用段（可信）
+   * @param scopedPaths 受限工具可触达的文件集合
+   */
+  public ReviewAgentInput(
+      String prTitle,
+      String commitMessages,
+      String diffText,
+      String windowText,
+      String slicesText,
+      String extraSection,
+      String reviewPolicySection,
+      Set<String> scopedPaths) {
+    this(
+        prTitle,
+        commitMessages,
+        diffText,
+        windowText,
+        slicesText,
+        extraSection,
+        reviewPolicySection,
+        scopedPaths,
+        "");
   }
 }

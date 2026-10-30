@@ -100,7 +100,7 @@
 3. 反锚定质控链路：trace 中 PASS/FAIL 可查、周报可聚合；**单行 off-by-one 类种子样本不因 FAIL 被拒**（FAIL 不阻断的直接验证）；
 4. 注入防御回归：M1 验收 5/6 持续通过；
 5. 单 reviewer 注入超时 → run DEGRADED 完成并声明；验证不可得 → UNVERIFIED 计数出现在 Summary；预算截断 → `suppressed_by_truncation` 进 Summary；
-6. Standard 档（≤2k 行、≤10 文件）p95 ≤5min；**成本实测对照 04§2.2 算术（≈330k / 500k 预算 = 66%，不得触发 70% 降档）**，偏差 >30% 必须回改文档；
+6. Standard 档（≤2k 行、≤10 文件）p95 ≤5min；**成本实测对照 04§2.2 算术（≈330k / 800k 预算 = 41%（放宽前 500k = 66%），不得触发 70% 降档）**，偏差 >30% 必须回改文档；
 7. clean 8（真实代码样本）误报均值对比 M1 单 reviewer 基线下降 ≥30%（分母为真实代码 diff，可判定）；
 8. `cra review --local` 在一个注入了会挂测试的分支上：报告**如实展示测试失败输出**且退出码非零；在正常分支输出建议清单——pre-PR 不是空壳的直接证据。
 
@@ -203,7 +203,7 @@
 ### 验证层反证纪律记录（ADR-0015，2026-10-28）
 
 - **触发与取证**：官方 L3 bad 71/90（WL 0.6937）已知红；稳定性实验（run 40536199041/40536205522）表明主因不是温度。复核 trace 原文：JacksonCore-8 在 run 40536205522 的 3 次 REFUTED 全部是"结论把变更定位在 contentsAsArray，但 diff 实际修改的是 getTextBuffer"的**引述/锚点不符**——反证可核查，但没有否定失败模式；同一 D4J 缺陷（#182）在 run 40342221542 以正确命名发布并命中。审计文档中"调用方不会把 null 当 char[] 用"的概括与 trace 不符，以 trace 为准（ADR-0015 §1.1）。
-- **落地**：bug 类 REFUTED 必须携带 `refutation{kind,anchor,quote,reason}`；`RefuteEvidenceGate` 在缺字段/`kind=CITATION_MISMATCH`/quote 无法在简报可见上下文逐字定位/quote 过短时把判定降级为 INSUFFICIENT_EVIDENCE 交 Judge（trace `refute_evidence_check`）；bug 类 brief 增确定性调用点索引（同目录有界扫描，≤700 token 从 codeContext 预留，不可得如实声明）；judge 提示词增反证审查规则。**未改**阈值（0.70/0.35/0.80）、expected/数据集、CrossChecker 默认值。
+- **落地**：bug 类 REFUTED 必须携带 `refutation{kind,anchor,quote,reason}`；`RefuteEvidenceGate` 在缺字段/`kind=CITATION_MISMATCH`/quote 无法在简报可见上下文逐字定位/quote 过短时把判定降级为 INSUFFICIENT_EVIDENCE 交 Judge（trace `refute_evidence_check`）；bug 类 brief 增确定性调用点索引（2026-10-30 起为跨包有界：候选 60/条目 40/渲染 ≤1000 token 从 codeContext 预留，import 不可得与截断如实声明）；judge 提示词增反证审查规则。**未改**阈值（0.70/0.35/0.80）、expected/数据集、CrossChecker 默认值。
 - **测试**：`RefuteEvidenceGateTest`（无反证不得 REFUTED 的四类降级 + 合法反证保留）、`CallSiteIndexTest`（注入/降级/渲染预算）、`VerdictJsonCodecTest`（refutation 解析）、`VerifierAntiRefutePipelineTest`（JacksonCore-8 形态：引述不符 REFUTED → 降级 → Judge CONFIRMED → 发布；改前 PromotionEngine 直接 REJECT；verifier 输入 ≤12k）。`mvn -B -ntp verify` 2109 tests 全绿（1:51，含 PG 集成）。
 - **有界对比**（8 个翻转 case × k=3 × temperature=0.2 × standard × tier=l3，同一子集参数）：
 

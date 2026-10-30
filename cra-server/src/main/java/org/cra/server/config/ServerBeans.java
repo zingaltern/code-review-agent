@@ -158,8 +158,9 @@ public class ServerBeans {
    * @return ReviewCrew
    */
   @Bean
-  public ReviewCrew reviewCrew() {
-    return AgentsAssembly.createReviewCrew();
+  public ReviewCrew reviewCrew(ServerConfig config) {
+    // 05§5 agents.budget.<role>.*：覆盖在组合根施加（执行器只面向 SubAgent 接口）
+    return config.agentBudgets().apply(AgentsAssembly.createReviewCrew());
   }
 
   /**
@@ -168,8 +169,8 @@ public class ServerBeans {
    * @return verifier
    */
   @Bean
-  public SubAgent<VerificationBatchInput> verifier() {
-    return AgentsAssembly.createVerifier();
+  public SubAgent<VerificationBatchInput> verifier(ServerConfig config) {
+    return config.agentBudgets().apply(AgentsAssembly.createVerifier());
   }
 
   /**
@@ -178,8 +179,8 @@ public class ServerBeans {
    * @return judge
    */
   @Bean
-  public SubAgent<JudgeCaseInput> judge() {
-    return AgentsAssembly.createJudge();
+  public SubAgent<JudgeCaseInput> judge(ServerConfig config) {
+    return config.agentBudgets().apply(AgentsAssembly.createJudge());
   }
 
   /**
@@ -205,8 +206,8 @@ public class ServerBeans {
         config.runTotalTokens(),
         0.70,
         0.85,
-        2000,
-        8000,
+        PipelineOptions.DEFAULT_LARGE_DIFF_LINES,
+        PipelineOptions.DEFAULT_HARD_CAP_LINES,
         3,
         "never",
         PipelineOptions.DEFAULT_SPOTCHECK_PERCENT,
