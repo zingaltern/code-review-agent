@@ -65,40 +65,6 @@ final class ReviewBodyRenderer {
     return body.toString();
   }
 
-  static String summaryBody(
-      ReviewRequest request,
-      String runId,
-      List<FindingAggregator.Scored> ordered,
-      List<FindingAggregator.Scored> fallbacks,
-      int skippedDuplicate,
-      int suppressedByTruncation,
-      List<String> degradations,
-      boolean degraded,
-      String suspectWarning,
-      List<String> coverageLines,
-      String convergenceAdvice,
-      Set<String> unverifiedIds,
-      int unverifiedUnpublished,
-      SignoffAdvice signoff) {
-    return summaryBody(
-        request,
-        runId,
-        ordered,
-        fallbacks,
-        skippedDuplicate,
-        suppressedByTruncation,
-        degradations,
-        degraded,
-        suspectWarning,
-        coverageLines,
-        convergenceAdvice,
-        unverifiedIds,
-        unverifiedUnpublished,
-        false,
-        false,
-        signoff);
-  }
-
   /**
    * Summary 正文渲染。
    *
@@ -146,6 +112,8 @@ final class ReviewBodyRenderer {
           skippedDuplicate,
           unverifiedUnpublished,
           noReviewableChanges);
+    } else if (noReviewableChanges && ordered.isEmpty()) {
+      body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
     } else if (important.isEmpty()
         && nits.isEmpty()
         && fallbacks.isEmpty()

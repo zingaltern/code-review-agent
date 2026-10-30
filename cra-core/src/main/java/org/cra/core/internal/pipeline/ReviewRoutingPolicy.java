@@ -201,9 +201,12 @@ final class ReviewRoutingPolicy {
    * @return true = 测试文件
    */
   static boolean isTestPath(String path) {
-    return path.startsWith("src/test/")
-        || path.contains("/src/test/")
-        || path.endsWith("Test.java")
-        || path.endsWith("Tests.java");
+    if (path.startsWith("src/test/") || path.contains("/src/test/")) {
+      return true;
+    }
+    // 后缀启发式（非标准目录布局）：要求前缀名非空，避免把恰名为 Test.java/Tests.java 的生产文件误判为测试
+    String simple = path.substring(path.lastIndexOf('/') + 1);
+    return (simple.endsWith("Test.java") && simple.length() > "Test.java".length())
+        || (simple.endsWith("Tests.java") && simple.length() > "Tests.java".length());
   }
 }

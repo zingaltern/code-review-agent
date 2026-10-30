@@ -142,6 +142,15 @@ class M1PipelinePoliciesTest {
   }
 
   @Test
+  void pipelineOptionsCompatConstructorDefaultsToNoTestReview() {
+    // 02§4.4：8 参兼容构造沿用默认策略（测试文件不进入评审范围）
+    org.cra.core.api.PipelineOptions options =
+        new org.cra.core.api.PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", 20);
+    assertThat(options.includeTestFiles()).isFalse();
+    assertThat(options.runTotalTokens()).isEqualTo(500_000);
+  }
+
+  @Test
   void testFilesExcludedByDefaultAndCounted() {
     // 02§4.4：默认策略下测试文件不进评审范围，跳过数量必须可声明
     ChunkPlanner.Plan plan =

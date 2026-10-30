@@ -133,4 +133,15 @@ class ReviewRoutingPolicyTest {
                 new DepthPlan(Depth.DEEP, 60, true, 400, false, List.of())))
         .isTrue();
   }
+
+  @Test
+  void testPathHeuristicExcludesExactTestClassName() {
+    // 02§4.4：目录判定优先；后缀启发式要求前缀名非空——恰名为 Test.java/Tests.java 的生产文件不被误判
+    assertThat(ReviewRoutingPolicy.isTestPath("src/test/java/demo/Foo.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("cra-core/src/test/java/demo/Foo.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/FooTest.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/FooTests.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/Test.java")).isFalse();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/Tests.java")).isFalse();
+  }
 }

@@ -650,11 +650,22 @@ public final class ReviewStage {
    * @return Summary 上下文声明
    */
   private static String emptyPlanNote(int filesChanged, ChunkPlanner.Plan plan) {
-    if (plan.skippedTestCount() > 0) {
+    int testSkipped = plan.skippedTestCount();
+    int otherSkipped = plan.skippedPaths().size();
+    if (testSkipped > 0 && otherSkipped > 0) {
+      return "无可评审变更，按策略不评审：变更 "
+          + filesChanged
+          + " 个文件——测试文件 "
+          + testSkipped
+          + " 个按默认策略跳过（--review-tests / CRA_REVIEW_TESTS=true 可恢复），另 "
+          + otherSkipped
+          + " 个被 skip_paths/hard-cap 裁剪，本次不派发评审代理";
+    }
+    if (testSkipped > 0) {
       return "仅测试文件/无可评审变更，按策略不评审：变更 "
           + filesChanged
           + " 个文件，其中测试文件 "
-          + plan.skippedTestCount()
+          + testSkipped
           + " 个按默认策略跳过（--review-tests / CRA_REVIEW_TESTS=true 可恢复），本次不派发评审代理";
     }
     return "无可评审文件：变更 " + filesChanged + " 个文件全部被 skip/hard-cap 裁剪，本次不派发评审代理";

@@ -30,6 +30,39 @@ public record PipelineOptions(
     int importantRefutedSpotCheckPercent,
     boolean includeTestFiles) {
 
+  /**
+   * 兼容构造（02§4.4 测试文件策略引入前形态）：测试文件按默认策略处理（不进入评审范围）。
+   *
+   * @param runTotalTokens run 级总预算
+   * @param softLimitRatio 70% 档比例
+   * @param hardLimitRatio 85% 档比例
+   * @param largeDiffLines 大 diff 降档线
+   * @param hardCapLines 硬上限
+   * @param nitBudgetDefault 默认 nit 预算
+   * @param publishUnverified UNVERIFIED 发布策略
+   * @param importantRefutedSpotCheckPercent 抽查百分比
+   */
+  public PipelineOptions(
+      long runTotalTokens,
+      double softLimitRatio,
+      double hardLimitRatio,
+      int largeDiffLines,
+      int hardCapLines,
+      int nitBudgetDefault,
+      String publishUnverified,
+      int importantRefutedSpotCheckPercent) {
+    this(
+        runTotalTokens,
+        softLimitRatio,
+        hardLimitRatio,
+        largeDiffLines,
+        hardCapLines,
+        nitBudgetDefault,
+        publishUnverified,
+        importantRefutedSpotCheckPercent,
+        DEFAULT_INCLUDE_TEST_FILES);
+  }
+
   /** run 级预算默认（02§4.4 v1.2.1：500k）。 */
   public static final long DEFAULT_RUN_TOTAL_TOKENS = 500_000;
 
