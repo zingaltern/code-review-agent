@@ -393,4 +393,34 @@ class CallSiteIndexTest {
     String judgeView = index.render(200);
     assertThat(TokenMath.estimateTokens(judgeView)).isLessThanOrEqualTo(260);
   }
+
+  @Test
+  void sameDirectoryCandidatesAreCappedToReserveCapacityForCrossPackageCallers() {
+    // ADR-0015 §2.2 修订：同目录不得吃满候选槽——跨层 caller 在别的包，必须保有余量
+    Map<String, String> files = new java.util.LinkedHashMap<>();
+    files.put(SERVICE, SERVICE_TEXT);
+    for (int i = 0; i < 40; i++) {
+      files.put(
+          "src/main/java/com/demo/service/Peer" + i + ".java",
+          "package com.demo.service;\n\npublic class Peer" + i + " {\n}\n");
+    }
+    files.put(CONTROLLER, CONTROLLER_TEXT);
+    List<TypeImport> imports =
+        List.of(
+            new TypeImport(
+                CONTROLLER, "com.demo.service.UserService", "UserService", false, 3, SERVICE));
+
+    CallSiteIndex index = buildCrossPackage(files, imports);
+
+    assertThat(index.importsAvailable()).isTrue();
+    assertThat(index.notes()).anyMatch(n -> n.contains("同目录候选上限 30"));
+    // 跨包 caller 仍被纳入（未被同目录候选挤掉）
+    assertThat(index.entries())
+        .anySatisfy(
+            e -> {
+              assertThat(e.direction()).isEqualTo(CallSiteIndex.DIRECTION_CALLER);
+              assertThat(e.path()).isEqualTo(CONTROLLER);
+            });
+    assertThat(index.filesScanned()).isLessThanOrEqualTo(1 + 30 + 1);
+  }
 }

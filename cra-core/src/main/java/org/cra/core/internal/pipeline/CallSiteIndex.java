@@ -41,6 +41,9 @@ public final class CallSiteIndex {
   /** 候选文件上限（含批次文件自身；同目录优先，其后为 import 关联文件）。 */
   static final int MAX_FILES = 60;
 
+  /** 同目录候选上限（为 import 关联的跨包 caller 预留容量；02§4.4/ADR-0015 §2.2 修订）。 */
+  static final int SAME_DIR_MAX = 30;
+
   /** 条目上限。 */
   static final int MAX_ENTRIES = 40;
 
@@ -304,13 +307,20 @@ public final class CallSiteIndex {
       peers.add(path);
     }
     peers.sort(String::compareTo);
+    int sameDirDropped = 0;
     for (String peer : peers) {
-      if (candidates.size() >= MAX_FILES) {
-        break;
+      if (candidates.size() - 1 >= SAME_DIR_MAX || candidates.size() >= MAX_FILES) {
+        sameDirDropped++;
+        continue;
       }
       candidates.add(peer);
     }
     List<String> notes = new ArrayList<>();
+    if (sameDirDropped > 0) {
+      // 同目录不宜吃满候选槽：跨层 caller（service/controller）通常在别的包，必须预留容量
+      notes.add(
+          "同目录候选上限 " + SAME_DIR_MAX + "：另有 " + sameDirDropped + " 个同目录文件未扫描（为跨包 caller 预留容量）");
+    }
     int callerCandidates = 0;
     if (importsAvailable) {
       List<String> callers =
