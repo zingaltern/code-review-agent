@@ -31,26 +31,49 @@ public final class CliProcessRunner {
         throws Exception;
   }
 
-  /** 默认 invoker：java -jar 子进程。 */
-  public static final CliInvoker JAVA_JAR =
-      (args, env, workDir, stdoutLog, stderrLog) -> {
-        List<String> command = new ArrayList<>();
-        command.add("java");
-        command.add("-jar");
-        command.addAll(args);
-        ProcessBuilder pb = new ProcessBuilder(command);
-        pb.directory(workDir.toFile());
-        pb.environment().putAll(env);
-        pb.redirectOutput(stdoutLog.toFile());
-        pb.redirectError(stderrLog.toFile());
-        Process process = pb.start();
-        if (!process.waitFor(timeoutSeconds(), TimeUnit.SECONDS)) {
+  /** 默认 invoker：java -jar 子进程（超时取系统属性/默认 900s）。 */
+  public static final CliInvoker JAVA_JAR = javaJar(0);
+
+  /**
+   * 指定单 run 超时的 invoker（run 子命令的 --timeout-sec 由此生效；≤0 表示回退到系统属性/默认值）。
+   *
+   * @param timeoutSeconds 超时秒数
+   * @return invoker
+   */
+  static CliInvoker javaJar(long timeoutSeconds) {
+    return (args, env, workDir, stdoutLog, stderrLog) -> {
+      List<String> command = new ArrayList<>();
+      command.add("java");
+      command.add("-jar");
+      command.addAll(args);
+      ProcessBuilder pb = new ProcessBuilder(command);
+      pb.directory(workDir.toFile());
+      pb.environment().putAll(env);
+      pb.redirectOutput(stdoutLog.toFile());
+      pb.redirectError(stderrLog.toFile());
+      Process process = pb.start();
+      long effective = timeoutSeconds > 0 ? timeoutSeconds : timeoutSeconds();
+      try {
+        if (!process.waitFor(effective, TimeUnit.SECONDS)) {
           process.destroyForcibly();
+          process.waitFor(5, TimeUnit.SECONDS);
           throw new CraIntegrationException(
-              "被测 CLI 超时（" + timeoutSeconds() + "s）被强杀: " + String.join(" ", args));
+              "被测 CLI 超时（" + effective + "s）被强杀: " + String.join(" ", args));
         }
         return process.exitValue();
-      };
+      } catch (InterruptedException e) {
+        // 中断（CI cancel/Ctrl-C）必须清理子进程，否则它会继续跑 LLM 并写 run-root
+        process.destroyForcibly();
+        process.waitFor(5, TimeUnit.SECONDS);
+        Thread.currentThread().interrupt();
+        throw e;
+      } finally {
+        if (process.isAlive()) {
+          process.destroyForcibly();
+        }
+      }
+    };
+  }
 
   private CliProcessRunner() {}
 

@@ -49,12 +49,18 @@ public final class DepthPolicy {
               .formatted(totalPatchLines, options.largeDiffLines()));
     }
     boolean priorityOnly = false;
+    int perspectiveDrop = 0;
+    if (totalPatchLines > options.largeDiffLines()) {
+      perspectiveDrop = 1;
+      notes.add("大 diff 降档：视角降 1（04§2.2）");
+    }
     if (totalPatchLines > options.hardCapLines()) {
       priorityOnly = true;
       notes.add(
           "超大 diff（%d 行 > %d）仅评审 priority_paths（02§4.4）"
               .formatted(totalPatchLines, options.hardCapLines()));
     }
-    return new DepthPlan(effective, window, fullText, fullFileMax, priorityOnly, notes);
+    return new DepthPlan(
+        effective, window, fullText, fullFileMax, priorityOnly, notes, perspectiveDrop);
   }
 }

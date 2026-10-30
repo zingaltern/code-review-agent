@@ -40,7 +40,7 @@ public final class GitLabAssembly {
         new GitLabHttpAdapter(
             base,
             token,
-            HttpClient.newBuilder().build(),
+            HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(20)).build(),
             d -> {
               try {
                 Thread.sleep(d);

@@ -68,7 +68,12 @@ public final class ContextCitation {
 
   private ContextCitation() {}
 
-  /** 被引 commit（path 为 null = 未注明，调用方以 finding.file 兜底）。 */
+  /**
+   * 被引 commit。
+   *
+   * @param sha 7-40 位小写 hex sha
+   * @param path 该 commit 内文件路径；null = 未注明，调用方以 finding.file 兜底
+   */
   public record CommitRef(String sha, String path) {
 
     /**
@@ -82,10 +87,19 @@ public final class ContextCitation {
     }
   }
 
-  /** 被引事件史条目（ADR-0012：{@code event <event_id>}）。 */
+  /**
+   * 被引事件史条目（ADR-0012：{@code event <event_id>}）。
+   *
+   * @param eventId 产品事件标识（与 ProductEvent.EVENT_ID_PATTERN 一致）
+   */
   public record EventRef(String eventId) {}
 
-  /** 被引 REVIEW.md 条目（entry 为空 = 整段）。 */
+  /**
+   * 被引 REVIEW.md 条目（entry 为空 = 整段）。
+   *
+   * @param section 规范段名（Product context / Known incidents / Sniff tests）
+   * @param entry 条目原文或前缀；空串 = 整段
+   */
   public record ReviewMdRef(String section, String entry) {
 
     /**
@@ -174,7 +188,11 @@ public final class ContextCitation {
       return List.of();
     }
     int header = text.indexOf(CITATION_HEADER);
-    String scope = header >= 0 ? text.substring(header) : text;
+    if (header < 0) {
+      // ADR-0012 §2.6：只在「矛盾来源」块内解析——无块时不得把正文 "event loop" 之类当事件引用
+      return List.of();
+    }
+    String scope = text.substring(header);
     List<EventRef> refs = new ArrayList<>();
     Set<String> seen = new LinkedHashSet<>();
     Matcher matcher = EVENT_REF.matcher(scope);

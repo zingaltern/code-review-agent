@@ -8,8 +8,8 @@ final class EvalUsage {
   static String text() {
     return """
         用法:
-          cra-eval run --dataset <dir> [--set all|bad|clean|l2|adversarial|adv-injection|adv-hallucination|adv-refusal]
-              [--k N] [--depth quick|standard] [--cli-jar PATH] [--work-dir DIR] [--json PATH]
+          cra-eval run --dataset <dir> [--set all|bad|clean|l2|adversarial|adv-injection|adv-hallucination|adv-refusal|adv-context]
+              [--k N] [--depth quick|standard|deep] [--cli-jar PATH] [--work-dir DIR] [--json PATH]
               [--tier auto|l1|l2|l3] [--commit SHA] [--fail-on-red] [--sha256-out PATH]
               [--crosschecker-enabled] [--semantic-context] [--timeout-sec N] [--case ID[,ID...]]
           cra-eval annotate --fixture <caseDir> [--action prefill|confirm|relabel] [--to-set bad|clean]

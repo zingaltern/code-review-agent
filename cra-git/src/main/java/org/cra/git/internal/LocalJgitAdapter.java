@@ -114,24 +114,45 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     try (RevWalk walk = new RevWalk(repository)) {
       RevCommit baseCommit = parseCommit(walk, resolve(baseSha));
       RevCommit headCommit = parseCommit(walk, resolve(headSha));
+      // 与 GitHub compare（三点语义）同构：diff 基线 = merge-base，而不是 base 分支 tip——
+      // 否则分支落后时会把目标分支的新提交以反向 diff 算进评审
+      String mergeBaseSha = mergeBase(baseCommit, headCommit);
+      if (mergeBaseSha == null) {
+        throw new CraIntegrationException(
+            "本地 diff 无共同祖先: " + shortSha(baseSha) + ".." + shortSha(headSha));
+      }
+      RevCommit diffBase = parseCommit(walk, mergeBaseSha);
       List<DiffFile> files = new ArrayList<>();
       ByteArrayOutputStream buffer = new ByteArrayOutputStream();
       try (DiffFormatter formatter = new DiffFormatter(buffer)) {
         formatter.setRepository(repository);
         formatter.setDetectRenames(true);
         formatter.setDiffComparator(RawTextComparator.DEFAULT);
-        for (DiffEntry entry : formatter.scan(toTree(walk, baseCommit), toTree(walk, headCommit))) {
+        for (DiffEntry entry : formatter.scan(toTree(walk, diffBase), toTree(walk, headCommit))) {
           files.add(toDiffFile(formatter, buffer, entry));
         }
       }
       return new DiffResult(
-          baseCommit.getName(),
+          diffBase.getName(),
           headCommit.getName(),
           files,
-          commitsBetween(walk, baseCommit, headCommit));
+          commitsBetween(walk, diffBase, headCommit));
     } catch (java.io.IOException e) {
       throw new CraIntegrationException(
           "本地 diff 失败: " + shortSha(baseSha) + ".." + shortSha(headSha), e);
+    }
+  }
+
+  /** merge-base（三点 diff 基线）；无共同祖先返回 null。 */
+  private String mergeBase(RevCommit base, RevCommit head) {
+    try (RevWalk walk = new RevWalk(repository)) {
+      walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE);
+      walk.markStart(walk.parseCommit(base));
+      walk.markStart(walk.parseCommit(head));
+      RevCommit first = walk.next();
+      return first == null ? null : first.getName();
+    } catch (java.io.IOException e) {
+      throw new CraIntegrationException("merge-base 计算失败", e);
     }
   }
 

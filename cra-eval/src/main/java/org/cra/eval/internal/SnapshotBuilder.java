@@ -69,7 +69,7 @@ final class SnapshotBuilder {
     Map<String, byte[]> files = new TreeMap<>();
     try (Stream<Path> walk = Files.walk(tree)) {
       List<Path> regular =
-          walk.filter(Files::isRegularFile)
+          walk.filter(p -> Files.isRegularFile(p, java.nio.file.LinkOption.NOFOLLOW_LINKS))
               .filter(p -> !ignored(tree.relativize(p).toString().replace('\\', '/')))
               .sorted()
               .toList();

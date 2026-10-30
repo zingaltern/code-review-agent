@@ -46,8 +46,15 @@ public final class PathGlobs {
       char c = glob.charAt(i);
       if (c == '*') {
         if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-          regex.append(".*");
-          i++;
+          if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
+            // `**/` 匹配零或多级目录（与 GitHub/GitLab 适配器的 glob 语义一致）：
+            // `**/foo` 命中根级 foo，`a/**/b` 命中 a/b 与 a/x/y/b
+            regex.append("(?:.*/)?");
+            i += 2;
+          } else {
+            regex.append(".*");
+            i++;
+          }
         } else {
           regex.append("[^/]*");
         }

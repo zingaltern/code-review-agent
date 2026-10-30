@@ -259,7 +259,7 @@ final class ChangedSymbols {
           enclosingDefinitions(addedLines.keySet(), index.definitionsOfPath(file.path()));
       for (Map.Entry<Integer, String> entry : addedLines.entrySet()) {
         for (String identifier : identifiersOf(entry.getValue())) {
-          if (!isCandidateName(identifier)) {
+          if (!isStructurallyCandidate(identifier)) {
             continue;
           }
           List<SymbolDefinition> definitions = index.definitionsOf(identifier);
@@ -276,7 +276,7 @@ final class ChangedSymbols {
           }
         }
         SymbolDefinition enclosingDefinition = enclosing.get(entry.getKey());
-        if (enclosingDefinition != null && isCandidateName(enclosingDefinition.name())) {
+        if (enclosingDefinition != null && isStructurallyCandidate(enclosingDefinition.name())) {
           recordCandidate(
               bestTier,
               occurrences,
@@ -309,11 +309,9 @@ final class ChangedSymbols {
     occurrences.merge(name, occurrencesOfName, Math::max);
   }
 
-  private static boolean isCandidateName(String name) {
-    return name != null
-        && name.length() >= 3
-        && !STDLIB_TYPES.contains(name)
-        && !STOPLIST.contains(name);
+  /** 结构过滤（长度/JDK 类型）；STOPLIST 只适用于 Tier B（ADR-0014 §2.4），Tier A 的主符号即使叫 run/get 也必须保留。 */
+  private static boolean isStructurallyCandidate(String name) {
+    return name != null && name.length() >= 3 && !STDLIB_TYPES.contains(name);
   }
 
   /** 新增行的最内层定义：对本文件每个新增行号，取定义行 ≤ 该行的最后一个方法/字段（方法体改动的符号归属）。 类型定义不参与（类名由"新增行出现同名定义"路径覆盖）。 */
@@ -352,12 +350,17 @@ final class ChangedSymbols {
       return added;
     }
     int newLine = 0;
+    boolean inHunk = false;
     for (String raw : patch.split("\n", -1)) {
       if (raw.startsWith("@@")) {
+        inHunk = true;
         newLine = parseNewStart(raw);
         continue;
       }
-      if (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("\\")) {
+      if (!inHunk && (raw.startsWith("+++") || raw.startsWith("---"))) {
+        continue;
+      }
+      if (raw.startsWith("\\")) {
         continue;
       }
       if (raw.startsWith("+")) {

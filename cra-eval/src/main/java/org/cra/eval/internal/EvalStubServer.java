@@ -40,7 +40,11 @@ public final class EvalStubServer implements AutoCloseable {
   private record Seed(
       List<DiffSplitter.PatchedFile> files, String headSha, String baseSha, Path snapshotRoot) {}
 
+  /** 请求体上限（stub 只接收评测 CLI 的发布写请求）。 */
+  private static final int MAX_BODY_BYTES = 4 * 1024 * 1024;
+
   private final HttpServer server;
+  private final java.util.concurrent.ExecutorService executor;
   private final Seed seed;
   private final ConcurrentLinkedQueue<CapturedReview> reviews = new ConcurrentLinkedQueue<>();
   private final ConcurrentLinkedQueue<CapturedSummary> summaries = new ConcurrentLinkedQueue<>();
@@ -49,9 +53,11 @@ public final class EvalStubServer implements AutoCloseable {
   /** 快照文件清单缓存（首次 tree 请求构建；同一 run 内 listFiles 可能被多次调用）。 */
   private volatile List<JsonNode> treeEntries;
 
-  private EvalStubServer(Seed seed, HttpServer server) {
+  private EvalStubServer(
+      Seed seed, HttpServer server, java.util.concurrent.ExecutorService executor) {
     this.seed = seed;
     this.server = server;
+    this.executor = executor;
   }
 
   /**
@@ -68,7 +74,17 @@ public final class EvalStubServer implements AutoCloseable {
     Seed seed = new Seed(files, headSha, baseSha, snapshotRoot);
     try {
       HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-      EvalStubServer stub = new EvalStubServer(seed, server);
+      // 默认实现是单线程：一个慢请求会让并发的 contents 请求排队，评测被误判为超时
+      java.util.concurrent.ExecutorService executor =
+          java.util.concurrent.Executors.newFixedThreadPool(
+              8,
+              runnable -> {
+                Thread thread = new Thread(runnable, "cra-eval-stub");
+                thread.setDaemon(true);
+                return thread;
+              });
+      server.setExecutor(executor);
+      EvalStubServer stub = new EvalStubServer(seed, server, executor);
       server.createContext("/", stub::handle);
       server.start();
       return stub;
@@ -100,6 +116,7 @@ public final class EvalStubServer implements AutoCloseable {
   @Override
   public void close() {
     server.stop(0);
+    executor.shutdownNow();
   }
 
   /** contents 路径提取（任意长度 owner/repo；组 1 = 文件路径）。 */
@@ -120,6 +137,10 @@ public final class EvalStubServer implements AutoCloseable {
       } else {
         respondJson(exchange, 405, Map.of("message", "method not allowed"));
       }
+    } catch (RuntimeException e) {
+      // 非法请求是协议面事实（400），不是"网络故障"：必须回响应，否则 CLI 端只能看到连接被关。
+      // 响应已发出时 write 会抛 IOException，交由 HttpServer 关闭连接（不在此静默吞掉）。
+      respondJson(exchange, 400, Map.of("message", "bad request: " + e.getMessage()));
     } finally {
       exchange.close();
     }
@@ -168,8 +189,12 @@ public final class EvalStubServer implements AutoCloseable {
   }
 
   private void routePost(HttpExchange exchange, String path) throws IOException {
-    byte[] raw = exchange.getRequestBody().readAllBytes();
+    byte[] raw = readBody(exchange);
     JsonNode payload = Json.MAPPER.readTree(raw);
+    if (payload == null || !payload.isObject()) {
+      respondJson(exchange, 400, Map.of("message", "body must be a JSON object"));
+      return;
+    }
     if (path.matches("/repos/[^/]+/[^/]+/pulls/\\d+/reviews")) {
       List<CapturedComment> comments = new ArrayList<>();
       for (JsonNode c : payload.path("comments")) {
@@ -327,23 +352,35 @@ public final class EvalStubServer implements AutoCloseable {
     exchange.getResponseBody().write(bytes);
   }
 
-  /** 仅解码 %XX（不解 '+'——路径中 '+' 是合法字符）。 */
+  private static byte[] readBody(HttpExchange exchange) throws IOException {
+    byte[] body = exchange.getRequestBody().readNBytes(MAX_BODY_BYTES + 1);
+    if (body.length > MAX_BODY_BYTES) {
+      throw new IllegalArgumentException("请求体超过上限 " + MAX_BODY_BYTES + " 字节");
+    }
+    return body;
+  }
+
+  /** 仅解码 %XX（不解 '+'——路径中 '+' 是合法字符）；按 UTF-8 字节序列解码（非 ASCII 文件名）。 */
   private static String percentDecode(String value) {
-    StringBuilder out = new StringBuilder(value.length());
+    java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(value.length());
     for (int i = 0; i < value.length(); i++) {
       char c = value.charAt(i);
       if (c == '%' && i + 2 < value.length()) {
         int hi = Character.digit(value.charAt(i + 1), 16);
         int lo = Character.digit(value.charAt(i + 2), 16);
         if (hi >= 0 && lo >= 0) {
-          out.append((char) ((hi << 4) | lo));
+          bytes.write((hi << 4) | lo);
           i += 2;
           continue;
         }
       }
-      out.append(c);
+      if (c < 0x80) {
+        bytes.write(c);
+      } else {
+        bytes.writeBytes(String.valueOf(c).getBytes(StandardCharsets.UTF_8));
+      }
     }
-    return out.toString();
+    return bytes.toString(StandardCharsets.UTF_8);
   }
 
   /** 供测试：快照根（数据面只读）。 */

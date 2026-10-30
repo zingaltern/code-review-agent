@@ -1,0 +1,45 @@
+package org.cra.common.git;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+/** diff 行数口径（02§4.4：大 diff 判据 = +/- 内容行合计，不含 hunk 头与上下文行）。 */
+class DiffResultTest {
+
+  @Test
+  void countsOnlyAddedAndRemovedContentLines() {
+    String patch =
+        "@@ -1,3 +1,4 @@\n context one\n+added\n-removed\n"
+            + "++++ content starting with ++\n---- content starting with --\n";
+    DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
+    DiffResult diff = new DiffResult("base", "head", List.of(file), List.of());
+    assertThat(diff.totalPatchLines()).isEqualTo(4);
+  }
+
+  @Test
+  void skipsFileHeadersBeforeFirstHunk() {
+    String patch = "--- a/A.java\n+++ b/A.java\n@@ -1 +1 @@\n-old\n+new\n";
+    DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
+    assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines())
+        .isEqualTo(2);
+  }
+
+  @Test
+  void nullPatchCountsZero() {
+    DiffFile file = new DiffFile("A.java", null, "modified", null, List.of());
+    assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines()).isZero();
+  }
+
+  @Test
+  void countsAcrossMultipleHunksAndSkipsNoNewlineMarker() {
+    String patch =
+        "--- a/A.java\n+++ b/A.java\n"
+            + "@@ -1,2 +1,2 @@\n-old1\n+new1\n\\ No newline at end of file\n"
+            + "@@ -10,2 +10,2 @@\n-old2\n+new2\n";
+    DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
+    assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines())
+        .isEqualTo(4);
+  }
+}

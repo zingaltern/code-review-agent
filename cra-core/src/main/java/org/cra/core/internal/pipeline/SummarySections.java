@@ -40,7 +40,7 @@ public final class SummarySections {
     out.add(
         "评审深度：%s（窗口 ±%d，条件全文%s）"
             .formatted(
-                plan.effectiveDepth().name().toLowerCase(),
+                plan.effectiveDepth().name().toLowerCase(java.util.Locale.ROOT),
                 plan.windowLines(),
                 plan.conditionalFullText() ? "开" : "关"));
     plan.notes().forEach(n -> out.add("档位说明：" + n));
@@ -57,13 +57,12 @@ public final class SummarySections {
     input.trimDecisions().forEach(n -> out.add("裁剪：" + n));
     input.policyWarnings().forEach(n -> out.add("策略警告：" + n));
     input.blameNotes().forEach(n -> out.add("pre-existing：" + n));
-    out.add("验证：M1 未启用独立验证层（候选经指纹去重与锚定校验后直接聚合发布，Verifier 随 M2 接入）");
     if (input.nitDropped() > 0) {
       out.add("nit 超预算丢弃 " + input.nitDropped() + " 条候选");
     }
     if (input.suppressedByTruncation() > 0) {
       // 02§4.4：截断必须可见——"发 N 条丢 M 条"不允许对护栏 invisible
-      out.add("因预算截断丢弃 " + input.suppressedByTruncation() + " 条候选（未发布）");
+      out.add("因预算截断丢弃 " + input.suppressedByTruncation() + " 条候选（未验证、未发布；02§4.4）");
     }
     return out;
   }

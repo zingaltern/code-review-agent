@@ -20,6 +20,7 @@ import org.cra.common.text.Texts;
  * @param citedEvidence context 类结论的被引证据原文（commit diff 节选等；不可信；无则为空串）
  * @param policySections REVIEW.md 证据要求段 + Product context/Known incidents 相关条目（可信）
  * @param followupContext 补查文件全文（不可信；第一轮为空串）
+ * @param testFileIndex 仓库测试文件清单（仅 test 类批次；不可信；无则空串）
  */
 public record VerificationBatchInput(
     String file,
@@ -27,7 +28,8 @@ public record VerificationBatchInput(
     String codeContext,
     String citedEvidence,
     String policySections,
-    String followupContext) {
+    String followupContext,
+    String testFileIndex) {
 
   public VerificationBatchInput {
     Texts.requireNonBlank(file, "file");
@@ -39,5 +41,17 @@ public record VerificationBatchInput(
     citedEvidence = citedEvidence == null ? "" : citedEvidence;
     policySections = policySections == null ? "" : policySections;
     followupContext = followupContext == null ? "" : followupContext;
+    testFileIndex = testFileIndex == null ? "" : testFileIndex;
+  }
+
+  /** 兼容构造（无测试文件清单）。 */
+  public VerificationBatchInput(
+      String file,
+      List<VerificationItem> items,
+      String codeContext,
+      String citedEvidence,
+      String policySections,
+      String followupContext) {
+    this(file, items, codeContext, citedEvidence, policySections, followupContext, "");
   }
 }

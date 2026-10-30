@@ -63,6 +63,10 @@ public final class Main {
               + "或 cra sweep --repo owner/name --since 30d --max-prs 10",
           e.getMessage());
       return 2;
+    } catch (org.cra.common.exception.CraException e) {
+      // 05§3：自身故障（本地实跑启动失败/run 级异常等）统一退出码 2，不打未捕获栈
+      LOG.error("cra 运行故障: {}", e.getMessage());
+      return 2;
     }
   }
 }

@@ -3,6 +3,7 @@ package org.cra.runner.cli;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.cra.common.exception.CraIntegrationException;
@@ -25,6 +26,22 @@ class BuildVerifyRunnerTest {
         .content()
         .contains("command: /bin/echo hello cra")
         .contains("exit code: 0");
+  }
+
+  @Test
+  void streamsCompleteOutputToLogWhileMemoryStaysTruncated() throws Exception {
+    BuildVerifyRunner runner = new BuildVerifyRunner(tempDir.resolve("runs"), 200);
+    var result = runner.run(tempDir, "/usr/bin/seq 1 1000");
+    assertThat(result.exitCode()).isZero();
+    assertThat(result.output())
+        .contains("内存留存已截断")
+        .contains("完整输出仍见日志文件")
+        .doesNotContain("\n1000\n");
+    String log = Files.readString(result.logFile());
+    assertThat(log)
+        .contains("command: /usr/bin/seq 1 1000")
+        .contains("\n1000\nexit code: 0")
+        .hasSizeGreaterThan(3_000);
   }
 
   @Test

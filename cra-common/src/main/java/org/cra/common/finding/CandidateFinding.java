@@ -62,7 +62,8 @@ public record CandidateFinding(
     side = side == null ? Side.RIGHT : side;
     Texts.requireNonBlank(evidence, "evidence");
     Objects.requireNonNull(severityProposed, "severityProposed");
-    if (confidence != null && (confidence < 0 || confidence > 1)) {
+    if (confidence != null
+        && !(Double.isFinite(confidence) && confidence >= 0 && confidence <= 1)) {
       throw new IllegalArgumentException("confidence must be in [0,1]: " + confidence);
     }
     Texts.requireNonBlank(originAgentRole, "originAgentRole");

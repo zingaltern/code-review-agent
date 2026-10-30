@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import org.cra.agents.api.AgentBrief;
@@ -37,6 +36,9 @@ import org.cra.core.internal.pipeline.SemanticContext;
  */
 final class VerificationWave {
 
+  /** 单批验证等待硬限（历史下限；实际值由 LlmGatewayConfig 推导，见 ReviewPipeline/TimeoutBudgets）。 */
+  private static final long DEFAULT_VERIFY_BATCH_TIMEOUT_MS = 360_000L;
+
   private final SubAgent<VerificationBatchInput> verifier;
   private final SemanticContext semanticContext;
   private final AgentRunner agentRunner;
@@ -46,6 +48,7 @@ final class VerificationWave {
   private final Function<String, Optional<String>> followupLookup;
   private final CitedEvidenceResolver citedResolver;
   private final BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer;
+  private final long waitTimeoutMs;
 
   /** 批内单 finding 判定结果。 */
   record PerFinding(
@@ -85,6 +88,36 @@ final class VerificationWave {
       CitedEvidenceResolver citedResolver,
       BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer,
       SemanticContext semanticContext) {
+    this(
+        verifier,
+        agentRunner,
+        trace,
+        budget,
+        pool,
+        followupLookup,
+        citedResolver,
+        callSiteIndexer,
+        semanticContext,
+        DEFAULT_VERIFY_BATCH_TIMEOUT_MS);
+  }
+
+  /**
+   * @param waitTimeoutMs 单批外层等待毫秒（须覆盖网关重试链 + 缩上下文重试，见 TimeoutBudgets）
+   */
+  VerificationWave(
+      SubAgent<VerificationBatchInput> verifier,
+      AgentRunner agentRunner,
+      TraceWriter trace,
+      RunBudgetTracker budget,
+      ExecutorService pool,
+      Function<String, Optional<String>> followupLookup,
+      CitedEvidenceResolver citedResolver,
+      BiFunction<String, List<FindingAggregator.Scored>, CallSiteIndex> callSiteIndexer,
+      SemanticContext semanticContext,
+      long waitTimeoutMs) {
+    if (waitTimeoutMs <= 0) {
+      throw new IllegalArgumentException("waitTimeoutMs must be positive");
+    }
     this.semanticContext = semanticContext == null ? SemanticContext.disabled() : semanticContext;
     this.verifier = verifier;
     this.agentRunner = agentRunner;
@@ -94,6 +127,7 @@ final class VerificationWave {
     this.followupLookup = followupLookup;
     this.citedResolver = citedResolver;
     this.callSiteIndexer = callSiteIndexer;
+    this.waitTimeoutMs = waitTimeoutMs;
   }
 
   /**
@@ -147,7 +181,7 @@ final class VerificationWave {
     for (FindingAggregator.Scored scored : candidates) {
       byFile.computeIfAbsent(scored.finding().file(), k -> new ArrayList<>()).add(scored);
     }
-    List<Future<BatchOutcome>> futures = new ArrayList<>();
+    List<TaskHandle<BatchOutcome>> futures = new ArrayList<>();
     List<String> degradations = new java.util.concurrent.CopyOnWriteArrayList<>();
     for (Map.Entry<String, List<FindingAggregator.Scored>> entry : byFile.entrySet()) {
       String batchFile = entry.getKey();
@@ -157,7 +191,8 @@ final class VerificationWave {
               reviewDiff.files().stream().filter(file -> file.path().equals(batchFile)).toList());
       List<FindingAggregator.Scored> batch = entry.getValue();
       futures.add(
-          pool.submit(
+          TaskHandle.submit(
+              pool,
               () ->
                   verifyBatch(
                       batchFile,
@@ -176,21 +211,29 @@ final class VerificationWave {
     long tokensIn = 0;
     long tokensOut = 0;
     int batches = 0;
-    for (Future<BatchOutcome> future : futures) {
+    for (TaskHandle<BatchOutcome> task : futures) {
+      // 每个 future 恰计一次：成功/超时/失败都算一个已提交批次（评测覆盖度口径）
+      batches++;
       try {
-        BatchOutcome outcome = future.get();
-        batches++;
+        // 09§6 强制：带超时 Future；单批卡住/异常收敛为该批验证不可得（UNVERIFIED），不炸穿整个 run
+        BatchOutcome outcome =
+            task.future().get(waitTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
         outcomes.putAll(outcome.outcomes());
         indexByFinding.putAll(outcome.indexByFinding());
         tokensIn += outcome.tokensIn();
         tokensOut += outcome.tokensOut();
         budget.record(outcome.tokensIn(), outcome.tokensOut());
+      } catch (java.util.concurrent.TimeoutException e) {
+        boolean started = task.started();
+        task.cancel();
+        degradations.add(started ? "verifier-timeout" : "verifier-queue-timeout");
       } catch (InterruptedException e) {
+        futures.forEach(TaskHandle::cancel);
         Thread.currentThread().interrupt();
         throw new IllegalStateException("验证波被中断", e);
       } catch (java.util.concurrent.ExecutionException e) {
         Throwable cause = e.getCause() == null ? e : e.getCause();
-        throw new IllegalStateException("验证批次执行失败: " + cause.getMessage(), cause);
+        degradations.add("verifier-batch-failed: " + cause.getClass().getSimpleName());
       }
     }
     return new WaveResult(

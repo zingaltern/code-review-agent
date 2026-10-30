@@ -1,0 +1,254 @@
+package org.cra.eval.internal;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import org.cra.common.exception.CraIntegrationException;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/** tar 解包边界（06§3）：PAX path 覆盖、路径逃逸、截断与校验和。 */
+class TarReaderTest {
+
+  private static final int BLOCK = 512;
+
+  @TempDir Path tmp;
+
+  @Test
+  void paxPathOverrideWinsOverTruncatedUstarName() throws Exception {
+    byte[] payload = paxRecord("path", "deep/中文.java");
+    byte[] content = "class A {}\n".getBytes(StandardCharsets.UTF_8);
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", payload.length, 'x'), payload);
+    writeEntry(tar, header("trunc.java", content.length, '0'), content);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.files()).isEqualTo(1);
+    assertThat(out.resolve("deep/中文.java")).hasContent("class A {}\n");
+  }
+
+  @Test
+  void paxSizeOverrideControlsPayloadLength() throws Exception {
+    // ustar 头 size 写 0，真实长度由 PAX size 覆盖：忽略覆盖会把负载当下一块头部
+    byte[] pax = paxRecord("size", "11");
+    byte[] content = "class B {}\n".getBytes(StandardCharsets.UTF_8);
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("B.java", 0, '0'), content);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.files()).isEqualTo(1);
+    assertThat(out.resolve("B.java")).hasContent("class B {}\n");
+  }
+
+  @Test
+  void paxSizeAndPathKeepFollowingEntriesAligned() throws Exception {
+    // PAX size 与 ustar size 不同（且非 512 对齐）时，padded 必须按覆盖后的 size 重算
+    byte[] pax = paxRecords(new String[] {"path", "deep/P.java"}, new String[] {"size", "11"});
+    byte[] first = "class P {}\n".getBytes(StandardCharsets.UTF_8);
+    byte[] second = "class Q {}\n".getBytes(StandardCharsets.UTF_8);
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("P.java", 0, '0'), first);
+    writeEntry(tar, header("Q.java", second.length, '0'), second);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.files()).isEqualTo(2);
+    assertThat(out.resolve("deep/P.java")).hasContent("class P {}\n");
+    assertThat(out.resolve("Q.java")).hasContent("class Q {}\n");
+  }
+
+  @Test
+  void rejectsInvalidPaxSize() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    byte[] oversized = paxRecord("size", String.valueOf(TarReader.MAX_ENTRY_BYTES + 1));
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", oversized.length, 'x'), oversized);
+    writeEntry(tar, header("A.java", 0, '0'), new byte[0]);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("PAX 覆盖的条目大小非法");
+
+    byte[] nonNumeric = paxRecord("size", "abc");
+    ByteArrayOutputStream tar2 = new ByteArrayOutputStream();
+    writeEntry(tar2, header("PaxHeader", nonNumeric.length, 'x'), nonNumeric);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar2.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("PAX size");
+  }
+
+  @Test
+  void rejectsPaxPathWithNulByte() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    byte[] pax = paxRecord("path", "safe.java\0/../../evil");
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("路径非法");
+  }
+
+  @Test
+  void rejectsPaxPathWithNewlineOrCarriageReturn() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    for (String value : new String[] {"safe\n.java", "safe\r.java"}) {
+      byte[] pax = paxRecord("path", value);
+      ByteArrayOutputStream tar = new ByteArrayOutputStream();
+      writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+      writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
+      assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+          .isInstanceOf(CraIntegrationException.class)
+          .hasMessageContaining("路径非法");
+    }
+  }
+
+  @Test
+  void paxPathOverrideAppliesToDirectoryEntries() throws Exception {
+    byte[] pax = paxRecord("path", "deep/newdir");
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("trunc", 0, '5'), new byte[0]);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.dirs()).isEqualTo(1);
+    assertThat(out.resolve("deep/newdir")).isDirectory();
+  }
+
+  @Test
+  void rejectsDirectoryEntryWithNonZeroSize() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("dir", 1, '5'), "x".getBytes(StandardCharsets.UTF_8));
+    tar.writeBytes(new byte[BLOCK * 2]);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("目录条目");
+  }
+
+  @Test
+  void rejectsParentTraversalForFilesAndDirectories() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    assertThatThrownBy(
+            () ->
+                TarReader.untar(
+                    new ByteArrayInputStream(tar(header("../../evil.txt", 1, '0'), "x".getBytes())),
+                    out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("非法");
+    assertThatThrownBy(
+            () ->
+                TarReader.untar(
+                    new ByteArrayInputStream(tar(header("../../evil-dir", 0, '5'), new byte[0])),
+                    out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("非法");
+  }
+
+  @Test
+  void rejectsTruncatedPayload() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    tar.write(header("a.txt", 100, '0'));
+    tar.write("short".getBytes(StandardCharsets.UTF_8));
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("截断");
+  }
+
+  @Test
+  void rejectsCorruptHeaderChecksum() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    byte[] header = header("a.txt", 1, '0');
+    header[0] = 'b'; // 改名但不重算校验和
+    assertThatThrownBy(
+            () -> TarReader.untar(new ByteArrayInputStream(tar(header, "x".getBytes())), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("校验和");
+  }
+
+  private static byte[] tar(byte[] header, byte[] payload) {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    writeEntry(out, header, payload);
+    out.writeBytes(new byte[BLOCK * 2]);
+    return out.toByteArray();
+  }
+
+  private static void writeEntry(ByteArrayOutputStream out, byte[] header, byte[] payload) {
+    out.writeBytes(header);
+    out.writeBytes(payload);
+    int pad = (BLOCK - payload.length % BLOCK) % BLOCK;
+    out.writeBytes(new byte[pad]);
+  }
+
+  private static byte[] header(String name, long size, char type) {
+    byte[] h = new byte[BLOCK];
+    byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
+    assertThat(nameBytes.length).isLessThanOrEqualTo(100);
+    System.arraycopy(nameBytes, 0, h, 0, nameBytes.length);
+    put(h, 100, "0000644");
+    put(h, 108, "0000000");
+    put(h, 116, "0000000");
+    put(h, 124, String.format("%011o", size));
+    put(h, 136, "00000000000");
+    for (int i = 148; i < 156; i++) {
+      h[i] = ' ';
+    }
+    put(h, 156, String.valueOf(type));
+    put(h, 257, "ustar");
+    h[262] = 0;
+    put(h, 263, "00");
+    int checksum = 0;
+    for (byte b : h) {
+      checksum += b & 0xff;
+    }
+    put(h, 148, String.format("%06o", checksum));
+    h[154] = 0;
+    h[155] = ' ';
+    return h;
+  }
+
+  private static byte[] paxRecord(String key, String value) {
+    String body = " " + key + "=" + value + "\n";
+    byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+    int length = bodyBytes.length + 2;
+    while (String.valueOf(length).length() + bodyBytes.length != length) {
+      length = String.valueOf(length).length() + bodyBytes.length;
+    }
+    byte[] record = (length + body).getBytes(StandardCharsets.UTF_8);
+    assertThat(record.length).isEqualTo(length);
+    return record;
+  }
+
+  private static byte[] paxRecords(String[]... pairs) {
+    StringBuilder out = new StringBuilder();
+    for (String[] pair : pairs) {
+      String body = " " + pair[0] + "=" + pair[1] + "\n";
+      int bodyLength = body.getBytes(StandardCharsets.UTF_8).length;
+      int length = bodyLength + 2;
+      while (String.valueOf(length).length() + bodyLength != length) {
+        length = String.valueOf(length).length() + bodyLength;
+      }
+      out.append(length).append(body);
+    }
+    return out.toString().getBytes(StandardCharsets.UTF_8);
+  }
+
+  private static void put(byte[] target, int offset, String value) {
+    byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+    System.arraycopy(bytes, 0, target, offset, bytes.length);
+  }
+}

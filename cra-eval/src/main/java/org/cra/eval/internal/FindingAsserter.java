@@ -86,10 +86,11 @@ public final class FindingAsserter {
     if (!bait.file().isEmpty() && !bait.file().equals(obs.file())) {
       return false;
     }
-    if (bait.lineFrom() != null
-        && (obs.line() < bait.lineFrom() - ExpectedFinding.LINE_TOLERANCE
-            || bait.lineTo() == null
-            || obs.line() > bait.lineTo() + ExpectedFinding.LINE_TOLERANCE)) {
+    // 区间两端独立判断：line_to 为 null = 不限上界（此前把 null 并入拒绝条件，单边区间判定相反）
+    if (bait.lineFrom() != null && obs.line() < bait.lineFrom() - ExpectedFinding.LINE_TOLERANCE) {
+      return false;
+    }
+    if (bait.lineTo() != null && obs.line() > bait.lineTo() + ExpectedFinding.LINE_TOLERANCE) {
       return false;
     }
     if (bait.keywords().isEmpty()) {

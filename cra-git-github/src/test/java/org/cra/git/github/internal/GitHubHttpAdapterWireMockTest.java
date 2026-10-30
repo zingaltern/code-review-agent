@@ -532,6 +532,57 @@ class GitHubHttpAdapterWireMockTest {
     assertThat(issues.get(0).body()).isEqualTo("issue-bot");
   }
 
+  @Test
+  void fetchBotCommentsAllowsExactlyTenThousandAndProbesNextPage() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=" + page))
+              .willReturn(okJson(commentPage(page))));
+    }
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=101"))
+            .willReturn(okJson("[]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/7/comments?per_page=100&page=1"))
+            .willReturn(okJson("[]")));
+
+    CommentLedger ledger = adapter.fetchBotComments(REPO, 7);
+    // 恰好 100 页满页（10k）→ 第 101 页为空必须正常返回，不得触顶误报
+    assertThat(ledger.comments()).hasSize(10_000);
+  }
+
+  @Test
+  void fetchBotCommentsRejectsOverflowPastProbePage() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=" + page))
+              .willReturn(okJson(commentPage(page))));
+    }
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=101"))
+            .willReturn(okJson(commentPage(101))));
+
+    assertThatThrownBy(() -> adapter.fetchBotComments(REPO, 7))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("评论分页超过上限");
+  }
+
+  private static String commentPage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"id\":")
+          .append(page * 1_000L + i)
+          .append(",\"user\":{\"login\":\"cra-bot\"},\"body\":\"c\",")
+          .append("\"created_at\":\"2026-10-25T00:00:00Z\"}");
+    }
+    return sb.append(']').toString();
+  }
+
   private static PostReviewCommand command(int count) {
     List<InlineComment> inline = new ArrayList<>();
     for (int i = 0; i < count; i++) {

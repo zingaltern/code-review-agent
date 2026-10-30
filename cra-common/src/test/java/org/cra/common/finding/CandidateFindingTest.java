@@ -192,4 +192,31 @@ class CandidateFindingTest {
     CandidateFinding f = valid();
     assertThat(f.side()).isEqualTo(Side.RIGHT);
   }
+
+  @Test
+  void rejectsNonFiniteConfidence() {
+    CandidateFinding base = valid();
+    // NaN 与任何数比较都为 false，旧的 <0 || >1 校验放行后会成为去重代表元选择的"最大值"
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                new CandidateFinding(
+                    base.id(),
+                    base.runId(),
+                    base.category(),
+                    base.title(),
+                    base.description(),
+                    base.failureMode(),
+                    base.file(),
+                    base.line(),
+                    base.side(),
+                    base.evidence(),
+                    base.suggestion(),
+                    base.severityProposed(),
+                    base.preExistingSuspect(),
+                    Double.NaN,
+                    base.originAgentRole(),
+                    base.originModel()))
+        .withMessageContaining("confidence");
+  }
 }

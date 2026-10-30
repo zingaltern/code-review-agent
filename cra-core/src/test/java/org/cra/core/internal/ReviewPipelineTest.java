@@ -650,8 +650,9 @@ class ReviewPipelineTest {
 
   private static String bigPatch(int lines) {
     StringBuilder sb = new StringBuilder("@@ -1," + lines + " +" + lines + " @@\n");
+    // 大 diff 判据是 +/- 内容行（02§4.4）：context 行不计，这里必须造真实新增行
     for (int i = 0; i < lines; i++) {
-      sb.append(" line ").append(i).append("\n");
+      sb.append("+line ").append(i).append("\n");
     }
     return sb.toString();
   }
@@ -783,7 +784,7 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("因预算截断丢弃 2 条候选（未发布）");
+    assertThat(summary).contains("因预算截断丢弃 2 条候选（未验证、未发布；02§4.4）");
     assertThat(summary).containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
     assertThat(result.stats().degradations()).contains("budget-truncate-85");
   }

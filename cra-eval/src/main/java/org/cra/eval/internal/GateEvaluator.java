@@ -321,7 +321,7 @@ public final class GateEvaluator {
     return new EvalReport.GateCheck(
         "zero_publish_guardrail",
         pass ? PASS : RED,
-        z.ratio(),
+        z.sampleRatio(),
         policy.zeroPublishMaxRatio(),
         detail);
   }

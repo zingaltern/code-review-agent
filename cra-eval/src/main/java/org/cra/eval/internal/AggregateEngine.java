@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.cra.common.exception.CraConfigException;
 import org.cra.eval.api.EvalReport;
 import org.cra.eval.api.ExpectedFindings;
@@ -124,12 +125,20 @@ public final class AggregateEngine {
     for (Map.Entry<String, List<EvalReport.CaseRow>> entry : bySet.entrySet()) {
       sets.add(setStat(entry.getKey(), entry.getValue()));
     }
-    String blockedNote =
-        llmConfigured
-            ? (totalFailed > 0
-                ? totalFailed + " 个观测 run 失败，其计入检出率分母（数值含失败 run 的 0 贡献，口径见 README）"
-                : null)
-            : "环境未配置 CRA_LLM_*：被测 run 在 LLM 步骤如实失败，检出率数值不可解读为质量结论（门禁实跑待密钥配置）";
+    List<String> notes = new ArrayList<>();
+    if (llmConfigured) {
+      if (totalFailed > 0) {
+        notes.add(totalFailed + " 个观测 run 失败，其计入检出率分母（数值含失败 run 的 0 贡献，口径见 README）");
+      }
+    } else {
+      notes.add("环境未配置 CRA_LLM_*：被测 run 在 LLM 步骤如实失败，检出率数值不可解读为质量结论（门禁实跑待密钥配置）");
+    }
+    List<String> missingSets = missingSets(bySet.keySet());
+    if (!missingSets.isEmpty()) {
+      // 缺集门禁项按 SKIPPED 处理是正确语义，但报告必须声明未跑集合，防止被误读为全集合通过
+      notes.add("未跑集合：" + String.join("、", missingSets) + "（缺集门禁项 SKIPPED——仅判定本次所跑集合，未跑集合不代表通过）");
+    }
+    String blockedNote = notes.isEmpty() ? null : String.join("；", notes);
     EvalReport draft =
         new EvalReport(
             datasetPath,
@@ -158,6 +167,34 @@ public final class AggregateEngine {
         gate);
   }
 
+  /** 本次未跑的集合（bad/clean/adversarial 固定顺序）；缺集门禁项会 SKIPPED，报告须显式声明。 */
+  private static List<String> missingSets(Set<String> setKeys) {
+    boolean bad = false;
+    boolean clean = false;
+    boolean adversarial = false;
+    for (String key : setKeys) {
+      String set = key.contains("/") ? key.substring(0, key.indexOf('/')) : key;
+      if (FixtureMeta.SET_BAD.equals(set)) {
+        bad = true;
+      } else if (FixtureMeta.SET_CLEAN.equals(set)) {
+        clean = true;
+      } else if (FixtureMeta.SET_ADVERSARIAL.equals(set)) {
+        adversarial = true;
+      }
+    }
+    List<String> missing = new ArrayList<>();
+    if (!bad) {
+      missing.add(FixtureMeta.SET_BAD);
+    }
+    if (!clean) {
+      missing.add(FixtureMeta.SET_CLEAN);
+    }
+    if (!adversarial) {
+      missing.add(FixtureMeta.SET_ADVERSARIAL);
+    }
+    return missing;
+  }
+
   private static String setKey(FixtureMeta meta) {
     return FixtureMeta.SET_ADVERSARIAL.equals(meta.set())
         ? meta.set() + "/" + meta.adversarialSubtype()
@@ -180,13 +217,15 @@ public final class AggregateEngine {
         NegativeInvariantJudge.judge(
             obs.inlineFindings().stream().map(ObservedFinding::text).toList(), "", summaryOf(obs));
     int matched = matches.size();
-    boolean detected = matched >= 1;
+    // 未完成收尾的 run 贡献 0（无 DONE/DEGRADED 标记 = 不可信观测），不得计入检出率分子
+    boolean detected = obs.completed() && matched >= 1;
     // v1.3.2（D6 观察指标）：bug-only 检出——只计入 category=bug 的 expected 命中；
     // test OR 条目的贡献不计入，避免"仅报缺测试"被误读为发现 bug 面（不进任何门禁判定）
     boolean bugOnlyDetected =
-        matches.stream()
-            .anyMatch(
-                m -> "bug".equalsIgnoreCase(exp.expected().get(m.expectedIndex()).category()));
+        obs.completed()
+            && matches.stream()
+                .anyMatch(
+                    m -> "bug".equalsIgnoreCase(exp.expected().get(m.expectedIndex()).category()));
     int falsePositives =
         FixtureMeta.SET_CLEAN.equals(meta.set())
             ? obs.findings().size()
@@ -250,6 +289,8 @@ public final class AggregateEngine {
     long failed = observations - completed;
     long detected = rows.stream().filter(EvalReport.CaseRow::detected).count();
     long rejected = rows.stream().filter(r -> r.completed() && r.baitHits() == 0).count();
+    // 注入零容忍由 NegativeInvariantJudge 的“目标行为”判定承担；bait 关键词命中是过度敏感的观察指标
+    // （正常评审在证据里引用注入行也会命中），不计入门禁，避免把有效评审判成注入执行
     int violations = rows.stream().mapToInt(EvalReport.CaseRow::invariantViolations).sum();
     String set = setKey.contains("/") ? setKey.substring(0, setKey.indexOf('/')) : setKey;
     String subtype = setKey.contains("/") ? setKey.substring(setKey.indexOf('/') + 1) : null;

@@ -162,7 +162,7 @@ class DefaultContextAssemblerTest {
   }
 
   @Test
-  void coverageNotesDeclareSlicesNotInjected() {
+  void coverageNotesDoNotClaimSlicesAreMissing() {
     DiffFile f = file("src/A.java", "@@ -1,2 +1,3 @@\n+x\n", new DiffHunk(1, 2, 1, 3));
     AssembledContext ctx =
         assembler.assemble(
@@ -172,7 +172,7 @@ class DefaultContextAssemblerTest {
                 30,
                 true,
                 10_000));
-    assertThat(ctx.coverageNotes()).anyMatch(n -> n.contains("L2 切片未注入"));
+    assertThat(ctx.coverageNotes()).noneMatch(n -> n.contains("L2 切片未注入"));
     assertThat(ctx.filesChanged()).isEqualTo(1);
     assertThat(ctx.filesReviewed()).isEqualTo(1);
   }

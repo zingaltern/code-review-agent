@@ -125,4 +125,22 @@ class ReportSignatureTest {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("密钥");
   }
+
+  @Test
+  void rejectsNewlineInOptionalEnvelopeFields() {
+    String sha = ReportSignature.sha256(REPORT);
+    // commit/tier 曾不校验换行：签出的信封会多出物理行，parse 必拒（200 + 不可用签名）
+    assertThatThrownBy(
+            () ->
+                ReportSignature.sign(
+                    SECRET, "k", sha, "acme/demo", "abc\nissued_at:x", "l2", "t", "run_1"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("commit");
+    assertThatThrownBy(
+            () ->
+                ReportSignature.sign(
+                    SECRET, "k", sha, "acme/demo", "abc", "l2\nrun_id:x", "t", "run_1"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("tier");
+  }
 }

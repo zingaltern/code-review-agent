@@ -50,7 +50,10 @@ class CrossCheckerDefinitionTest {
     assertThat(barrierAfter).isGreaterThan(historyStart);
     int trustedStart = user.indexOf(trusted);
     assertThat(trustedStart).isGreaterThan(barrierAfter);
-    assertThat(user.indexOf(TemplateSupport.UNTRUSTED_OPEN, trustedStart)).isNegative();
+    // 产品段本身不得位于任何 UNTRUSTED 块内：最近的开标记必须已被更近的闭标记关闭
+    // （受限工具路径清单同样以 UNTRUSTED 包裹，位于产品段之后，不改变本断言）
+    assertThat(user.lastIndexOf(TemplateSupport.UNTRUSTED_OPEN, trustedStart))
+        .isLessThanOrEqualTo(user.lastIndexOf(TemplateSupport.UNTRUSTED_CLOSE, trustedStart));
   }
 
   @Test

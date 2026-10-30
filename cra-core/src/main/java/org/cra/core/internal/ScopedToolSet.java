@@ -76,7 +76,7 @@ final class ScopedToolSet {
     }
     List<String> lines = List.of(file.text().split("\n", -1));
     int start = clampLine(args, "start_line", 1);
-    int end = clampLine(args, "end_line", lines.size());
+    int end = Math.min(clampLine(args, "end_line", lines.size()), lines.size());
     if (start > end) {
       return new ToolResult(true, "行区间非法（start > end）: " + start + "-" + end);
     }

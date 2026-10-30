@@ -32,12 +32,24 @@ public final class RunCommand {
   public static int execute(EvalCliArgs.RunArgs args, Map<String, String> env) {
     List<Path> caseDirs = DatasetLoader.listCases(args.dataset(), args.set());
     if (args.onlyCases() != null && !args.onlyCases().isEmpty()) {
+      java.util.Set<String> requested =
+          args.onlyCases().stream()
+              .filter(id -> !id.isBlank())
+              .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
       List<Path> filtered = new ArrayList<>();
       for (Path p : caseDirs) {
         String id = p.getFileName().toString();
-        if (args.onlyCases().contains(id)) {
+        if (requested.contains(id)) {
           filtered.add(p);
         }
+      }
+      java.util.List<String> unknown =
+          requested.stream()
+              .filter(id -> filtered.stream().noneMatch(p -> p.getFileName().toString().equals(id)))
+              .toList();
+      if (!unknown.isEmpty()) {
+        // 拼错的 --case 曾静默缩小样本面（少 1 例仍可能过门禁），必须显式失败
+        throw new CraConfigException("--case 含未知用例: " + unknown + "（数据集: " + args.dataset() + "）");
       }
       caseDirs = filtered;
     }
@@ -49,7 +61,7 @@ public final class RunCommand {
     Map<String, FixtureMeta> metas = new LinkedHashMap<>();
     Map<String, ExpectedFindings> expecteds = new LinkedHashMap<>();
     List<CaseObservation> observations = new ArrayList<>();
-    EvalRunner runner = new EvalRunner(CliProcessRunner.JAVA_JAR);
+    EvalRunner runner = new EvalRunner(CliProcessRunner.javaJar(args.timeoutSec()));
     int index = 0;
     for (Path caseDir : caseDirs) {
       // 状态机先于数据加载（06§3）：draft 只有草稿、无 expected_findings.json——先给出"未确认"的
@@ -63,6 +75,10 @@ public final class RunCommand {
       if (isDraftAnnotation(meta)) {
         throw new CraConfigException(
             "用例 " + meta.caseId() + " 标注仍为 draft——先 cra-eval annotate confirm 后再 run（禁止跑未确认断言）");
+      }
+      if (metas.containsKey(meta.caseId())) {
+        throw new CraConfigException(
+            "重复 case_id: " + meta.caseId() + "（用例目录 " + caseDir + " 与其他目录冲突；聚合会按 id 合并样本）");
       }
       DatasetLoader.LoadedCase loaded = DatasetLoader.load(caseDir, cacheDir);
       metas.put(meta.caseId(), meta);

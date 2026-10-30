@@ -81,8 +81,8 @@ public final class ReportSignature {
       keyId = requireText(keyId, "keyId");
       reportSha256 = requireSha256(reportSha256, "reportSha256");
       repo = requireRepo(repo);
-      commit = commit == null ? "" : commit.strip();
-      tier = tier == null ? "" : tier.strip();
+      commit = requireOptionalSingleLine(commit, "commit");
+      tier = requireOptionalSingleLine(tier, "tier");
       issuedAt = requireText(issuedAt, "issuedAt");
       runId = requireText(runId, "runId");
       signature = requireSha256(signature, "signature");
@@ -225,6 +225,17 @@ public final class ReportSignature {
   private static String requireText(String value, String field) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException(field + " 不能为空");
+    }
+    if (value.contains("\n") || value.contains("\r")) {
+      throw new IllegalArgumentException(field + " 不得包含换行");
+    }
+    return value.strip();
+  }
+
+  /** 可空单行字段（commit/tier）：空值归一为空串，但同样拒绝 CR/LF——否则信封会多出物理行。 */
+  private static String requireOptionalSingleLine(String value, String field) {
+    if (value == null || value.isBlank()) {
+      return "";
     }
     if (value.contains("\n") || value.contains("\r")) {
       throw new IllegalArgumentException(field + " 不得包含换行");

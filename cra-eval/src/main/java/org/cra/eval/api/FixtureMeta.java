@@ -55,12 +55,22 @@ public record FixtureMeta(
   public static final String SET_CLEAN = "clean";
   public static final String SET_ADVERSARIAL = "adversarial";
 
+  /**
+   * 单段路径分量校验：case_id / snapshot.file 会被 resolve 到缓存目录或拼接文件路径—— 含分隔符、`..` 或绝对路径会逃出数据集/缓存根（含递归删除面）。
+   */
+  private static void requireSafeSegment(String value, String field) {
+    if (!value.matches("[A-Za-z0-9._-]+") || ".".equals(value) || "..".equals(value)) {
+      throw new IllegalArgumentException(field + " 必须是安全单段名称（[A-Za-z0-9._-]+）: " + value);
+    }
+  }
+
   public FixtureMeta {
     if (formatVersion != FORMAT_VERSION) {
       throw new IllegalArgumentException(
           "meta format_version=" + formatVersion + " 不受支持（当前 " + FORMAT_VERSION + "）");
     }
     Texts.requireNonBlank(caseId, "case_id");
+    requireSafeSegment(caseId, "case_id");
     Texts.requireNonBlank(set, "set");
     if (!SET_BAD.equals(set) && !SET_CLEAN.equals(set) && !SET_ADVERSARIAL.equals(set)) {
       throw new IllegalArgumentException("非法 set: " + set + "（bad|clean|adversarial）");
@@ -99,6 +109,7 @@ public record FixtureMeta(
 
     public Snapshot {
       Texts.requireNonBlank(file, "snapshot.file");
+      requireSafeSegment(file, "snapshot.file");
       sha256 = sha256 == null || sha256.isBlank() ? null : sha256;
       cropRoot = cropRoot == null ? "" : cropRoot;
     }

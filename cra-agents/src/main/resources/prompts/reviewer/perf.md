@@ -31,3 +31,6 @@
 
 ## 热点标注
 {{untrusted_extra_section}}
+
+## 受限工具范围
+{{scoped_paths_note}}

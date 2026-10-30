@@ -1,6 +1,7 @@
 package org.cra.eval.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 import java.util.List;
 import org.cra.eval.api.EvalReport;
@@ -147,11 +148,15 @@ class GateEvaluatorTest {
     EvalReport.GateCheck guard = check(m2, "zero_publish_guardrail");
     assertThat(guard.status()).isEqualTo(GateEvaluator.PASS);
     assertThat(guard.detail()).contains("0/12").contains("4/36");
+    // 判定值与 detail 的样本级数值一致（观测级 4/36 只作观察指标）
+    assertThat(guard.observed()).isZero();
 
     // 样本级 2/12 = 16.7% > 1/12 → 红（系统性沉默样本存在）
     EvalReport.Gate red =
         evaluate(report("l3", 3, "standard", badWithZeroPublish(6, 36, 2, 12)), GateTier.L3, false);
-    assertThat(check(red, "zero_publish_guardrail").status()).isEqualTo(GateEvaluator.RED);
+    EvalReport.GateCheck redGuard = check(red, "zero_publish_guardrail");
+    assertThat(redGuard.status()).isEqualTo(GateEvaluator.RED);
+    assertThat(redGuard.observed()).isCloseTo(2.0 / 12, within(1e-9));
     assertThat(red.passed()).isFalse();
   }
 

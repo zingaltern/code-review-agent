@@ -92,13 +92,13 @@ public final class DiffSplitter {
         status = "removed";
       } else if (line.startsWith("rename from ")) {
         status = "renamed";
-        oldPath = line.substring("rename from ".length()).trim();
+        oldPath = renamePath(line.substring("rename from ".length()), line);
       } else if (line.startsWith("rename to ")) {
         status = "renamed";
-        newPath = line.substring("rename to ".length()).trim();
-      } else if (line.startsWith("--- a/") || line.startsWith("--- /dev/null")) {
-        // 保持 GitHub patch 形态：跳过 ---/+++ 头
-      } else if (line.startsWith("+++ b/") || line.startsWith("+++ /dev/null")) {
+        newPath = renamePath(line.substring("rename to ".length()), line);
+      } else if (!inHunks && (line.startsWith("--- a/") || line.startsWith("--- /dev/null"))) {
+        // 保持 GitHub patch 形态：跳过 ---/+++ 头（仅在 hunk 之前——hunk 内容行可能以 "--- " 开头）
+      } else if (!inHunks && (line.startsWith("+++ b/") || line.startsWith("+++ /dev/null"))) {
         // 同上
       } else if (line.startsWith("@@")) {
         inHunks = true;
@@ -106,7 +106,7 @@ public final class DiffSplitter {
       } else if (inHunks) {
         patch.append(line).append('\n');
       }
-      if (line.startsWith("Binary files") || line.startsWith("GIT binary patch")) {
+      if (!inHunks && (line.startsWith("Binary files") || line.startsWith("GIT binary patch"))) {
         return new PatchedFile(oldPath, newPath, status, null);
       }
     }
@@ -118,8 +118,15 @@ public final class DiffSplitter {
   }
 
   private static String[] parseDiffGitHeader(String line) {
-    // diff --git a/<path> b/<path>；路径含空格时按 " b/" 与 " a/" 锚点切
+    // diff --git a/<path> b/<path>；git 对非 ASCII/含空格路径加 C 式引号（core.quotePath）
     String body = line.substring(DIFF_GIT.length());
+    if (body.startsWith("\"")) {
+      List<String> tokens = quotedTokens(body);
+      if (tokens.size() == 2) {
+        return new String[] {stripPrefix(tokens.get(0)), stripPrefix(tokens.get(1))};
+      }
+      throw new CraConfigException("diff --git 头引号形态无法解析: " + line);
+    }
     int mid = body.indexOf(" b/");
     if (mid < 0) {
       throw new CraConfigException("diff --git 头无法解析: " + line);
@@ -127,6 +134,82 @@ public final class DiffSplitter {
     String a = body.substring(0, mid);
     String b = body.substring(mid + 1);
     return new String[] {stripPrefix(a), stripPrefix(b)};
+  }
+
+  /** 解析两个连续 C 式引号串（"a/..." "b/..."），含八进制转义字节（UTF-8）。 */
+  private static List<String> quotedTokens(String body) {
+    List<String> out = new ArrayList<>();
+    int i = 0;
+    while (i < body.length() && out.size() < 2) {
+      while (i < body.length() && Character.isWhitespace(body.charAt(i))) {
+        i++;
+      }
+      if (i >= body.length() || body.charAt(i) != '"') {
+        break;
+      }
+      i++;
+      java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+      while (i < body.length() && body.charAt(i) != '"') {
+        char c = body.charAt(i);
+        if (c != '\\') {
+          if (c < 0x80) {
+            bytes.write(c);
+          } else {
+            bytes.writeBytes(String.valueOf(c).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          }
+          i++;
+          continue;
+        }
+        i++;
+        if (i >= body.length()) {
+          break;
+        }
+        char esc = body.charAt(i);
+        switch (esc) {
+          case 'n' -> bytes.write('\n');
+          case 't' -> bytes.write('\t');
+          case 'r' -> bytes.write('\r');
+          case '\\' -> bytes.write('\\');
+          case '"' -> bytes.write('"');
+          default -> {
+            if (esc >= '0' && esc <= '7' && i + 2 < body.length()) {
+              int value = 0;
+              int digits = 0;
+              while (digits < 3
+                  && i < body.length()
+                  && body.charAt(i) >= '0'
+                  && body.charAt(i) <= '7') {
+                value = value * 8 + (body.charAt(i) - '0');
+                i++;
+                digits++;
+              }
+              bytes.write(value & 0xFF);
+              continue;
+            }
+            bytes.write(esc);
+          }
+        }
+        i++;
+      }
+      if (i < body.length() && body.charAt(i) == '"') {
+        i++;
+      }
+      out.add(bytes.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+    return out;
+  }
+
+  /** rename from/to 行按 C 风格引号解码（与 diff --git 头一致）；未加引号时保留原样路径。 */
+  private static String renamePath(String value, String line) {
+    String token = value.trim();
+    if (!token.startsWith("\"")) {
+      return token;
+    }
+    List<String> tokens = quotedTokens(token);
+    if (tokens.size() != 1) {
+      throw new CraConfigException("rename 头引号形态无法解析: " + line);
+    }
+    return tokens.get(0);
   }
 
   private static String stripPrefix(String path) {

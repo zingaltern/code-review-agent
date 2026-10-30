@@ -12,6 +12,7 @@ import org.cra.common.run.Depth;
  * @param fullFileMaxLines 全文注入行数上限
  * @param priorityOnly true 时仅评审 priority_paths（hard-cap 触发）
  * @param notes 降档/自动选档说明（进 trace 与 Summary 覆盖声明）
+ * @param perspectiveDrop 额外裁掉的评审视角数（大 diff 降档：04§2.2 "视角降 1"）
  */
 public record DepthPlan(
     Depth effectiveDepth,
@@ -19,9 +20,25 @@ public record DepthPlan(
     boolean conditionalFullText,
     int fullFileMaxLines,
     boolean priorityOnly,
-    List<String> notes) {
+    List<String> notes,
+    int perspectiveDrop) {
 
   public DepthPlan {
     notes = List.copyOf(notes == null ? List.of() : notes);
+    if (perspectiveDrop < 0) {
+      throw new IllegalArgumentException("perspectiveDrop must be non-negative");
+    }
+  }
+
+  /** 兼容构造（无大 diff 视角降档）。 */
+  public DepthPlan(
+      Depth effectiveDepth,
+      int windowLines,
+      boolean conditionalFullText,
+      int fullFileMaxLines,
+      boolean priorityOnly,
+      List<String> notes) {
+    this(
+        effectiveDepth, windowLines, conditionalFullText, fullFileMaxLines, priorityOnly, notes, 0);
   }
 }

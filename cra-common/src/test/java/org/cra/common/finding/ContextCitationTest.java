@@ -91,4 +91,11 @@ class ContextCitationTest {
     assertThat(ContextCitation.commitRefs("普通证据 L3: x", "src/Foo.java")).isEmpty();
     assertThat(ContextCitation.reviewMdRefs("普通证据")).isEmpty();
   }
+
+  @Test
+  void eventRefsRequireCitationBlock() {
+    // ADR-0012 §2.6：只在「矛盾来源」块内解析，正文 "event loop" 不得命中
+    assertThat(ContextCitation.eventRefs("the event loop blocks the main thread")).isEmpty();
+    assertThat(ContextCitation.eventRefs("矛盾来源：\n- event INC-42")).hasSize(1);
+  }
 }

@@ -31,9 +31,12 @@ final class CliJarLocator {
               stream
                   .filter(p -> p.getFileName().toString().startsWith("cra-runner-cli-"))
                   .filter(p -> p.getFileName().toString().endsWith(".jar"))
-                  .filter(p -> !p.getFileName().toString().endsWith("sources.jar"))
-                  .sorted()
-                  .findFirst();
+                  // 分类器产物（-sources/-javadoc/-tests）不是被测 CLI；字典序首项会选中旧版本
+                  .filter(
+                      p -> !p.getFileName().toString().matches(".*-(sources|javadoc|tests)\\.jar$"))
+                  .max(
+                      java.util.Comparator.comparingLong((Path p) -> p.toFile().lastModified())
+                          .thenComparing(p -> p.getFileName().toString()));
           if (found.isPresent()) {
             return found.get().toAbsolutePath();
           }

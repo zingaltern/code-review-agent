@@ -56,7 +56,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final String CI_BOT_LOGIN = "github-actions[bot]";
   private static final int PAGE_SIZE = 100;
-  private static final int MAX_PAGES = 10;
+  private static final int MAX_PAGES = 100;
+
+  /** 分页硬上限（100×100 = 10k 条）：触顶即显式失败，禁止把部分结果冒充"全部评论"。 */
+  private static final int MAX_ITEMS = PAGE_SIZE * MAX_PAGES;
 
   private final GitHubHttpTransport transport;
   private final LedgerMarkerParser markerParser = new LedgerMarkerParser();
@@ -133,6 +136,11 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     JsonNode root =
         transport.getJson(
             repo, "/git/trees/" + GitHubPayloadSupport.urlEncode(sha) + "?recursive=1");
+    if (root.path("truncated").asBoolean(false)) {
+      // ADR-0015 §2.2：不可得不静默——截断的文件树会让"调用方/测试覆盖"判定把未看到的文件当成不存在
+      throw new org.cra.common.exception.CraIntegrationException(
+          "GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
+    }
     java.util.regex.Pattern glob = GitHubPayloadSupport.globToRegex(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry : root.path("tree")) {
@@ -353,8 +361,16 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private void collectPaged(
       RepoRef repo, String path, String login, String kind, List<LedgerComment> out) {
-    for (int page = 1; page <= MAX_PAGES; page++) {
+    // 与 GitLab 同语义：恰好 MAX_PAGES 个满页后探第 MAX_PAGES+1 页，空=恰好 10k 正常结束，非空=超限
+    for (int page = 1; page <= MAX_PAGES + 1; page++) {
       JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
+      if (page == MAX_PAGES + 1) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new org.cra.common.exception.CraIntegrationException(
+              "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
+        }
+        return;
+      }
       if (!root.isArray() || root.isEmpty()) {
         return;
       }

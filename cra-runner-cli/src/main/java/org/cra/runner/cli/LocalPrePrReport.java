@@ -53,7 +53,9 @@ final class LocalPrePrReport {
         .append("  耗时: ")
         .append(exec.durationMs() / 1000.0)
         .append("s\n");
-    out.append("完整输出: ").append(exec.logFile()).append('\n');
+    out.append("完整输出: ")
+        .append(exec.logFile() == null ? "（日志落盘失败，输出见上方回显/内存留存）" : exec.logFile())
+        .append('\n');
     if (exec.failed()) {
       out.append("\n失败摘录（真实输出节选，置顶）:\n");
       List<String> excerpts = BuildVerifyRunner.failureExcerpts(exec.output());

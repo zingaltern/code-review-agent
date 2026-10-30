@@ -124,4 +124,12 @@ class EventModelTest {
     return new ProductEvent(
         id, "o/r", null, null, AT, type, "summary", null, List.of(), List.of(), "", AT);
   }
+
+  @Test
+  void normalizesTrailingGlobCombinedWithSlash() {
+    // `src/billing/**/` 先剥尾 `/` 再剥 `/**`，否则落库后 SQL LIKE 按字面 `*` 匹配不到任何文件
+    assertThat(EventPathMatcher.normalize("src/billing/**/")).isEqualTo("src/billing");
+    assertThat(EventPathMatcher.normalize("src/billing/*/")).isEqualTo("src/billing");
+    assertThat(EventPathMatcher.matches("src/billing/**/", "src/billing/Invoice.java")).isTrue();
+  }
 }

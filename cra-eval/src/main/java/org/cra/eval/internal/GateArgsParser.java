@@ -28,6 +28,9 @@ final class GateArgsParser {
     }
     String jsonOut = named.get("--json-out");
     String sha256Out = named.get("--sha256-out");
+    if (sha256Out != null && !sha256Out.isBlank() && (jsonOut == null || jsonOut.isBlank())) {
+      throw new CraConfigException("--sha256-out 需与 --json-out 同用（哈希绑定重判报告；单独给出会被静默忽略）");
+    }
     return new EvalCliArgs.GateArgs(
         Path.of(report),
         tier,

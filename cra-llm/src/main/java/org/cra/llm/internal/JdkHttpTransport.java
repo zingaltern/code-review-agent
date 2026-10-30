@@ -1,14 +1,19 @@
 package org.cra.llm.internal;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /** JDK HttpClient 实现（无额外依赖；openai-code-review 的 HttpUtil 语义收敛到唯一传输层）。 */
 public final class JdkHttpTransport implements LlmTransport {
+
+  /** 响应体上限：正常 chat/completions 远小于此值；超限视为协议级异常，避免外部可控的堆耗尽。 */
+  static final int MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 
   private final HttpClient client;
 
@@ -45,7 +50,23 @@ public final class JdkHttpTransport implements LlmTransport {
       extraHeaders.forEach(builder::header);
     }
     HttpRequest request = builder.POST(HttpRequest.BodyPublishers.ofString(jsonBody)).build();
-    HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-    return new TransportResponse(response.statusCode(), response.body());
+    HttpResponse<InputStream> response =
+        client.send(request, HttpResponse.BodyHandlers.ofInputStream());
+    try (InputStream in = response.body()) {
+      return new TransportResponse(response.statusCode(), readBounded(in));
+    }
+  }
+
+  private static String readBounded(InputStream in) throws IOException {
+    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+    byte[] buffer = new byte[8192];
+    int n;
+    while ((n = in.read(buffer)) > 0) {
+      if (out.size() + n > MAX_RESPONSE_BYTES) {
+        throw new IOException("llm 响应体超过上限 " + MAX_RESPONSE_BYTES + " 字节");
+      }
+      out.write(buffer, 0, n);
+    }
+    return out.toString(StandardCharsets.UTF_8);
   }
 }

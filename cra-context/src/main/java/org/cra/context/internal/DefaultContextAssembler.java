@@ -64,9 +64,6 @@ public final class DefaultContextAssembler implements ContextAssembler {
       }
     }
 
-    if (input.conditionalFullText()) {
-      coverageNotes.add("L2 切片未注入（M1 单角色无按需路由，机制随 M2 视角接入）");
-    }
     long totalTokens = TokenMath.estimateTokens(diffText) + l1Tokens;
     return new AssembledContext(
         diffText,

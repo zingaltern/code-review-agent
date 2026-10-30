@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.SplittableRandom;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
 import org.cra.common.finding.Severity;
@@ -17,7 +16,6 @@ import org.cra.common.finding.Side;
 final class FindingJsonCodec {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final SplittableRandom RANDOM = new SplittableRandom();
 
   private FindingJsonCodec() {}
 
@@ -102,6 +100,11 @@ final class FindingJsonCodec {
   }
 
   private static String randomHex() {
-    return String.format("%08x%04x", RANDOM.nextInt(), RANDOM.nextInt(1 << 16));
+
+    // 并发解析（8 个评审代理线程）下必须使用线程本地 RNG：SplittableRandom 非线程安全，
+    // 共享实例在竞态下会产出相同 id，导致验证判定按 id 互相覆盖
+    java.util.concurrent.ThreadLocalRandom random =
+        java.util.concurrent.ThreadLocalRandom.current();
+    return String.format("%08x%04x", random.nextInt(), random.nextInt(1 << 16));
   }
 }

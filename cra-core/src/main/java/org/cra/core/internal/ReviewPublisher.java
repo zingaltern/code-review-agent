@@ -62,14 +62,21 @@ final class ReviewPublisher {
     boolean pullRequest = mode == ReviewMode.PULL_REQUEST;
     // 无 PR 载体（commit comment / issue）没有行级锚点：全部 finding 以详情进正文（05§2.4/§2.5），
     // 锚定校验结果仍如实进 stats/trace，但不作为发布分派依据
+    boolean markerUnsafePath = pullRequest && hasMarkerUnsafeInline(ordered);
     List<FindingAggregator.Scored> fallbacks =
         pullRequest
-            ? ordered.stream().filter(s -> s.anchor() == AnchorStatus.SUMMARY_FALLBACK).toList()
+            ? ordered.stream()
+                .filter(
+                    s ->
+                        s.anchor() == AnchorStatus.SUMMARY_FALLBACK
+                            || !ReviewBodyRenderer.markerSafePath(s.finding().file()))
+                .toList()
             : List.of();
     List<InlineComment> inline =
         pullRequest
             ? ordered.stream()
                 .filter(s -> s.anchor() == AnchorStatus.INLINE)
+                .filter(s -> ReviewBodyRenderer.markerSafePath(s.finding().file()))
                 .map(
                     s ->
                         new InlineComment(
@@ -81,6 +88,10 @@ final class ReviewPublisher {
                             s.finding().id()))
                 .toList()
             : List.of();
+    if (markerUnsafePath && !degradations.contains("path-marker-unsafe")) {
+      // 路径含 |/-->/换行会破坏账本标记（字段顺序严格校验），inline 降级为 Summary，幂等不静默失效
+      degradations.add("path-marker-unsafe");
+    }
     String summaryBody =
         ReviewBodyRenderer.summaryBody(
             request,
@@ -189,6 +200,10 @@ final class ReviewPublisher {
             result.summaryCommentId().isPresent()));
     if (result.summaryCommentId().isEmpty()) {
       // Summary 发布失败 = 无完成标记 = 不完整 run：不回写账本、不做过期收尾，重跑走指纹级补发（02§4.1）
+      // 必须显式降级：否则 run 报 SUCCESS、CI 退出 0，用户却看不到 Summary
+      if (!degradations.contains("summary-publish-failed")) {
+        degradations.add("summary-publish-failed");
+      }
       return (int) (publishedActual + fallbackActual);
     }
     recordToLedger(request, runId, ordered, result, skippedDuplicate, degraded, templateVersions);
@@ -377,5 +392,14 @@ final class ReviewPublisher {
       }
     }
     return failures;
+  }
+
+  /** inline 候选里是否存在会破坏账本标记的路径（Summary 候选不受影响）。 */
+  static boolean hasMarkerUnsafeInline(List<FindingAggregator.Scored> ordered) {
+    return ordered.stream()
+        .anyMatch(
+            s ->
+                s.anchor() == AnchorStatus.INLINE
+                    && !ReviewBodyRenderer.markerSafePath(s.finding().file()));
   }
 }

@@ -22,7 +22,7 @@ public final class RunBudgetTracker {
   }
 
   private final PipelineOptions options;
-  private long usedTokens;
+  private volatile long usedTokens;
 
   public RunBudgetTracker(PipelineOptions options) {
     this.options = options;

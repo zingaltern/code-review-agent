@@ -90,4 +90,22 @@ class DiffSplitterTest {
     assertThat(files.get(0).newPath()).isEqualTo("src/main/java/Old.java");
     assertThat(files.get(0).patch()).isNotNull();
   }
+
+  @Test
+  void renamePathsDecodeCStyleQuotes() {
+    // core.quotePath=true 时 rename from/to 行与 diff --git 头同样以 C 风格引号 + UTF-8 八进制字节输出
+    String diff =
+        """
+        diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251-renamed.txt"
+        similarity index 100%
+        rename from "caf\\303\\251.txt"
+        rename to "caf\\303\\251-renamed.txt"
+        """;
+    List<DiffSplitter.PatchedFile> files = DiffSplitter.split(diff);
+    assertThat(files).hasSize(1);
+    assertThat(files.get(0).status()).isEqualTo("renamed");
+    assertThat(files.get(0).oldPath()).isEqualTo("café.txt");
+    assertThat(files.get(0).newPath()).isEqualTo("café-renamed.txt");
+    assertThat(files.get(0).patch()).isNull();
+  }
 }

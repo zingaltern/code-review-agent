@@ -89,6 +89,8 @@ public final class AnnotateService {
     if (!Files.isRegularFile(draft)) {
       throw new CraConfigException("草稿不存在（先跑 annotate prefill）: " + draft);
     }
+    // 先校验再转正：手工编辑坏的草稿不能以"已确认"身份进入正式断言（下次 run 才炸）
+    Json.readExpected(draft);
     try {
       Files.move(draft, finalFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
     } catch (IOException e) {

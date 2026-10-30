@@ -118,16 +118,26 @@ public final class ReportCommand {
       if (text == null || !text.matches("\\d+[dhw]")) {
         throw new CraConfigException("--since 非法: " + text + "（示例: 7d / 12h / 2w）");
       }
-      long value = Long.parseLong(text.substring(0, text.length() - 1));
+      long value;
+      try {
+        value = Long.parseLong(text.substring(0, text.length() - 1));
+      } catch (NumberFormatException e) {
+        // 超长数字曾是未捕获 NFE（退出码 1 + 栈），契约要求参数故障退出 2
+        throw new CraConfigException("--since 数字越界: " + text);
+      }
       if (value <= 0) {
         throw new CraConfigException("--since 必须为正: " + text);
       }
-      return switch (text.charAt(text.length() - 1)) {
-        case 'h' -> Duration.ofHours(value);
-        case 'd' -> Duration.ofDays(value);
-        case 'w' -> Duration.ofDays(value * 7);
-        default -> throw new CraConfigException("--since 非法: " + text);
-      };
+      try {
+        return switch (text.charAt(text.length() - 1)) {
+          case 'h' -> Duration.ofHours(value);
+          case 'd' -> Duration.ofDays(value);
+          case 'w' -> Duration.ofDays(Math.multiplyExact(value, 7));
+          default -> throw new CraConfigException("--since 非法: " + text);
+        };
+      } catch (ArithmeticException e) {
+        throw new CraConfigException("--since 超出可表示范围: " + text);
+      }
     }
   }
 }

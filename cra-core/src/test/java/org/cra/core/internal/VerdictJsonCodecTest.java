@@ -119,4 +119,13 @@ class VerdictJsonCodecTest {
     assertThat(result.errors()).isEmpty();
     assertThat(result.verdicts().get("f_1").refutation()).isNull();
   }
+
+  @Test
+  void blankFindingIdIsSchemaError() {
+    VerdictJsonCodec.ParseResult result =
+        VerdictJsonCodec.parse(
+            "{\"verdicts\":[{\"finding_id\":\"  \",\"verdict\":\"CONFIRMED\",\"rationale\":\"L3\"}]}");
+    assertThat(result.verdicts()).isEmpty();
+    assertThat(result.errors()).anyMatch(e -> e.contains("finding_id"));
+  }
 }
