@@ -233,7 +233,8 @@ public final class JgitSymbolIndex implements SymbolIndex {
         if (!definedNames.contains(name)) {
           continue;
         }
-        int count = entry.getValue().size();
+        int count =
+            Math.max(entry.getValue().size(), scan.identifierCounts().getOrDefault(name, 0));
         occurrencesByName.merge(name, count, Integer::sum);
         outboundByPath.merge(path, count, Integer::sum);
         for (String definitionPath : definitionPathsByName.getOrDefault(name, List.of())) {

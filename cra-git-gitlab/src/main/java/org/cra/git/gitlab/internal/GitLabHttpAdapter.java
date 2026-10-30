@@ -51,7 +51,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
   private static final Logger LOG = LoggerFactory.getLogger(GitLabHttpAdapter.class);
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final int PAGE_SIZE = 100;
-  private static final int MAX_PAGES = 10;
+  private static final int MAX_PAGES = 100;
 
   private final GitLabHttpTransport transport;
   private final String botUsernameFallback;
@@ -658,24 +658,33 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
   private List<JsonNode> getPagedArray(RepoRef repo, String pathAndQuery) {
     List<JsonNode> out = new ArrayList<>();
     String page = "1";
+    boolean exhausted = false;
     for (int i = 0; i < MAX_PAGES; i++) {
       GitLabHttpTransport.Page p = transport.getPage(repo, withPage(pathAndQuery, page));
       JsonNode root = p.body();
       if (!root.isArray() || root.isEmpty()) {
+        exhausted = true;
         break;
       }
       root.forEach(out::add);
       String next = p.nextPage();
       if (next.isBlank()) {
         if (root.size() < PAGE_SIZE) {
+          exhausted = true;
           break;
         }
         next = incrementPageOrNull(page);
         if (next == null) {
-          break; // 异常分页头：页号无法递增，按无下一页处理
+          exhausted = true; // 异常分页头：页号无法递增，按无下一页处理
+          break;
         }
       }
       page = next;
+    }
+    if (!exhausted) {
+      // 触顶仍是满页 = 还有数据未读：返回部分结果会让文件索引/账本"看起来完整"
+      throw new org.cra.common.exception.CraIntegrationException(
+          "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
     }
     return out;
   }

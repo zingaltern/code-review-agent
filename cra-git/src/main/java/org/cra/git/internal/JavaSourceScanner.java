@@ -149,7 +149,8 @@ final class JavaSourceScanner {
    * @param packageName 包名（无包声明为空串）
    * @param definitions 定义（源码顺序）
    * @param imports import 语句（resolvedPath 为空，解析在索引层统一进行）
-   * @param identifierLines 标识符 → 出现行（不含 package/import 段、注释与字面量；已按上限截断）
+   * @param identifierLines 标识符 → 出现行（不含 package/import 段、注释与字面量；证据条数按上限截断）
+   * @param identifierCounts 标识符 → 精确出现次数（不受证据条数上限影响，ADR-0014 §2.3）
    * @param sourceLines 源码行（摘录用；0 基索引 = line - 1）
    */
   record FileScan(
@@ -158,11 +159,12 @@ final class JavaSourceScanner {
       List<SymbolDefinition> definitions,
       List<TypeImport> imports,
       Map<String, List<Integer>> identifierLines,
+      Map<String, Integer> identifierCounts,
       String[] sourceLines) {
 
     /** 空扫描（读取失败等降级用）。 */
     static FileScan empty(String path) {
-      return new FileScan(path, "", List.of(), List.of(), Map.of(), new String[] {""});
+      return new FileScan(path, "", List.of(), List.of(), Map.of(), Map.of(), new String[] {""});
     }
   }
 
@@ -188,6 +190,7 @@ final class JavaSourceScanner {
 
     List<SymbolDefinition> definitions = new ArrayList<>();
     Map<String, List<Integer>> identifierLines = new LinkedHashMap<>();
+    Map<String, Integer> identifierCounts = new LinkedHashMap<>();
     int depth = 0;
     List<String> typeStack = new ArrayList<>();
     List<Integer> bodyDepths = new ArrayList<>();
@@ -200,7 +203,7 @@ final class JavaSourceScanner {
       Token token = tokens.get(i);
       if (token.kind() == TokenKind.IDENT) {
         if (!KEYWORDS.contains(token.text())) {
-          recordIdentifier(identifierLines, token);
+          recordIdentifier(identifierLines, identifierCounts, token);
         }
         if (TYPE_KEYWORDS.contains(token.text())
             && i + 1 < tokens.size()
@@ -255,6 +258,7 @@ final class JavaSourceScanner {
         List.copyOf(definitions),
         List.copyOf(imports),
         identifierLines,
+        identifierCounts,
         sourceLines);
   }
 
@@ -648,7 +652,12 @@ final class JavaSourceScanner {
         path, name.text(), SymbolKind.FIELD, name.line(), owner, snippet(sourceLines, name.line()));
   }
 
-  private static void recordIdentifier(Map<String, List<Integer>> identifierLines, Token token) {
+  private static void recordIdentifier(
+      Map<String, List<Integer>> identifierLines,
+      Map<String, Integer> identifierCounts,
+      Token token) {
+    // 计数与证据条数解耦：≤100 行的上限只约束证据，不能把 occurrences 也截断（ADR-0014 §2.3）
+    identifierCounts.merge(token.text(), 1, Integer::sum);
     List<Integer> lines = identifierLines.computeIfAbsent(token.text(), key -> new ArrayList<>());
     if (lines.size() >= MAX_LINES_PER_NAME_PER_FILE) {
       return;

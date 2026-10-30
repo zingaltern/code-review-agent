@@ -20,7 +20,7 @@ public final class GitHubAssembly {
         new GitHubHttpAdapter(
             apiBase,
             token,
-            HttpClient.newBuilder().build(),
+            HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(20)).build(),
             d -> {
               try {
                 Thread.sleep(d);
