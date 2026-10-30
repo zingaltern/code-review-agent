@@ -126,6 +126,15 @@ final class FindingPromoter {
           }
         }
         case JUDGE -> {
+          if (budget.phase() == RunBudgetTracker.Phase.STOP) {
+            // 02§4.4 100%：终止剩余代理（含仲裁）；候选按验证不可得处理，不静默当拒绝
+            if (publishUnverified) {
+              unverifiedLabeled.add(s);
+            } else {
+              unverifiedCount++;
+            }
+            continue;
+          }
           boolean spotCheck = "refuted-spotcheck".equals(promotion.reason());
           JudgeArbiter.Judgement judgement =
               arbitrate(

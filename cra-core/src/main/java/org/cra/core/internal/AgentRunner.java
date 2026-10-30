@@ -282,7 +282,7 @@ public final class AgentRunner {
               null,
               List.of(),
               tokensIn + response.tokensIn(),
-              tokensOut,
+              tokensOut + response.tokensOut(),
               System.currentTimeMillis() - start,
               turns,
               Termination.LLM_UNAVAILABLE,
@@ -292,6 +292,10 @@ public final class AgentRunner {
         }
         tokensIn += response.tokensIn();
         tokensOut += response.tokensOut();
+        if (response.degradation() != null && !response.degradation().isBlank()) {
+          // 模型降级链触发（02§4.2/§6）：必须进 stats/Summary，不能只存在于响应对象里
+          degradations.add(response.degradation());
+        }
         if (response.model() != null) {
           lastModel = response.model();
         }

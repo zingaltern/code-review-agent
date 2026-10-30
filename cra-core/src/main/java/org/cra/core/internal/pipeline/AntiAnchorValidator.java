@@ -20,7 +20,6 @@ import java.util.stream.Collectors;
 public final class AntiAnchorValidator {
 
   private static final Pattern LINE_REF = Pattern.compile("\\bL?(\\d{1,4})\\b|:(\\d{1,4})");
-  private static final Pattern FENCE = Pattern.compile("```+");
 
   /** 校验结果（anti_anchor_check 字段与 trace 事件载荷）。 */
   public record Result(Status status, double overlapRatio, int refsTotal) {}
@@ -75,7 +74,7 @@ public final class AntiAnchorValidator {
     List<String> content = new java.util.ArrayList<>();
     boolean inside = false;
     for (String line : lines) {
-      if (FENCE.matcher(line.trim()).matches()) {
+      if (line.trim().startsWith("```")) {
         inside = !inside;
         continue;
       }

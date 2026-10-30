@@ -107,7 +107,8 @@ public final class VerdictJsonCodec {
       String findingId = textOf(node, "finding_id");
       String verdict = textOf(node, "verdict");
       String rationale = textOf(node, "rationale");
-      if (findingId == null) {
+      if (findingId == null || findingId.isBlank()) {
+        // 空串不是合法 id：放行会让整批判定按真实 id 查不到，静默退化为 UNAVAILABLE
         errors.add("verdicts[" + index + "]: 缺 finding_id");
       } else if (verdict == null) {
         errors.add("verdicts[" + index + "]: 缺 verdict");

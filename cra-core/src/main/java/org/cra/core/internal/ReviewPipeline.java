@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.ReviewCrew;
@@ -269,14 +268,8 @@ public final class ReviewPipeline implements Orchestrator {
     this.citedResolver = new CitedEvidenceResolver(localRepoContext, eventHistoryQuery);
     this.promoter = new FindingPromoter(judge, agentRunner, this.options, citedResolver);
     this.publisher = new ReviewPublisher(adapter, ledger);
-    this.verifyPool =
-        Executors.newFixedThreadPool(
-            MAX_PARALLEL_BATCHES,
-            runnable -> {
-              Thread thread = new Thread(runnable, "cra-verify");
-              thread.setDaemon(true);
-              return thread;
-            });
+    // 09§6：进程级共享验证池（daemon，不随 pipeline 实例创建/泄漏）
+    this.verifyPool = CorePools.verifyPool();
   }
 
   @Override
@@ -465,6 +458,16 @@ public final class ReviewPipeline implements Orchestrator {
         // 全代理执行失败（非 LLM 不可得）：零候选可信产出，降级收尾并声明（02§4.2 失败隔离语义）
         degraded = true;
       }
+      // 02§4.1/§4.2：角色超时/预算击穿/LLM 不可得导致缺失 = DEGRADED；验证侧不可得同理
+      if (outcome.degradations().stream()
+          .anyMatch(
+              d ->
+                  d.startsWith("agent-failed:")
+                      || d.startsWith("agent-budget-exceeded:")
+                      || d.startsWith("llm-unavailable-agents:")
+                      || d.equals("agent-timeout"))) {
+        degraded = true;
+      }
 
       // T2.8：run 内精确去重 merge（03§4.5：同 file ±3 行同 category；语义去重留 M3）
       ExactDedupMerger.Result merged = ExactDedupMerger.merge(outcome.findings());
@@ -484,6 +487,18 @@ public final class ReviewPipeline implements Orchestrator {
           gatekeeper.gate(request, diff, merged.kept(), publishedMarkers, contentCache, trace);
       List<FindingAggregator.Scored> candidates = gateOutcome.candidates();
       int skippedDuplicate = gateOutcome.skippedDuplicate();
+      // 02§4.4 / 04§2.2：预算 ≥85% 或大 diff 时只验证 top-10（验证成本才是降档要救的成本）；
+      // 被截断的候选计入 suppressed_by_truncation 并进 Summary（梯度沉默护栏）
+      int validationSuppressed = 0;
+      if ((outcome.truncationReached() || depthPlan.perspectiveDrop() > 0)
+          && candidates.size() > FindingAggregator.TRUNCATION_LIMIT) {
+        List<FindingAggregator.Scored> window = FindingAggregator.validationWindow(candidates);
+        validationSuppressed = candidates.size() - window.size();
+        candidates = window;
+        trace.emit(
+            "validation_truncation",
+            Map.of("kept", window.size(), "suppressed", validationSuppressed));
+      }
 
       // v1.4（ADR-0015）：bug 类候选的确定性调用点索引——一次仓库树列举，逐批次有界扫描
       List<String> javaFileIndex =
@@ -522,7 +537,6 @@ public final class ReviewPipeline implements Orchestrator {
       VerificationWave.WaveResult waveResult =
           wave.verify(candidates, policy, headFiles, reviewDiff, runId, testFileIndex, repoKey);
       degradations.addAll(waveResult.degradations());
-      budget.record(waveResult.tokensIn(), waveResult.tokensOut());
       long tokensIn = outcome.tokensIn() + waveResult.tokensIn();
       long tokensOut = outcome.tokensOut() + waveResult.tokensOut();
 
@@ -547,9 +561,14 @@ public final class ReviewPipeline implements Orchestrator {
       int unverifiedCount = promotion.unverifiedCount();
 
       // T1.7/T1.6：severity 排序 + nit 预算 + 阶梯截断 top-10（02§4.4；只对确认集执行）
-      FindingAggregator.Aggregation aggregation =
+      FindingAggregator.Aggregation rawAggregation =
           FindingAggregator.aggregate(
               confirmedCandidates, policy, options.nitBudgetDefault(), outcome.truncationReached());
+      FindingAggregator.Aggregation aggregation =
+          new FindingAggregator.Aggregation(
+              rawAggregation.ordered(),
+              rawAggregation.nitDropped(),
+              rawAggregation.suppressedByTruncation() + validationSuppressed);
       List<FindingAggregator.Scored> toPublish = new ArrayList<>(aggregation.ordered());
       toPublish.addAll(unverifiedLabeled);
       trace.emit(
@@ -597,6 +616,19 @@ public final class ReviewPipeline implements Orchestrator {
               unverifiedCount,
               outcome.templateVersions(),
               signoff);
+      if (degradations.stream()
+          .anyMatch(
+              d ->
+                  d.startsWith("verifier-budget-exhausted")
+                      || d.startsWith("verifier-timeout")
+                      || d.startsWith("verifier-batch-failed")
+                      || d.equals("verifier-unavailable"))) {
+        degraded = true;
+      }
+      if (degradations.contains("summary-publish-failed")) {
+        // Summary 未发出 = 无 DONE 标记 = 不完整发布（02§4.1），不得报 SUCCESS
+        degraded = true;
+      }
       ReviewRunFinisher.PublishCounters counters = ReviewRunFinisher.counters(toPublish, plan);
       RunStatus status = degraded ? RunStatus.DEGRADED : RunStatus.SUCCESS;
       ReviewStats stats =

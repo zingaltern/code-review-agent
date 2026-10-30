@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import org.cra.agents.api.AgentBrief;
@@ -43,14 +42,8 @@ final class ReviewAgentDispatcher {
   ReviewAgentDispatcher(AgentRunner agentRunner, ContextAssembler contextAssembler) {
     this.agentRunner = agentRunner;
     this.contextAssembler = contextAssembler;
-    this.pool =
-        Executors.newFixedThreadPool(
-            MAX_PARALLEL,
-            runnable -> {
-              Thread thread = new Thread(runnable, "cra-review");
-              thread.setDaemon(true);
-              return thread;
-            });
+    // 09§6：进程级共享池（常驻 server 按仓库缓存 pipeline，实例自建池会线性泄漏线程）
+    this.pool = org.cra.core.internal.CorePools.reviewPool();
   }
 
   /** 单代理派发结果。 */
@@ -118,7 +111,13 @@ final class ReviewAgentDispatcher {
     long sliceTokens = sliceRole ? slices.estimatedTokens() : 0L;
     ContextInput contextInput =
         buildContextInput(
-            chunk, headFiles, depthPlan, simplified, agent.budget().maxInputTokens(), sliceTokens);
+            chunk,
+            headFiles,
+            depthPlan,
+            simplified,
+            agent.budget().maxInputTokens(),
+            sliceTokens,
+            TokenMath.estimateTokens(extraSection));
     return pool.submit(
         () ->
             dispatch(
@@ -272,7 +271,18 @@ final class ReviewAgentDispatcher {
     try {
       Prepared prepared = prepare.get();
       AgentBrief brief = agent.buildBrief(prepared.input());
-      Path briefPath = trace.persistBrief(brief, scope.key());
+      // 同一模块超过 3 文件会拆成多个 chunk，key 相同——后缀加文件集短哈希，避免并行代理写同一 brief 文件
+      Path briefPath =
+          trace.persistBrief(
+              brief,
+              scope.key()
+                  + "-"
+                  + Integer.toHexString(
+                      scope.files().stream()
+                          .map(org.cra.common.git.DiffFile::path)
+                          .sorted()
+                          .toList()
+                          .hashCode()));
       trace.emit(
           "agent_start",
           Map.of(
@@ -426,12 +436,16 @@ final class ReviewAgentDispatcher {
       DepthPlan depthPlan,
       boolean simplified,
       long agentInputBudget,
-      long sliceTokens) {
+      long sliceTokens,
+      long extraSectionTokens) {
     boolean fullText = depthPlan.conditionalFullText() && !simplified;
     int window = simplified ? Math.min(depthPlan.windowLines(), 15) : depthPlan.windowLines();
-    // L2 切片占用该代理的输入预算（ADR-0014）：从 L1 预算扣除，保证 brief 不越单代理硬限
+    // L2 切片与 Security 全文附加段都占用该代理的输入预算：从 L1 预算扣除，保证 brief 不越单代理硬限
     long reserved =
-        TokenMath.estimateTokens(estimateChunkL0(chunk)) + 4_000 + Math.max(0, sliceTokens);
+        TokenMath.estimateTokens(estimateChunkL0(chunk))
+            + 4_000
+            + Math.max(0, sliceTokens)
+            + Math.max(0, extraSectionTokens);
     long l1Budget = Math.max(1_000, agentInputBudget - reserved);
     return new ContextInput(
         chunk.files(), headFiles, window, fullText, depthPlan.fullFileMaxLines(), l1Budget);

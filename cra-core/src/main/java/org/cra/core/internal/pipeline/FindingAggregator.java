@@ -16,7 +16,7 @@ import org.cra.core.internal.pipeline.PreExistingBlameChecker.Verdict;
 public final class FindingAggregator {
 
   /** 发布集合截断上限（02§4.4 ≥85% 档）。 */
-  static final int TRUNCATION_LIMIT = 10;
+  public static final int TRUNCATION_LIMIT = 10;
 
   private FindingAggregator() {}
 
@@ -74,6 +74,18 @@ public final class FindingAggregator {
       kept = new ArrayList<>(kept.subList(0, TRUNCATION_LIMIT));
     }
     return new Aggregation(kept, nitDropped, suppressed);
+  }
+
+  /**
+   * 验证窗口（02§4.4 ≥85% / 04§2.2 大 diff：按 severity 排序只验证 top-10）。
+   *
+   * @param candidates 去重+锚定后的候选
+   * @return 按发布顺序截断到 {@link #TRUNCATION_LIMIT} 的候选（少于上限时原样返回）
+   */
+  public static List<Scored> validationWindow(List<Scored> candidates) {
+    List<Scored> sorted = new ArrayList<>(candidates);
+    sorted.sort(publishOrder());
+    return List.copyOf(sorted.subList(0, Math.min(TRUNCATION_LIMIT, sorted.size())));
   }
 
   private static Comparator<Scored> publishOrder() {

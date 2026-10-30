@@ -6,7 +6,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.SplittableRandom;
+import java.util.concurrent.ThreadLocalRandom;
 import org.cra.common.finding.AnchorStatus;
 import org.cra.common.run.Coverage;
 import org.cra.common.run.ReviewRequest;
@@ -26,7 +26,6 @@ import org.cra.core.internal.pipeline.PreExistingBlameChecker;
  */
 final class ReviewRunFinisher {
 
-  private static final SplittableRandom RANDOM = new SplittableRandom();
   private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
   private ReviewRunFinisher() {}
@@ -35,7 +34,7 @@ final class ReviewRunFinisher {
     return "run_"
         + LocalDateTime.now().format(TS)
         + "-"
-        + String.format("%06x", RANDOM.nextInt(1 << 24));
+        + String.format("%06x", ThreadLocalRandom.current().nextInt(1 << 24));
   }
 
   static ReviewResult finish(

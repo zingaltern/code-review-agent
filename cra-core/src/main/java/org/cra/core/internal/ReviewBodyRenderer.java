@@ -32,19 +32,17 @@ final class ReviewBodyRenderer {
         .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
         .append("] ")
         .append(escape(f.title()))
-        .append("** — `")
-        .append(f.file())
-        .append(":")
-        .append(f.line())
-        .append("`\n\n");
+        .append("** — ")
+        .append(codeSpan(f.file() + ":" + f.line()))
+        .append("\n\n");
     if (unverified) {
       body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
     }
     body.append(escape(f.description())).append("\n\n");
     body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
-    body.append("**证据**：\n```\n").append(f.evidence()).append("\n```\n");
+    body.append("**证据**：\n").append(codeBlock(f.evidence())).append("\n");
     if (f.suggestion() != null && !f.suggestion().isBlank()) {
-      body.append("\n**建议**：\n```\n").append(f.suggestion()).append("\n```\n");
+      body.append("\n**建议**：\n").append(codeBlock(f.suggestion())).append("\n");
     }
     // 规则 3（05§1.3）：标记行由发布器在全部正文之后追加（正文已全量转义 <!--）
     body.append("\n<!-- cra:v=")
@@ -295,19 +293,17 @@ final class ReviewBodyRenderer {
           .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
           .append("] ")
           .append(escape(f.title()))
-          .append(" — `")
-          .append(f.file())
-          .append(":")
-          .append(f.line())
-          .append("`\n\n");
+          .append(" — ")
+          .append(codeSpan(f.file() + ":" + f.line()))
+          .append("\n\n");
       if (unverified) {
         body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
       }
       body.append(escape(f.description())).append("\n\n");
       body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
-      body.append("**证据**：\n```\n").append(f.evidence()).append("\n```\n\n");
+      body.append("**证据**：\n").append(codeBlock(f.evidence())).append("\n\n");
       if (f.suggestion() != null && !f.suggestion().isBlank()) {
-        body.append("**建议**：\n```\n").append(f.suggestion()).append("\n```\n\n");
+        body.append("**建议**：\n").append(codeBlock(f.suggestion())).append("\n\n");
       }
     }
   }
@@ -315,11 +311,9 @@ final class ReviewBodyRenderer {
   private static String listLine(FindingAggregator.Scored s) {
     return "- **"
         + escape(s.finding().title())
-        + "** — `"
-        + s.finding().file()
-        + ":"
-        + s.finding().line()
-        + "`\n";
+        + "** — "
+        + codeSpan(s.finding().file() + ":" + s.finding().line())
+        + "\n";
   }
 
   static String categoryOf(CandidateFinding finding) {
@@ -329,6 +323,40 @@ final class ReviewBodyRenderer {
   static String escape(String text) {
     // 05§1.3 规则 3：正文 <!-- → &lt;!--（正文永远不可能再产生未转义 HTML 注释）
     return text.replace("<!--", "&lt;!--");
+  }
+
+  /** 代码块包裹（04§3.3 规则 3）：围栏长度按内容中最长反引号串动态加一—— 否则 finding 文本里自带 ``` 即可提前闭合围栏，在 bot 评论里注入链接/提及/图片。 */
+  static String codeBlock(String text) {
+    String content = text == null ? "" : text;
+    int longest = 0;
+    int run = 0;
+    for (int i = 0; i < content.length(); i++) {
+      if (content.charAt(i) == '`') {
+        run++;
+        longest = Math.max(longest, run);
+      } else {
+        run = 0;
+      }
+    }
+    String fence = "`".repeat(Math.max(3, longest + 1));
+    return fence + "\n" + content + "\n" + fence;
+  }
+
+  /** 行内代码（路径/行号）：反引号与换行会被中和，避免闭合 code span 或拆行。 */
+  static String codeSpan(String text) {
+    return "`"
+        + (text == null ? "" : text.replace("`", "'").replace("\r", " ").replace("\n", " "))
+        + "`";
+  }
+
+  /** 账本标记的 file 值是否可无歧义解析（字段分隔 `|`、注释闭合 `-->`、换行都会破坏标记格式）。 */
+  static boolean markerSafePath(String path) {
+    return path != null
+        && !path.contains("|")
+        && !path.contains("<!--")
+        && !path.contains("-->")
+        && !path.contains("\n")
+        && !path.contains("\r");
   }
 
   static String shortSha(String sha) {

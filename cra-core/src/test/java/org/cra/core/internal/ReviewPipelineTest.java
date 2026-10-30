@@ -650,8 +650,9 @@ class ReviewPipelineTest {
 
   private static String bigPatch(int lines) {
     StringBuilder sb = new StringBuilder("@@ -1," + lines + " +" + lines + " @@\n");
+    // 大 diff 判据是 +/- 内容行（02§4.4）：context 行不计，这里必须造真实新增行
     for (int i = 0; i < lines; i++) {
-      sb.append(" line ").append(i).append("\n");
+      sb.append("+line ").append(i).append("\n");
     }
     return sb.toString();
   }

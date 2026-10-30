@@ -179,12 +179,18 @@ final class VerificationBatchAssembler {
     String findingsText = renderFindingsText(batch);
     String testIndex = renderTestFileIndex(batch, testFileIndex);
     String slices = crossFileContext == null ? "" : crossFileContext;
+    String citedEvidence = renderCitedEvidence(batch, citedResolver, repo);
+    String policySections = renderPolicySections(policy, batch);
     long indexReserve = callSiteIndex == null ? 0 : CallSiteIndex.RENDER_TOKEN_CAP;
     long sliceTokens = TokenMath.estimateTokens(slices);
+    // 预留必须覆盖最终 brief 的全部非代码段（含被引证据、策略、测试清单与系统提示余量），
+    // 否则 context 类批次会在 AgentRunner 发送前被 12k 硬限杀掉 → UNVERIFIED 不发布
     long reserved =
         TokenMath.estimateTokens(findingsText)
-            + 1_200
+            + TokenMath.estimateTokens(citedEvidence)
+            + TokenMath.estimateTokens(policySections)
             + TokenMath.estimateTokens(testIndex)
+            + 2_000
             + indexReserve
             + sliceTokens;
     long contextBudget = Math.max(1_000, budget.maxInputTokens() - reserved);
@@ -199,12 +205,7 @@ final class VerificationBatchAssembler {
       codeContext = codeContext.isBlank() ? slices : codeContext + "\n\n" + slices;
     }
     return new VerificationBatchInput(
-        file,
-        items,
-        codeContext,
-        renderCitedEvidence(batch, citedResolver, repo),
-        renderPolicySections(policy, batch),
-        testIndex);
+        file, items, codeContext, citedEvidence, policySections, "", testIndex);
   }
 
   /**
@@ -246,13 +247,18 @@ final class VerificationBatchAssembler {
    * @return 第二轮输入
    */
   static VerificationBatchInput withFollowup(VerificationBatchInput base, String followupText) {
+    String followup = capLines(followupText, FOLLOWUP_TOKEN_CAP);
+    // 补查文本追加在既有代码上下文之上：等量收缩上下文，保证第二轮 brief 仍在 verifier 输入硬限内
+    long followupTokens = TokenMath.estimateTokens(followup);
+    long contextCap = Math.max(1_000, 9_000 - followupTokens);
     return new VerificationBatchInput(
         base.file(),
         base.items(),
-        base.codeContext(),
+        capLines(base.codeContext(), contextCap),
         base.citedEvidence(),
         base.policySections(),
-        capLines(followupText, FOLLOWUP_TOKEN_CAP));
+        followup,
+        base.testFileIndex());
   }
 
   /**
@@ -384,10 +390,14 @@ final class VerificationBatchAssembler {
                     + item.severity()
                     + "\n标题："
                     + item.title()
+                    + "\n描述："
+                    + item.description()
                     + "\n失败模式："
                     + item.failureMode()
                     + "\n证据："
                     + item.evidence()
+                    + "\n建议："
+                    + item.suggestion()
                     + "\n")
         .collect(Collectors.joining("\n"));
   }

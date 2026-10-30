@@ -37,6 +37,9 @@ import org.cra.core.internal.pipeline.SemanticContext;
  */
 final class VerificationWave {
 
+  /** 单批验证等待硬限（Verifier 240s 时间预算 + 重试/退避余量）。 */
+  private static final long VERIFY_BATCH_TIMEOUT_MS = 360_000L;
+
   private final SubAgent<VerificationBatchInput> verifier;
   private final SemanticContext semanticContext;
   private final AgentRunner agentRunner;
@@ -178,19 +181,25 @@ final class VerificationWave {
     int batches = 0;
     for (Future<BatchOutcome> future : futures) {
       try {
-        BatchOutcome outcome = future.get();
+        // 09§6 强制：带超时 Future；单批卡住/异常收敛为该批验证不可得（UNVERIFIED），不炸穿整个 run
+        BatchOutcome outcome =
+            future.get(VERIFY_BATCH_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
         batches++;
         outcomes.putAll(outcome.outcomes());
         indexByFinding.putAll(outcome.indexByFinding());
         tokensIn += outcome.tokensIn();
         tokensOut += outcome.tokensOut();
         budget.record(outcome.tokensIn(), outcome.tokensOut());
+      } catch (java.util.concurrent.TimeoutException e) {
+        future.cancel(true);
+        degradations.add("verifier-timeout");
       } catch (InterruptedException e) {
+        futures.forEach(f -> f.cancel(true));
         Thread.currentThread().interrupt();
         throw new IllegalStateException("验证波被中断", e);
       } catch (java.util.concurrent.ExecutionException e) {
         Throwable cause = e.getCause() == null ? e : e.getCause();
-        throw new IllegalStateException("验证批次执行失败: " + cause.getMessage(), cause);
+        degradations.add("verifier-batch-failed: " + cause.getClass().getSimpleName());
       }
     }
     return new WaveResult(
