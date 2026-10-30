@@ -17,7 +17,10 @@ import java.util.Set;
  * output-tokens}；未覆盖的维度沿用定义自带默认（03§6）。
  *
  * <p>覆盖在组合根以装饰器形式施加（{@link #apply})：核心只面向 {@link SubAgent} 接口，预算读取点（上下文裁剪、AgentRunner
- * 硬限、验证/仲裁组装）自然生效，无需改动编排逻辑。轮次与超时不在覆盖范围（03§6 的隔离机制不随配置放宽）。
+ * 硬限、验证/仲裁组装）自然生效，无需改动编排逻辑。轮次与超时不在覆盖范围（03§6 的隔离机制不随配置放宽）。 *
+ *
+ * <p>校验时序：两维度都覆盖时在构造期校验 input&gt;output；**单维度覆盖**必须与定义默认值合并后才能判定（{@link #apply} 期的 merge 校验），此时才可能抛
+ * IllegalArgumentException——配置错误仍在组装期（退出码 2）暴露，不会带病运行。
  */
 public final class AgentBudgetOverrides {
 
@@ -141,8 +144,9 @@ public final class AgentBudgetOverrides {
       if (dot <= 0) {
         continue;
       }
-      String role = rest.substring(0, dot);
-      String field = rest.substring(dot + 1);
+      // 与 of() 同一归一化口径：键大小写/首尾空白不敏感——静默丢弃配置比拒绝更危险
+      String role = rest.substring(0, dot).strip().toLowerCase(Locale.ROOT);
+      String field = rest.substring(dot + 1).strip();
       if (!ROLE_KEYS.contains(role)) {
         continue;
       }

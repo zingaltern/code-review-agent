@@ -226,11 +226,13 @@ public final class CallSiteIndex {
     return entries;
   }
 
+  /** 实际读取内容并扫描的候选文件数（≤ {@link #candidateFiles()}；内容不可得的候选不计入）。 */
   public int filesScanned() {
     return filesScanned;
   }
 
   /** 候选文件数（截断前）。 */
+  /** 纳入本轮扫描计划的候选文件数（含 self；上限 {@value #MAX_FILES}，记录截断前数值）。 */
   public int candidateFiles() {
     return candidateFiles;
   }
@@ -385,6 +387,10 @@ public final class CallSiteIndex {
    *
    * @return 去重后的候选路径（按路径升序；不含批次文件与已入选的同目录文件）
    */
+  /**
+   * import 关联 caller（词法启发式，ADR-0014 近似性）：精确解析（{@code resolvedInRepo}）、静态成员导入（包内类型前缀）、 通配导入（{@code
+   * pkg.*}）。不做类型绑定：同名成员跨类型/运行期 DI 装配不在覆盖范围，渲染端已声明近似性。
+   */
   private static List<String> importCallers(
       String batchFile, String batchFileText, SymbolIndexSnapshot index, Set<String> excluded) {
     String packageName = packageOf(batchFileText);
@@ -435,7 +441,15 @@ public final class CallSiteIndex {
    * @return 渲染文本（非空）
    */
   public String render(long tokenCap) {
-    long cap = Math.max(MIN_RENDER_CAP, tokenCap);
+    if (tokenCap < MIN_RENDER_CAP) {
+      // 严格上限语义：调用方给多小就注入多小（只留声明行），不得用内部下限顶回调用方预算
+      return "## 受影响符号的调用点索引（确定性预取；调用链不完整，未列出不代表不存在调用者）\n（渲染预算不足（"
+          + tokenCap
+          + " < "
+          + MIN_RENDER_CAP
+          + "），条目未注入；如需调用方证据可用 followup_file 请求具体文件）\n";
+    }
+    long cap = tokenCap;
     StringBuilder sb = new StringBuilder();
     sb.append("## 受影响符号的调用点索引（确定性预取；调用链不完整，未列出不代表不存在调用者）\n");
     if (!available) {
