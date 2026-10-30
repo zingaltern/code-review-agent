@@ -10,6 +10,7 @@
 > **v1.3.3**（2026-10-27，M4f-full，ADR-0012）：§1 L5 增**产品事件史条目**（按 `event <id>` 预取，≤1.5k/批）；§2.2 CrossChecker 增量改"变更史/事件史共享 ≤4k"；§2.4 声明事件史不进 CLI 评测（服务端数据面）。
 > **v1.3.4**（2026-10-28，ADR-0015）：§2.4 补验证层反证纪律的增量成本（预算不变，仅 bug 类降级仲裁有界增加）；§4.2 verifier 骨架补 `refutation` 契约与 bug 类调用点索引的组装纪律。
 > **v1.4**（2026-10-28，M4e 池内项，ADR-0014）：§1 **L2 从"未注入"变为"条件注入（默认关闭）"**——确定性符号索引（Java-only）+ 跨文件切片，仅 dataflow/security/verifier 注入、单 brief ≤4k 且从 L1 预算扣除；§2.2 补 L2 切片算术；§2.4 声明 L2 收益度量不在本轮评测口径内。
+> **v1.4.1**（2026-10-30，ADR-0015 §6）：反证机械校验扩至 test 类——§2.4 降级仲裁成本的上界改为 bug/test 类 REFUTED 候选数；verifier/judge 预算与模型可见契约不变。
 
 ---
 
@@ -66,7 +67,7 @@
 
 **数据集与成本口径校准（2026-10-27）**：L2 数据集已由 M1 基线（bad 12 + clean 8）扩至 M3 的 bad 30 + clean 20，k=2 → **60/40 观测**；表中「≈9M」按原 ~90k/用例规划上限线性推算，「≈1.7M」为最近一次真实 L2（`eval/l2/report.json`，commit `9eb4a82`，k=2 quick）实测：≈1.71M in / 0.15M out，单观测均值 ≈17k in / ≈1.5k out，观测耗时合计 ≈22min。真实成本以报告 `run_metrics` 为准。
 
-**验证层反证纪律的增量成本（v1.4，ADR-0015）**：verifier 输入/输出/轮次预算均不变（调用点索引 ≤700 token 从 codeContext 预留；refutation 对象计入既有 1.5k 输出预算）；judge 案件对 bug 类附索引 ≤500 token（16k 案件预算内）。新增成本只有**bug 类无有效反证 REFUTED 的降级仲裁**：每次 ≤16k in / ≤1k out，上界 = 每 run bug 类 REFUTED 候选数（L3 实测单 case 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
+**验证层反证纪律的增量成本（v1.4，ADR-0015）**：verifier 输入/输出/轮次预算均不变（调用点索引 ≤700 token 从 codeContext 预留；refutation 对象计入既有 1.5k 输出预算）；judge 案件对 bug 类附索引 ≤500 token（16k 案件预算内）。新增成本只有**bug/test 类无有效反证 REFUTED 的降级仲裁**（test 类于 v1.4.1 纳入，ADR-0015 §6）：每次 ≤16k in / ≤1k out，上界 = 每 run bug/test 类 REFUTED 候选数（L3 实测单 case 该类 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
 
 **L1 判定语义（v1.3.1 修正——"固定种子=确定性"假设不成立：OpenAI 兼容生态的 `seed` 是 best-effort，多数兼容端点忽略该参数，语义不跨 provider/模型版本稳定，而本项目恰是多模型路由架构）**：
 

@@ -1,6 +1,7 @@
 # ADR-0015 验证层反证纪律与 bug 类上下文增强
 
 - 状态：accepted（2026-10-28，设计随实现落地；有界对比结果为验收证据，见 PR）
+- 修订：2026-10-30 §6——机械校验适用范围 bug → bug/test（security 明确暂不扩，理由见 §6）；降级逻辑、原因枚举、阈值与 trace 语义不变
 - 关联：03§4.2/§4.3/§6、04§2.4/§4.2、06§1.2、07§6.0、docs/audits/l3-flip-audit-2026-10-27.md、docs/audits/l3-stability-2026-10-27.md
 - 影响面：`cra-core`（VerdictJsonCodec、VerificationWave、VerificationBatchAssembler、CallSiteIndexer、FindingPromoter、PipelineDataLoader、ReviewPipeline）；`cra-agents` 模板（verifier/balanced-review.md、judge/arbitrate.md）；docs/03/04/06/07
 
@@ -50,7 +51,7 @@ CrossChecker 默认关闭不变；验证层预算与轮次不得无上限增长�
 
 ### 2.1 REFUTED 必须给出"可核查反证"，否则降级为 INSUFFICIENT_EVIDENCE
 
-**契约**（verifier 输出新增可选对象；bug 类 REFUTED 必填）：
+**契约**（verifier 输出新增可选对象；bug/test 类 REFUTED 必填）：
 
 ```json
 {"finding_id": "f_…", "verdict": "REFUTED", "rationale": "…",
@@ -67,7 +68,7 @@ CrossChecker 默认关闭不变；验证层预算与轮次不得无上限增长�
 | `CONTRACT_SAFE` | 被调方/契约保证该输入不可能出现（如契约声明非 null 且调用点受约束） | 是 |
 | `CITATION_MISMATCH` | 结论的方法名/行号/引述与实际变更不符 | **否**——只是引述不准 |
 
-**机械校验（bug 类，core 侧确定性执行）**：以下任一条件成立 → 判定降级为
+**机械校验（bug/test 类，core 侧确定性执行）**：以下任一条件成立 → 判定降级为
 `INSUFFICIENT_EVIDENCE`，交 Judge 仲裁；trace 记 `refute_evidence_check`
 （`status=OK|DOWNGRADE`、`reason=MISSING|CITATION_MISMATCH|QUOTE_UNRESOLVED|QUOTE_TOO_SHORT|ANCHOR_MISSING`）：
 
@@ -121,8 +122,8 @@ judge（arbitrate.md）：
 
 - verifier：输入 ≤12k（代码类；索引在预留内）、输出 ≤1.5k（`refutation` 对象计入该预算）、轮次 2
   ——**均不变**；judge：输入 ≤16k、输出 ≤1k、轮次 2——不变；
-- 新增成本：bug 类 REFUTED 无有效反证时多一次 Judge 仲裁（≤16k in / ≤1k out/案）。
-  上界 = 每 run bug 类 REFUTED 候选数；L3 实测单 case 该类 1–3 条，属可控增量；
+- 新增成本：bug/test 类 REFUTED 无有效反证时多一次 Judge 仲裁（≤16k in / ≤1k out/案）。
+  上界 = 每 run bug/test 类 REFUTED 候选数；L3 实测单 case 该类 1–3 条，属可控增量；
 - 04§2.4 分级成本表补一行"bug 类 REFUTED 降级仲裁"的说明与上界；不调整 L1/L2/L3 的档位、
   阈值与判定项。
 
@@ -165,6 +166,50 @@ judge（arbitrate.md）：
 - 调用点索引只扫同目录候选，跨包调用者仍可能不可见；这是有界成本下的近似，简报显式声明。
 - 评测 harness 的 stub tree 为空 → L3 上索引 `available=false`；索引路径由单测 + 脚本化
   LLM fixture 覆盖，L3 结论只反映 2.1/2.3 的效果。生产 GitHub 形态一次 tree 调用即可用。
-- 机械校验只对 bug 类生效：改后有界对比中唯一残留的 REFUTED 候选为非 bug 类（gate
-  NOT_APPLICABLE，按设计放行）——是否把纪律扩展到 test/security 需等拒真池数据。
+- 机械校验的适用范围经 §6 修订为 bug/test：改后有界对比中唯一残留的 REFUTED 候选为非
+  bug/test 类（gate NOT_APPLICABLE，按设计放行）——该次对比的边界记录保留；test 类证据与
+  security 不扩的理由见 §6。
 - 单次有界对比 n=24，Wilson 区间与基线重叠；提升幅度（+3）不作为显著性结论。
+
+## 6. 修订（2026-10-30）：机械校验适用范围 bug → bug/test
+
+### 6.1 触发证据
+
+1. **契约已覆盖全部类别**：全量 L3（run `40908847824`）中 5 次非 bug 类 REFUTED 全部携带
+   `refutation{kind,anchor,quote,reason}`（kind 分布：CONTRACT_SAFE / GUARD_EXISTS /
+   CITATION_MISMATCH / UNREACHABLE）。提示词对 REFUTED 的反证要求本就不分类别，机械校验扩到
+   test 不会产生"缺字段批量降级"。
+2. **漏网案例**：bad-JacksonCore-8 r1 的唯一候选是 test 类（"空缓冲区场景无测试覆盖"），
+   REFUTED 的 kind = CITATION_MISMATCH——锚定 `getCurrentSegment`，而 diff 实际修改的是
+   `getTextBuffer`。这是"引述/锚点不符"而非对"缺少覆盖"主张的否定；因 bug-only 适用范围
+   gate 返回 NOT_APPLICABLE，判定被直接 reject，未进入 Judge。
+
+### 6.2 决策
+
+- `RefuteEvidenceGate.check` 的适用范围改为 **BUG 或 TEST**；其余类别（security / convention /
+  performance / context）与非 REFUTED 判定维持 NOT_APPLICABLE。
+- **降级逻辑、原因枚举（MISSING / CITATION_MISMATCH / QUOTE_UNRESOLVED / QUOTE_TOO_SHORT /
+  ANCHOR_MISSING）、quote 阈值（≥8 字符）、可见上下文定义、trace 语义均不变**：事件仍是
+  `refute_evidence_check{finding_id, status, reason, downgraded}`，status ∈
+  `OK`（适用且通过）/ `DOWNGRADE`（适用且降级）/ `NOT_APPLICABLE`（不适用），可区分三态。
+- 提示词仅同步事实性括注（"bug 类硬性要求" → "bug/test 类硬性要求"），契约本身未变。
+- **test 类的可见上下文边界**：test 类 brief 的"仓库测试文件清单"（v1.3.2 分型）位于补充索引槽
+  且只列路径，按 2.1 的定义**不计入** gate 可见上下文。引用测试代码作为反证须经 `followup_file`
+  补查（补查材料计入可见上下文），避免用清单路径冒充代码证据。
+
+### 6.3 security 暂不扩及理由
+
+- security 类 REFUTED 已有 **20% 确定性抽查保险丝**（03§4.3），错杀已有既有的复核通道；
+- 误判代价与 test 不同：security 主张的漏报（假 REFUTED 被放行）后果不对称，扩门需要拒真池
+  中 security 子集的实际数据支撑（当前样本不足）；
+- 故本轮只扩 test，security 维持"抽查保险丝 + Judge 反证审查"的既有形态，等数据再议。
+
+### 6.4 覆盖与不变项
+
+- 单测（`RefuteEvidenceGateTest`）：test 缺反证 → DOWNGRADE/MISSING；test + CITATION_MISMATCH
+  → DOWNGRADE/CITATION_MISMATCH；test + 简报内逐字 quote 的合法反证 → OK；security /
+  convention / performance / context 及非 REFUTED → NOT_APPLICABLE；bug 类既有用例逐例不变。
+- 端到端（`VerifierAntiRefutePipelineTest`，脚本化 LLM）：test 类 CITATION_MISMATCH 降级 →
+  Judge 可见"系统校验 + CITATION_MISMATCH"并裁决 CONFIRMED → 发布；test 类合法反证保留
+  REFUTED、不调 Judge。
+- 未改：门禁阈值、expected/数据集、抽查比例、预算与轮次、提示词契约语义、CrossChecker 默认值。
