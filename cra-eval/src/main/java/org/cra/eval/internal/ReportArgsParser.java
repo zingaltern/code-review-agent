@@ -20,7 +20,8 @@ final class ReportArgsParser {
           "--previous",
           "--dataset",
           "--token",
-          "--api-base");
+          "--api-base",
+          "--as-of");
 
   private ReportArgsParser() {}
 
@@ -43,6 +44,15 @@ final class ReportArgsParser {
     if (apiBase == null || apiBase.isBlank()) {
       apiBase = env.getOrDefault("GITHUB_API_URL", "https://api.github.com");
     }
+    String asOfRaw = named.get("--as-of");
+    java.time.Instant asOf = null;
+    if (asOfRaw != null) {
+      try {
+        asOf = java.time.Instant.parse(asOfRaw);
+      } catch (java.time.format.DateTimeParseException e) {
+        throw new CraConfigException("--as-of 需为 ISO-8601 时刻（如 2026-10-29T00:00:00Z）: " + asOfRaw);
+      }
+    }
     return new EvalCliArgs.ReportArgs(
         RepoRef.parse(repo),
         since,
@@ -52,6 +62,7 @@ final class ReportArgsParser {
         EvalArgsSupport.pathList(named.get("--previous")),
         datasetPath,
         token,
-        apiBase);
+        apiBase,
+        asOf);
   }
 }

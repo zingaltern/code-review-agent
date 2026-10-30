@@ -337,7 +337,8 @@ cra review --local [--base main] [--head REF] [--depth standard] [--dry-run=fals
 # 处置采集/周报（本地跑，读 GitHub 账本，无常驻服务；T3.4）
 cra-eval report --repo zingaltern/code-review-agent --since 7d \
   [--json report.json] [--ledger-fixture DIR] [--trace-dir DIR[,DIR...]] \
-  [--previous REPORT.json[,REPORT.json...]] [--dataset DIR] [--token TOKEN] [--api-base URL]
+  [--previous REPORT.json[,REPORT.json...]] [--dataset DIR] [--token TOKEN] [--api-base URL] \
+  [--as-of ISO-8601]   # 窗口与"合并满 7 天"判定以该时刻为基准（默认 now；离线回放/测试固定时钟用）
 
 # badcase 固化（T3.5，06§2）
 cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled \

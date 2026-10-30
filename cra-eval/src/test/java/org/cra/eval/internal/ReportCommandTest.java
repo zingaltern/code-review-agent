@@ -36,6 +36,8 @@ class ReportCommandTest {
               fixture.resolve("previous/2026-10-11.json")
                   + ","
                   + fixture.resolve("previous/2026-10-18.json"),
+              "--as-of",
+              "2026-10-29T00:00:00Z",
               "--json",
               out.toString()
             },
@@ -51,6 +53,23 @@ class ReportCommandTest {
     assertThat(report.dualVerifierGate().triggered()).isFalse();
     assertThat(report.notes()).anyMatch(n -> n.contains("resolve"));
     assertThat(report.notes()).anyMatch(n -> n.contains("Summary"));
+  }
+
+  @Test
+  void invalidAsOfFailsWithUsageError() {
+    int code =
+        EvalCli.execute(
+            new String[] {
+              "report",
+              "--repo",
+              "acme/demo",
+              "--ledger-fixture",
+              "src/test/resources/report-fixture",
+              "--as-of",
+              "not-a-timestamp"
+            },
+            Map.of());
+    assertThat(code).isEqualTo(2);
   }
 
   @Test
