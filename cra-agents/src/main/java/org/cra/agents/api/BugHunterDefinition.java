@@ -103,17 +103,7 @@ public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
                 scopedPathsNote(input),
                 "layer_contract_section",
                 input.layerContractSection()));
-    int splitAt = rendered.indexOf("\n# User\n");
-    if (splitAt < 0) {
-      throw new IllegalStateException("模板缺少 '# User' 分段: " + templatePath);
-    }
-    return new AgentBrief(
-        role,
-        rendered.substring(0, splitAt),
-        rendered.substring(splitAt + 1),
-        templates.versionOf(templatePath),
-        tools(),
-        budget());
+    return TemplateSupport.briefOf(templates, templatePath, rendered, role, tools(), budget());
   }
 
   @Override

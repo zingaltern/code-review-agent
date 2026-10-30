@@ -15,6 +15,8 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   /** 角色（kebab-case，05§1.1）。 */
   public static final AgentRole ROLE = new AgentRole("security-reviewer", "安全评审");
 
+  private static final String TEMPLATE = "prompts/reviewer/security.md";
+
   private final TemplateSupport templates;
 
   /**
@@ -33,7 +35,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   public AgentBrief buildBrief(ReviewAgentInput input) {
     String rendered =
         templates.render(
-            "prompts/reviewer/security.md",
+            TEMPLATE,
             Map.of(
                 "untrusted_pr_meta",
                 TemplateSupport.untrusted(input.prTitle() + "\n" + input.commitMessages()),
@@ -57,17 +59,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    int splitAt = rendered.indexOf("\n# User\n");
-    if (splitAt < 0) {
-      throw new IllegalStateException("security.md 模板缺少 '# User' 分段");
-    }
-    return new AgentBrief(
-        ROLE,
-        rendered.substring(0, splitAt),
-        rendered.substring(splitAt + 1),
-        templates.versionOf("prompts/reviewer/security.md"),
-        tools(),
-        budget());
+    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
   }
 
   @Override

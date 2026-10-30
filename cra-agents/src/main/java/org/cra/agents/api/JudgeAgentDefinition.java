@@ -54,17 +54,7 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
                     : TemplateSupport.untrusted(input.caseContext()),
                 "followup_section",
                 ""));
-    int splitAt = rendered.indexOf("\n# User\n");
-    if (splitAt < 0) {
-      throw new IllegalStateException("arbitrate.md 模板缺少 '# User' 分段");
-    }
-    return new AgentBrief(
-        ROLE,
-        rendered.substring(0, splitAt),
-        rendered.substring(splitAt + 1),
-        templates.versionOf(TEMPLATE),
-        ToolWhitelist.NONE,
-        budget());
+    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
   }
 
   @Override
