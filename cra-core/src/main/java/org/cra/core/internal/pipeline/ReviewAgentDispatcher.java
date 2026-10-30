@@ -340,11 +340,11 @@ final class ReviewAgentDispatcher {
       List<String> outcomeDegr = new ArrayList<>(run.degradations());
       if (run.termination() == AgentRunner.Termination.BUDGET_EXCEEDED) {
         // 03§1：预算硬限击穿的代理 = 该角色缺失，降级声明（不传染）
-        outcomeDegr.add("agent-budget-exceeded:" + agent.role().id());
+        outcomeDegr.add(Degradations.agentBudgetExceeded(agent.role().id()));
         outcomeNotes.add("代理 " + agent.role().id() + " 因预算硬限终止（" + run.errorMessage() + "）");
       }
       if (run.termination() == AgentRunner.Termination.TOOL_VIOLATION) {
-        outcomeDegr.add("agent-tool-violation:" + agent.role().id());
+        outcomeDegr.add(Degradations.agentToolViolation(agent.role().id()));
         outcomeNotes.add("代理 " + agent.role().id() + " 触发工具隔离边界被终止（" + run.errorMessage() + "）");
       }
       return new DispatchOutcome(
@@ -372,7 +372,7 @@ final class ReviewAgentDispatcher {
               "termination", "failed",
               "error", String.valueOf(e.getMessage())));
       List<String> outcomeDegr = new ArrayList<>();
-      outcomeDegr.add("agent-failed:" + agent.role().id());
+      outcomeDegr.add(Degradations.agentFailed(agent.role().id()));
       return new DispatchOutcome(
           agent.role().id(),
           "",

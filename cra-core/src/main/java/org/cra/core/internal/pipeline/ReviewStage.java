@@ -322,7 +322,7 @@ public final class ReviewStage {
       if (phase == RunBudgetTracker.Phase.STOP) {
         // 100%：终止剩余派发，已派发的照常收集（02§4.4 DEGRADED 收尾）
         if (chunkIndex < chunks.size() && !stopped) {
-          degradations.add("budget-exhausted-stop");
+          degradations.add(Degradations.BUDGET_EXHAUSTED_STOP);
           stopped = true;
           trace.emit(
               "budget_check",
@@ -340,14 +340,14 @@ public final class ReviewStage {
       } else {
         boolean simplified = phase != RunBudgetTracker.Phase.NORMAL;
         if (phase == RunBudgetTracker.Phase.DEGRADE
-            && !degradations.contains("budget-degrade-70")) {
-          degradations.add("budget-degrade-70");
+            && !degradations.contains(Degradations.BUDGET_DEGRADE_70)) {
+          degradations.add(Degradations.BUDGET_DEGRADE_70);
           trace.emit("budget_check", Map.of("phase", "degrade", "ratio", budget.ratio()));
         }
         if (phase == RunBudgetTracker.Phase.TRUNCATE) {
           truncationReached = true;
-          if (!degradations.contains("budget-truncate-85")) {
-            degradations.add("budget-truncate-85");
+          if (!degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
+            degradations.add(Degradations.BUDGET_TRUNCATE_85);
             trace.emit("budget_check", Map.of("phase", "truncate", "ratio", budget.ratio()));
           }
         }
@@ -543,8 +543,8 @@ public final class ReviewStage {
     RunBudgetTracker.Phase finalPhase = budget.phase();
     if (finalPhase.ordinal() >= RunBudgetTracker.Phase.TRUNCATE.ordinal()) {
       truncationReached = true;
-      if (!degradations.contains("budget-truncate-85")) {
-        degradations.add("budget-truncate-85");
+      if (!degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
+        degradations.add(Degradations.BUDGET_TRUNCATE_85);
         trace.emit("budget_check", Map.of("phase", "truncate-final", "ratio", budget.ratio()));
       }
     }
@@ -575,15 +575,15 @@ public final class ReviewStage {
     boolean llmUnavailable = !collected.isEmpty() && unavailableCount == collected.size();
     long failedCount =
         collected.stream()
-            .filter(o -> o.degradations().stream().anyMatch(d -> d.startsWith("agent-failed:")))
+            .filter(o -> o.degradations().stream().anyMatch(Degradations::isAgentExecutionFailed))
             .count();
     if (!collected.isEmpty() && failedCount == collected.size() && !llmUnavailable) {
       // 全部代理执行失败（异常/brief 落盘等，非 LLM 不可得）= 无可信评审产出——不得静默 SUCCESS
-      degradations.add("all-review-agents-failed");
+      degradations.add(Degradations.ALL_REVIEW_AGENTS_FAILED);
       contextNotes.add("全部 " + collected.size() + " 个评审代理执行失败（失败隔离已吸收，02§4.2），本次无可信评审产出");
     }
     if (unavailableCount > 0 && !llmUnavailable) {
-      degradations.add("llm-unavailable-agents:" + unavailableCount);
+      degradations.add(Degradations.llmUnavailableAgents(unavailableCount));
       contextNotes.add(unavailableCount + " 个评审代理因 LLM 不可得缺失（失败隔离，02§4.2），其余代理产出照常汇聚");
     }
     contextNotes.addAll(semanticContext.coverageNotes());
@@ -622,7 +622,7 @@ public final class ReviewStage {
     } catch (TimeoutException e) {
       boolean started = task.started();
       task.cancel();
-      String degradation = started ? "agent-timeout" : "agent-queue-timeout";
+      String degradation = started ? Degradations.AGENT_TIMEOUT : Degradations.AGENT_QUEUE_TIMEOUT;
       degradations.add(degradation);
       return new DispatchOutcome(
           "unknown",

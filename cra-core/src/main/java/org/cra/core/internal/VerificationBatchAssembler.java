@@ -426,10 +426,6 @@ final class VerificationBatchAssembler {
         finding.suggestion() == null ? "" : finding.suggestion());
   }
 
-  private static String renderFindingsText(List<FindingAggregator.Scored> batch) {
-    return renderItemsText(batch.stream().map(s -> toItem(s.finding())).toList());
-  }
-
   /** 待复核结论渲染（批次组装与预算回算共用同一形态，避免两处格式漂移）。 */
   private static String renderItemsText(List<VerificationItem> items) {
     return items.stream()
