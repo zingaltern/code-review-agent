@@ -13,14 +13,6 @@ public final class LlmAssembly {
    */
   public static LlmGateway createGateway(LlmGatewayConfig config) {
     return new org.cra.llm.internal.DefaultLlmGateway(
-        config,
-        new org.cra.llm.internal.JdkHttpTransport(),
-        d -> {
-          try {
-            Thread.sleep(d);
-          } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-          }
-        });
+        config, new org.cra.llm.internal.JdkHttpTransport(), Thread::sleep);
   }
 }

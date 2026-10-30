@@ -7,7 +7,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import org.cra.common.text.Texts;
 import org.cra.llm.api.LlmGateway;
@@ -26,20 +25,17 @@ public final class DefaultLlmGateway implements LlmGateway {
 
   private final LlmGatewayConfig config;
   private final LlmTransport transport;
-  private final LongConsumer sleeper;
+  private final Sleeper sleeper;
   private final Semaphore concurrency;
   private final BackoffPolicy backoff;
   private final RpmLimiter rpmLimiter;
 
-  public DefaultLlmGateway(LlmGatewayConfig config, LlmTransport transport, LongConsumer sleeper) {
+  public DefaultLlmGateway(LlmGatewayConfig config, LlmTransport transport, Sleeper sleeper) {
     this(config, transport, sleeper, System::currentTimeMillis);
   }
 
   DefaultLlmGateway(
-      LlmGatewayConfig config,
-      LlmTransport transport,
-      LongConsumer sleeper,
-      LongSupplier clockMillis) {
+      LlmGatewayConfig config, LlmTransport transport, Sleeper sleeper, LongSupplier clockMillis) {
     this.config = config;
     this.transport = transport;
     this.sleeper = sleeper;
@@ -98,9 +94,9 @@ public final class DefaultLlmGateway implements LlmGateway {
   }
 
   /**
-   * 单端点尝试：RPM 取槽 → 信号量排队（超时该端点失败，试链上下一端点，02§4.5）→ 重试循环。 非中断失败原因追加进 attemptFailures。
+   * 单端点尝试：信号量排队（超时该端点失败，试链上下一端点，02§4.5）→ 重试循环（每次实际 HTTP 调用前取 RPM 槽）。 非中断失败原因追加进 attemptFailures。
    *
-   * @throws InterruptedException RPM 排队/信号量排队/退避睡眠被中断（上抛终止整条链）
+   * @throws InterruptedException 信号量排队/RPM 排队/退避等待被中断（上抛终止整条链）
    */
   private LlmResponse attempt(
       LlmGatewayConfig.ModelEndpoint endpoint,
@@ -109,12 +105,11 @@ public final class DefaultLlmGateway implements LlmGateway {
       List<String> attemptFailures)
       throws InterruptedException {
     long start = System.currentTimeMillis();
-    rpmLimiter.awaitSlot(tier, config.rpmOf(tier));
     boolean acquired = false;
     try {
       acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!acquired) {
-        // 排队超时按降级语义收尾，并试降级链下一端点（02§4.5）
+        // 排队超时按降级语义收尾，并试降级链下一端点（02§4.5）；未触达模型，不占 RPM 槽
         attemptFailures.add(tierName(tier) + ": concurrency queue timeout");
         return LlmResponse.unavailable(
             tierName(tier) + ": concurrency queue timeout", 0, System.currentTimeMillis() - start);
@@ -138,10 +133,13 @@ public final class DefaultLlmGateway implements LlmGateway {
     String body =
         OpenAiCodec.encodeRequest(
             endpoint.model(), request, config.temperature(), config.reasoningEffort());
+    long estimatedInput = TokenEstimator.estimate(request.systemPrompt() + request.userPrompt());
     for (int attempt = 0; attempt <= config.maxRetries(); attempt++) {
       if (attempt > 0) {
-        sleeper.accept(backoff.delayForAttempt(attempt));
+        sleeper.sleep(backoff.delayForAttempt(attempt));
       }
+      // RPM 槽按“实际触达模型的请求”计：重试同样受限，排队超时不消耗配额（02§4.5 per-model RPM）
+      rpmLimiter.awaitSlot(tier, config.rpmOf(tier));
       try {
         LlmTransport.TransportResponse response =
             transport.post(
@@ -151,7 +149,7 @@ public final class DefaultLlmGateway implements LlmGateway {
                 java.time.Duration.ofMillis(config.requestTimeoutMs()),
                 config.extraHeaders());
         if (response.statusCode() == 200) {
-          return parseOk(response.body(), start);
+          return parseOk(response.body(), estimatedInput, start);
         }
         if (isRetryable(response.statusCode())) {
           continue; // 429/5xx：指数退避后重试（02§4.5）
@@ -162,6 +160,11 @@ public final class DefaultLlmGateway implements LlmGateway {
                 + response.statusCode()
                 + ": "
                 + Texts.truncate(response.body(), 200);
+        attemptFailures.add(failure);
+        return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+      } catch (IllegalArgumentException e) {
+        // 非法 URL/请求头（组装期本应拒绝）：边界内收敛为不可得，不抛穿编排层（09§4）
+        String failure = tierName(tier) + ": llm request invalid: " + e.getMessage();
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
       } catch (java.io.IOException e) {
@@ -179,9 +182,9 @@ public final class DefaultLlmGateway implements LlmGateway {
     return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
   }
 
-  private LlmResponse parseOk(String body, long start) {
+  private LlmResponse parseOk(String body, long estimatedInput, long start) {
     try {
-      OpenAiCodec.ParsedResponse parsed = OpenAiCodec.decodeResponse(body);
+      OpenAiCodec.ParsedResponse parsed = OpenAiCodec.decodeResponse(body, estimatedInput);
       if (parsed.content() == null) {
         return LlmResponse.unavailable(
             "llm response missing content", 0, System.currentTimeMillis() - start);

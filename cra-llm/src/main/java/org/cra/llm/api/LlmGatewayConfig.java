@@ -80,6 +80,17 @@ public record LlmGatewayConfig(
         || backoffMaxMs < backoffBaseMs) {
       throw new IllegalArgumentException("timeouts must be positive and backoff capped");
     }
+    for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
+      requireHeader(header.getKey(), "附加头名");
+      requireHeader(header.getValue(), "附加头值");
+    }
+  }
+
+  /** 请求头必须在组装期可被 JDK HttpClient 接受（运行期抛 IAE 会穿出网关边界，09§4）。 */
+  private static void requireHeader(String value, String what) {
+    if (value == null || value.isBlank() || value.contains("\n") || value.contains("\r")) {
+      throw new IllegalArgumentException(what + " 非法: " + value);
+    }
   }
 
   /**
@@ -96,6 +107,18 @@ public record LlmGatewayConfig(
       Objects.requireNonNull(apiKey, "apiKey");
       if (model.isBlank() || baseUrl.isBlank()) {
         throw new IllegalArgumentException("model/baseUrl must be non-blank");
+      }
+      // 组装期拒绝非法 URL（运行期 URI.create 抛 IAE 会穿出网关；09§4 / 05§5 fail-fast）
+      try {
+        java.net.URI uri = java.net.URI.create(baseUrl);
+        String scheme = uri.getScheme();
+        if (scheme == null
+            || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+            || uri.getHost() == null) {
+          throw new IllegalArgumentException("baseUrl 必须为 http(s) 绝对地址: " + baseUrl);
+        }
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("baseUrl 非法: " + baseUrl, e);
       }
     }
   }

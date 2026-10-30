@@ -4,7 +4,6 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.EnumMap;
 import java.util.Map;
-import java.util.function.LongConsumer;
 import java.util.function.LongSupplier;
 import org.cra.llm.api.ModelTier;
 
@@ -19,40 +18,43 @@ final class RpmLimiter {
 
   private final Map<ModelTier, Deque<Long>> windows = new EnumMap<>(ModelTier.class);
   private final LongSupplier clockMillis;
-  private final LongConsumer sleeper;
+  private final Sleeper sleeper;
 
   /**
    * @param clockMillis 毫秒时钟（测试注入）
-   * @param sleeper 睡眠实现（测试注入；生产为 Thread::sleep 包装）
+   * @param sleeper 等待实现（测试注入；生产为 {@code Thread::sleep}）
    */
-  RpmLimiter(LongSupplier clockMillis, LongConsumer sleeper) {
+  RpmLimiter(LongSupplier clockMillis, Sleeper sleeper) {
     this.clockMillis = clockMillis;
     this.sleeper = sleeper;
   }
 
   /**
-   * 等待并占用一个槽位（占用时间戳 = 放行时刻）。同步方法：多 chunk 并发共享网关时串行化取槽。
+   * 等待并占用一个槽位（占用时间戳 = 放行时刻）。锁只覆盖窗口计算与入队，等待在锁外进行—— 一个档位等待时不得阻塞其它档位取槽（09§6）。
    *
    * @param tier 请求档位
    * @param rpm 该档位 RPM 上限（≤0 表示不限制，立即放行）
    * @throws InterruptedException 等待被中断（调用方按不可得降级，02§4.5）
    */
-  synchronized void awaitSlot(ModelTier tier, int rpm) throws InterruptedException {
+  void awaitSlot(ModelTier tier, int rpm) throws InterruptedException {
     if (rpm <= 0) {
       return;
     }
-    Deque<Long> window = windows.computeIfAbsent(tier, k -> new ArrayDeque<>());
     while (true) {
-      long now = clockMillis.getAsLong();
-      while (!window.isEmpty() && now - window.peekFirst() >= WINDOW_MS) {
-        window.pollFirst();
+      long waitMs;
+      synchronized (this) {
+        Deque<Long> window = windows.computeIfAbsent(tier, k -> new ArrayDeque<>());
+        long now = clockMillis.getAsLong();
+        while (!window.isEmpty() && now - window.peekFirst() >= WINDOW_MS) {
+          window.pollFirst();
+        }
+        if (window.size() < rpm) {
+          window.addLast(now);
+          return;
+        }
+        waitMs = window.peekFirst() + WINDOW_MS - now + 1;
       }
-      if (window.size() < rpm) {
-        window.addLast(now);
-        return;
-      }
-      long waitMs = window.peekFirst() + WINDOW_MS - now + 1;
-      sleeper.accept(waitMs);
+      sleeper.sleep(waitMs);
     }
   }
 }

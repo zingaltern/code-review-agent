@@ -43,13 +43,25 @@ final class OpenAiCodec {
   }
 
   /**
-   * 解析 chat/completions 响应。
+   * 解析 chat/completions 响应（无用量回退估算时使用响应体长度——仅兼容旧调用，输入 token 会偏小）。
    *
    * @param body 响应体
-   * @return 解析结果（content + usage；usage 缺失按 字符数/3.5 估算，04§2.1）
+   * @return 解析结果
    * @throws IOException body 非 JSON 或结构不符合协议
    */
   static ParsedResponse decodeResponse(String body) throws IOException {
+    return decodeResponse(body, -1);
+  }
+
+  /**
+   * 解析 chat/completions 响应。
+   *
+   * @param body 响应体
+   * @param estimatedInputTokens usage 缺失时的输入 token 估算值（调用方按**请求**文本估算，≤0 表示回退到响应体估算）
+   * @return 解析结果（content + usage；usage 缺失按 字符数/3.5 估算，04§2.1）
+   * @throws IOException body 非 JSON 或结构不符合协议
+   */
+  static ParsedResponse decodeResponse(String body, long estimatedInputTokens) throws IOException {
     JsonNode root = MAPPER.readTree(body);
     JsonNode choices = root.path("choices");
     if (!choices.isArray() || choices.isEmpty()) {
@@ -60,7 +72,8 @@ final class OpenAiCodec {
     long tokensIn = usage.path("prompt_tokens").asLong(-1);
     long tokensOut = usage.path("completion_tokens").asLong(-1);
     if (tokensIn < 0) {
-      tokensIn = TokenEstimator.estimate(body);
+      // 输入 token 必须来自请求侧估算：用响应体长度会低估一个数量级，预算护栏随之失真
+      tokensIn = estimatedInputTokens > 0 ? estimatedInputTokens : TokenEstimator.estimate(body);
     }
     if (tokensOut < 0) {
       tokensOut = TokenEstimator.estimate(content);
