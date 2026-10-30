@@ -183,6 +183,8 @@ final class VerificationWave {
       byFile.computeIfAbsent(scored.finding().file(), k -> new ArrayList<>()).add(scored);
     }
     List<TaskHandle<BatchOutcome>> futures = new ArrayList<>();
+    // 并发批任务（工作线程）写、主线程在 future 汇合后读——COW 保证汇合前的并发追加不抛
+    // ConcurrentModificationException；失败隔离语义见 02§4.2（批内异常收敛为降级，不炸 run）
     List<String> degradations = new java.util.concurrent.CopyOnWriteArrayList<>();
     for (Map.Entry<String, List<FindingAggregator.Scored>> entry : byFile.entrySet()) {
       String batchFile = entry.getKey();
