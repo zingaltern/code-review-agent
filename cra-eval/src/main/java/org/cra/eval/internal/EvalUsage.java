@@ -22,7 +22,7 @@ final class EvalUsage {
               [--crosschecker-enabled]
           cra-eval report --repo <owner/name> --since 7d [--json PATH] [--ledger-fixture DIR]
               [--trace-dir DIR[,DIR...]] [--previous REPORT.json[,REPORT.json...]] [--dataset DIR]
-              [--token TOKEN] [--api-base URL]
+              [--token TOKEN] [--api-base URL] [--as-of ISO-8601]
           cra-eval badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled
               --dataset <dir> [--to-set bad|clean] [--case-id ID] [--annotator NAME] [--reason TEXT]
               [--diff-file PATH] [--snapshot-dir DIR] [--artifact-root DIR] [--token TOKEN]

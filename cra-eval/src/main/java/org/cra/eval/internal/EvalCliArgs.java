@@ -115,7 +115,8 @@ public final class EvalCliArgs {
       List<Path> previous,
       Path dataset,
       String token,
-      String apiBase) {}
+      String apiBase,
+      java.time.Instant asOf) {}
 
   /**
    * badcase add 命令参数（T3.5）。

@@ -32,7 +32,7 @@ public final class ReportCommand {
    * @param env 环境变量（token 兜底）
    */
   public static void execute(EvalCliArgs.ReportArgs args, Map<String, String> env) {
-    Instant now = Instant.now();
+    Instant now = args.asOf() != null ? args.asOf() : Instant.now();
     Duration windowLength = DurationSpec.parse(args.since());
     Instant since = now.minus(windowLength);
     ReportWindowSource source;
