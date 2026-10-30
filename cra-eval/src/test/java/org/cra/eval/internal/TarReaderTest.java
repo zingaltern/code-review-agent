@@ -51,6 +51,56 @@ class TarReaderTest {
   }
 
   @Test
+  void paxSizeAndPathKeepFollowingEntriesAligned() throws Exception {
+    // PAX size 与 ustar size 不同（且非 512 对齐）时，padded 必须按覆盖后的 size 重算
+    byte[] pax = paxRecords(new String[] {"path", "deep/P.java"}, new String[] {"size", "11"});
+    byte[] first = "class P {}\n".getBytes(StandardCharsets.UTF_8);
+    byte[] second = "class Q {}\n".getBytes(StandardCharsets.UTF_8);
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("P.java", 0, '0'), first);
+    writeEntry(tar, header("Q.java", second.length, '0'), second);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.files()).isEqualTo(2);
+    assertThat(out.resolve("deep/P.java")).hasContent("class P {}\n");
+    assertThat(out.resolve("Q.java")).hasContent("class Q {}\n");
+  }
+
+  @Test
+  void rejectsInvalidPaxSize() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    byte[] oversized = paxRecord("size", String.valueOf(TarReader.MAX_ENTRY_BYTES + 1));
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", oversized.length, 'x'), oversized);
+    writeEntry(tar, header("A.java", 0, '0'), new byte[0]);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("PAX 覆盖的条目大小非法");
+
+    byte[] nonNumeric = paxRecord("size", "abc");
+    ByteArrayOutputStream tar2 = new ByteArrayOutputStream();
+    writeEntry(tar2, header("PaxHeader", nonNumeric.length, 'x'), nonNumeric);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar2.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("PAX size");
+  }
+
+  @Test
+  void rejectsPaxPathWithNulByte() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    byte[] pax = paxRecord("path", "safe.java\0/../../evil");
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("路径非法");
+  }
+
+  @Test
   void rejectsParentTraversalForFilesAndDirectories() throws Exception {
     Path out = Files.createDirectories(tmp.resolve("out"));
     assertThatThrownBy(
@@ -142,6 +192,20 @@ class TarReaderTest {
     byte[] record = (length + body).getBytes(StandardCharsets.UTF_8);
     assertThat(record.length).isEqualTo(length);
     return record;
+  }
+
+  private static byte[] paxRecords(String[]... pairs) {
+    StringBuilder out = new StringBuilder();
+    for (String[] pair : pairs) {
+      String body = " " + pair[0] + "=" + pair[1] + "\n";
+      int bodyLength = body.getBytes(StandardCharsets.UTF_8).length;
+      int length = bodyLength + 2;
+      while (String.valueOf(length).length() + bodyLength != length) {
+        length = String.valueOf(length).length() + bodyLength;
+      }
+      out.append(length).append(body);
+    }
+    return out.toString().getBytes(StandardCharsets.UTF_8);
   }
 
   private static void put(byte[] target, int offset, String value) {

@@ -686,17 +686,18 @@ class GitLabHttpAdapterWireMockTest {
     assertThat(adapter.listFiles(REPO, "head9", "**")).hasSize(10_000);
 
     wm.resetAll();
-    for (int page = 1; page <= 101; page++) {
-      var stub =
-          get(
-              urlEqualTo(
-                  PROJECT
-                      + "/repository/tree?ref=head10&recursive=true&per_page=100&page="
-                      + page));
+    for (int page = 1; page <= 100; page++) {
       wm.stubFor(
-          stub.willReturn(
-              okJson(treePage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+          get(urlEqualTo(
+                  PROJECT + "/repository/tree?ref=head10&recursive=true&per_page=100&page=" + page))
+              .willReturn(
+                  okJson(treePage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
     }
+    // 第 101 页只有 1 条且无 next 头：仍属超过上限，必须失败（不得把越限数据当完整结果）
+    wm.stubFor(
+        get(urlEqualTo(
+                PROJECT + "/repository/tree?ref=head10&recursive=true&per_page=100&page=101"))
+            .willReturn(okJson("[{\"path\":\"p101_0.java\",\"type\":\"blob\"}]")));
     assertThatThrownBy(() -> adapter.listFiles(REPO, "head10", "**"))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("分页超过上限");

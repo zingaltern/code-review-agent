@@ -31,4 +31,15 @@ class DiffResultTest {
     DiffFile file = new DiffFile("A.java", null, "modified", null, List.of());
     assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines()).isZero();
   }
+
+  @Test
+  void countsAcrossMultipleHunksAndSkipsNoNewlineMarker() {
+    String patch =
+        "--- a/A.java\n+++ b/A.java\n"
+            + "@@ -1,2 +1,2 @@\n-old1\n+new1\n\\ No newline at end of file\n"
+            + "@@ -10,2 +10,2 @@\n-old2\n+new2\n";
+    DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
+    assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines())
+        .isEqualTo(4);
+  }
 }

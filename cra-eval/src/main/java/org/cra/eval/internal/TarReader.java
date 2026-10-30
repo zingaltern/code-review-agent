@@ -95,6 +95,7 @@ public final class TarReader {
         if (size < 0 || size > MAX_ENTRY_BYTES) {
           throw new CraIntegrationException("PAX 覆盖的条目大小非法: " + size + "（" + path + "）");
         }
+        padded = paddedSize(size);
       }
       pendingPathOverride = null;
       pendingSizeOverride = null;
@@ -157,6 +158,9 @@ public final class TarReader {
       path = path.substring(2);
     }
     if (path.isEmpty()
+        || path.indexOf('\0') >= 0
+        || path.contains("\n")
+        || path.contains("\r")
         || path.startsWith("/")
         || path.matches("(?i)^[a-z]:/.*")
         || containsParentSegment(path)

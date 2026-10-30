@@ -62,13 +62,7 @@ final class ReviewPublisher {
     boolean pullRequest = mode == ReviewMode.PULL_REQUEST;
     // 无 PR 载体（commit comment / issue）没有行级锚点：全部 finding 以详情进正文（05§2.4/§2.5），
     // 锚定校验结果仍如实进 stats/trace，但不作为发布分派依据
-    boolean markerUnsafePath =
-        pullRequest
-            && ordered.stream()
-                .anyMatch(
-                    s ->
-                        s.anchor() == AnchorStatus.INLINE
-                            && !ReviewBodyRenderer.markerSafePath(s.finding().file()));
+    boolean markerUnsafePath = pullRequest && hasMarkerUnsafeInline(ordered);
     List<FindingAggregator.Scored> fallbacks =
         pullRequest
             ? ordered.stream()
@@ -398,5 +392,14 @@ final class ReviewPublisher {
       }
     }
     return failures;
+  }
+
+  /** inline 候选里是否存在会破坏账本标记的路径（Summary 候选不受影响）。 */
+  static boolean hasMarkerUnsafeInline(List<FindingAggregator.Scored> ordered) {
+    return ordered.stream()
+        .anyMatch(
+            s ->
+                s.anchor() == AnchorStatus.INLINE
+                    && !ReviewBodyRenderer.markerSafePath(s.finding().file()));
   }
 }

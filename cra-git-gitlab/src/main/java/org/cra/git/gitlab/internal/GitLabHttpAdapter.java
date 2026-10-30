@@ -663,6 +663,15 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     for (int i = 0; i <= MAX_PAGES; i++) {
       GitLabHttpTransport.Page p = transport.getPage(repo, withPage(pathAndQuery, page));
       JsonNode root = p.body();
+      if (i == MAX_PAGES) {
+        // 探页：恰好 MAX_PAGES 个满页后第 101 页为空才算正常结束；有数据即超过上限
+        if (root.isArray() && !root.isEmpty()) {
+          throw new org.cra.common.exception.CraIntegrationException(
+              "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
+        }
+        exhausted = true;
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         exhausted = true;
         break;
