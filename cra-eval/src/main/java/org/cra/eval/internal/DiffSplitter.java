@@ -92,10 +92,10 @@ public final class DiffSplitter {
         status = "removed";
       } else if (line.startsWith("rename from ")) {
         status = "renamed";
-        oldPath = line.substring("rename from ".length()).trim();
+        oldPath = renamePath(line.substring("rename from ".length()), line);
       } else if (line.startsWith("rename to ")) {
         status = "renamed";
-        newPath = line.substring("rename to ".length()).trim();
+        newPath = renamePath(line.substring("rename to ".length()), line);
       } else if (!inHunks && (line.startsWith("--- a/") || line.startsWith("--- /dev/null"))) {
         // 保持 GitHub patch 形态：跳过 ---/+++ 头（仅在 hunk 之前——hunk 内容行可能以 "--- " 开头）
       } else if (!inHunks && (line.startsWith("+++ b/") || line.startsWith("+++ /dev/null"))) {
@@ -197,6 +197,19 @@ public final class DiffSplitter {
       out.add(bytes.toString(java.nio.charset.StandardCharsets.UTF_8));
     }
     return out;
+  }
+
+  /** rename from/to 行按 C 风格引号解码（与 diff --git 头一致）；未加引号时保留原样路径。 */
+  private static String renamePath(String value, String line) {
+    String token = value.trim();
+    if (!token.startsWith("\"")) {
+      return token;
+    }
+    List<String> tokens = quotedTokens(token);
+    if (tokens.size() != 1) {
+      throw new CraConfigException("rename 头引号形态无法解析: " + line);
+    }
+    return tokens.get(0);
   }
 
   private static String stripPrefix(String path) {

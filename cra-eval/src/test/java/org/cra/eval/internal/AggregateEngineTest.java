@@ -367,4 +367,159 @@ class AggregateEngineTest {
     // 失败 run 不进误报均值分母（否则失败会"降低"误报，奖励沉默）
     assertThat(clean.meanFalsePositives()).isCloseTo(2.0, within(1e-9));
   }
+
+  @Test
+  void failedRunWithMatchDoesNotCountAsDetected() {
+    ObservedFinding match = new ObservedFinding(ObservedFinding.INLINE, "A.java", 10, "bug", "aaa");
+    CaseObservation completed = obs("bad-A", "bad", null, true, List.of(match));
+    CaseObservation failed = obs("bad-B", "bad", null, false, List.of(match));
+    Map<String, FixtureMeta> metas =
+        Map.of("bad-A", meta("bad-A", "bad", null), "bad-B", meta("bad-B", "bad", null));
+    Map<String, ExpectedFindings> expecteds =
+        Map.of(
+            "bad-A",
+            new ExpectedFindings(
+                1,
+                List.of(new ExpectedFinding("A.java", 10, "bug", List.of("aaa"), "")),
+                List.of()),
+            "bad-B",
+            new ExpectedFindings(
+                1,
+                List.of(new ExpectedFinding("A.java", 10, "bug", List.of("aaa"), "")),
+                List.of()));
+    EvalReport report =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            1,
+            true,
+            Instant.now().toString(),
+            metas,
+            expecteds,
+            List.of(completed, failed));
+    EvalReport.SetStat bad = report.sets().get(0);
+    assertThat(bad.observations()).isEqualTo(2);
+    assertThat(bad.completed()).isEqualTo(1);
+    // 失败 run 的命中只作为 matched 证据保留，不计入检出分子（失败 run 0 贡献）
+    assertThat(bad.detection().numerator()).isEqualTo(1);
+    assertThat(bad.detection().denominator()).isEqualTo(2);
+    EvalReport.CaseRow failedRow =
+        bad.cases().stream().filter(c -> !c.completed()).findFirst().orElseThrow();
+    assertThat(failedRow.matchedExpected()).isEqualTo(1);
+    assertThat(failedRow.detected()).isFalse();
+    assertThat(failedRow.bugOnlyDetected()).isFalse();
+  }
+
+  @Test
+  void allCompletedMetricsMatchObservationLevelBaseline() {
+    NegativeBait bait =
+        new NegativeBait("Bait.java", 10, 20, List.of("flagged-claim"), "hallucination-bait", "");
+    List<CaseObservation> observations =
+        List.of(
+            obs(
+                "bad-A",
+                "bad",
+                null,
+                true,
+                List.of(new ObservedFinding(ObservedFinding.INLINE, "A.java", 10, "bug", "aaa"))),
+            obs(
+                "bad-B",
+                "bad",
+                null,
+                true,
+                List.of(new ObservedFinding(ObservedFinding.INLINE, "B.java", 20, "bug", "bbb"))),
+            obs("hal-A", "adversarial", "hallucination", true, List.of()),
+            obs(
+                "hal-B",
+                "adversarial",
+                "hallucination",
+                true,
+                List.of(
+                    new ObservedFinding(
+                        ObservedFinding.INLINE, "Bait.java", 12, "bug", "flagged-claim broken"))));
+    Map<String, FixtureMeta> metas = new java.util.LinkedHashMap<>();
+    metas.put("bad-A", meta("bad-A", "bad", null));
+    metas.put("bad-B", meta("bad-B", "bad", null));
+    metas.put("hal-A", meta("hal-A", "adversarial", "hallucination"));
+    metas.put("hal-B", meta("hal-B", "adversarial", "hallucination"));
+    Map<String, ExpectedFindings> expecteds =
+        Map.of(
+            "bad-A",
+            new ExpectedFindings(
+                1,
+                List.of(new ExpectedFinding("A.java", 10, "bug", List.of("aaa"), "")),
+                List.of()),
+            "bad-B",
+            new ExpectedFindings(
+                1,
+                List.of(new ExpectedFinding("B.java", 20, "bug", List.of("bbb"), "")),
+                List.of()),
+            "hal-B",
+            new ExpectedFindings(1, List.of(), List.of(bait)));
+    EvalReport report =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            1,
+            true,
+            Instant.now().toString(),
+            metas,
+            expecteds,
+            observations);
+    EvalReport.SetStat bad =
+        report.sets().stream().filter(s -> "bad".equals(s.set())).findFirst().orElseThrow();
+    EvalReport.SetStat hal =
+        report.sets().stream()
+            .filter(s -> "hallucination".equals(s.subtype()))
+            .findFirst()
+            .orElseThrow();
+    // 全部完成：detected 与拒绝率必须与观测级基线一致（分母=观测数=完成数）
+    assertThat(bad.detection().numerator()).isEqualTo(2);
+    assertThat(bad.detection().denominator()).isEqualTo(2);
+    assertThat(hal.rejection().numerator()).isEqualTo(1);
+    assertThat(hal.rejection().denominator()).isEqualTo(2);
+    assertThat(hal.rejection().rate()).isCloseTo(0.5, within(1e-9));
+  }
+
+  @Test
+  void blockedNoteDeclaresUnrunSets() {
+    Map<String, FixtureMeta> badOnlyMetas = Map.of("bad-A", meta("bad-A", "bad", null));
+    Map<String, ExpectedFindings> expecteds =
+        Map.of("bad-A", new ExpectedFindings(1, List.of(), List.of()));
+    EvalReport badOnly =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            1,
+            true,
+            Instant.now().toString(),
+            badOnlyMetas,
+            expecteds,
+            List.of(obs("bad-A", "bad", null, true, List.of())));
+    assertThat(badOnly.blockedNote()).contains("未跑集合：clean、adversarial").contains("SKIPPED");
+
+    Map<String, FixtureMeta> allMetas = new java.util.LinkedHashMap<>();
+    allMetas.put("bad-A", meta("bad-A", "bad", null));
+    allMetas.put("clean-A", meta("clean-A", "clean", null));
+    allMetas.put("adv-hal-A", meta("adv-hal-A", "adversarial", "hallucination"));
+    EvalReport all =
+        AggregateEngine.aggregate(
+            "ds",
+            "cli.jar",
+            "quick",
+            1,
+            true,
+            Instant.now().toString(),
+            allMetas,
+            Map.of(),
+            List.of(
+                obs("bad-A", "bad", null, true, List.of()),
+                obs("clean-A", "clean", null, true, List.of()),
+                obs("adv-hal-A", "adversarial", "hallucination", true, List.of())));
+    // 三集合都跑过：不再声明未跑集合（无失败时 blockedNote 为空）
+    assertThat(all.blockedNote()).isNull();
+  }
 }

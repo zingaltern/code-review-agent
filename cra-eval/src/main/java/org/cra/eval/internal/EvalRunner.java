@@ -115,11 +115,7 @@ public final class EvalRunner {
     List<EvalStubServer.CapturedSummary> summaries = server.summaries();
     List<ObservedFinding> findings = new ArrayList<>();
     List<String> inlineBodies = new ArrayList<>();
-    String reviewBody = "";
     for (EvalStubServer.CapturedReview review : reviews) {
-      if (review.reviewBody() != null && !review.reviewBody().isBlank()) {
-        reviewBody = review.reviewBody();
-      }
       for (EvalStubServer.CapturedComment c : review.comments()) {
         inlineBodies.add(c.body());
       }
@@ -164,9 +160,7 @@ public final class EvalRunner {
         status,
         findings,
         failure,
-        RunStatsReader.read(runRoot),
-        reviewBody,
-        summaryBody);
+        RunStatsReader.read(runRoot));
   }
 
   private static String sectionAfter(String body, int from) {

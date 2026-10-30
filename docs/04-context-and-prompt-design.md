@@ -53,6 +53,8 @@
 
 **大 PR 降档**：>2k diff 行 → 窗口 ±15、视角降 1、验证 top-10 候选；>8k 行 → priority_paths only + 覆盖声明。
 
+**diff 行数口径**：一律按增删内容行计（patch 内 hunk 的 `+`/`-` 行，不含 hunk 头 `@@`、上下文行与 `diff --git`/`---`/`+++` 文件头，`\ No newline` 不计）；300 行 auto-quick 与 2000 行大 diff 降档阈值均按此口径（`DiffResult.totalPatchLines()`）。
+
 ### 2.3 延迟算术（Standard 目标 p95 ≤5min）
 
 评审 wave（并发 8）：~90s → 验证 wave（≤4 批并行）：~40s → 仲裁（≤2 案件串行）：~60s → GitHub API + 开销：~60s ≈ **4.2min**。Deep 档与超限 PR 不受 5min 目标约束（声明降档）。

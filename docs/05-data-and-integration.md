@@ -415,6 +415,9 @@ cra-eval gate --report eval/l2/report.json --tier l2 [--json-out PATH] [--sha256
 
 **已知平台限制（显式声明，见 02§5 触发边界表）**：冲突 PR（mergeable=conflicting）的 `pull_request` workflow **不触发**（GitHub 官方行为）——该场景静默无评审，冲突解决后的 synchronize 会正常触发；fork PR 无 secrets 访问（当前个人仓库无碍，多协作者时引入 App token）。
 
+- **compare API 截断未声明**：GitHub compare API 对超过 **300 个变更文件 / 250 个 commit** 的响应会截断（`files`/`commits` 列表可能不完整），当前实现未在报告/trace 声明该截断；**deferred**（记入 backlog，修复前超出上限的 PR 评审面按 API 返回内容为准）。
+- **BuildVerifyRunner 环境变量剥离**：本地 pre-PR 实跑默认按关键词（`token`/`secret`/`api-key`/`apikey`/`password`/`passwd`/`credential`，大小写不敏感）剥离子进程敏感环境变量（05§6）；需要密钥的构建/测试命令会因此失败——这是安全默认，必要时由外部包装脚本按需注入而非继承父进程环境。
+
 **M4c/M4d 触发补充（v1.4）**：
 
 | 场景 | 行为 | 处置（workflow / CLI） |
