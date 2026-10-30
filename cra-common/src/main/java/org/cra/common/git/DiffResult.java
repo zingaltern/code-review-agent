@@ -21,13 +21,24 @@ public record DiffResult(
   /**
    * 变更 diff 总行数（+/- 行合计，大 diff 降档判据输入，02§4.4）。
    *
-   * @return 所有文件 patch 行数之和（patch 为 null 的文件计 0）
+   * <p>只计增删内容行：patch 文本还含 hunk 头与上下文行，按文本行计会把 150 增删行的小 PR 算成数百行， 使 auto-quick 与大 diff 降档在中型 PR
+   * 上误触发。
+   *
+   * @return 所有文件 patch 的 +/- 内容行数之和（patch 为 null 的文件计 0）
    */
   public int totalPatchLines() {
     int total = 0;
     for (DiffFile f : files) {
-      if (f.patch() != null) {
-        total += f.patch().split("\n", -1).length;
+      if (f.patch() == null) {
+        continue;
+      }
+      for (String line : f.patch().split("\n", -1)) {
+        if (line.startsWith("+++") || line.startsWith("---")) {
+          continue;
+        }
+        if (line.startsWith("+") || line.startsWith("-")) {
+          total++;
+        }
       }
     }
     return total;

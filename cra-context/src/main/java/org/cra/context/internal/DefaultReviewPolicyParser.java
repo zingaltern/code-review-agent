@@ -67,8 +67,9 @@ public final class DefaultReviewPolicyParser implements ReviewPolicyParser {
       String line = rawLine.stripTrailing();
       if (line.startsWith("## ") && !line.startsWith("###")) {
         String heading = line.substring(3).strip();
-        current = new Section(heading);
-        out.putIfAbsent(normalizeKey(heading), current);
+        // 重复标题复用首个段落：putIfAbsent 会让 current 指向不在 map 里的孤儿 Section，
+        // 其后所有列表项被静默丢弃（Skip paths/Conventions 丢失会直接改变评审范围）
+        current = out.computeIfAbsent(normalizeKey(heading), key -> new Section(heading));
         continue;
       }
       if (line.startsWith("#")) {

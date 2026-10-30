@@ -31,13 +31,17 @@ public final class EventPathMatcher {
     if (path.startsWith("/")) {
       path = path.substring(1);
     }
-    if (path.endsWith("/**")) {
-      path = path.substring(0, path.length() - 3);
-    } else if (path.endsWith("/*")) {
-      path = path.substring(0, path.length() - 2);
-    }
-    while (path.endsWith("/")) {
-      path = path.substring(0, path.length() - 1);
+    // 循环剥离直到稳定：`src/billing/**/` 需先去掉尾 `/` 再去 `/**`（ADR-0012 §2.2 的目录前缀归一）
+    while (true) {
+      if (path.endsWith("/**")) {
+        path = path.substring(0, path.length() - 3);
+      } else if (path.endsWith("/*")) {
+        path = path.substring(0, path.length() - 2);
+      } else if (path.endsWith("/")) {
+        path = path.substring(0, path.length() - 1);
+      } else {
+        break;
+      }
     }
     return ".".equals(path) ? "" : path;
   }
