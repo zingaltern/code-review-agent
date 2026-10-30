@@ -43,7 +43,8 @@ final class CoverageReportBuilder {
             PolicySections.warnings(policy, policyModified),
             blameOutcome.notes(),
             aggregation.nitDropped(),
-            aggregation.suppressedByTruncation()));
+            aggregation.suppressedByTruncation(),
+            plan.skippedTestCount()));
   }
 
   static String note(List<String> coverageLines) {

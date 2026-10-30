@@ -173,7 +173,9 @@ final class SweepArgs {
             SignoffConfig.defaults(),
             platform,
             gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
-            SemanticContextConfig.defaults());
+            SemanticContextConfig.defaults(),
+            // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
+            Boolean.parseBoolean(envOr(env, "CRA_REVIEW_TESTS", "false")));
     return new Parsed(config, since, maxPrs);
   }
 

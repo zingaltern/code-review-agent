@@ -66,6 +66,11 @@ class SourceScanRulesTest {
   private static final Pattern METHOD_DECL =
       Pattern.compile(
           "^\\s{2}(?:public\\s+|default\\s+|protected\\s+)?[\\w<>,\\[\\].?\\s]+\\s+\\w+\\s*\\(");
+
+  /** 构造器委托续行（{@code this(} / {@code super(}）——不是方法声明，Javadoc 规则不适用。 */
+  private static final Pattern CONSTRUCTOR_DELEGATION =
+      Pattern.compile("^\\s+(?:this|super)\\s*\\(\\s*$");
+
   private static final Pattern WILDCARD_IMPORT =
       Pattern.compile("^\\s*import\\s+(?:static\\s+)?[\\w.]+\\.\\*\\s*;");
   private static final Pattern EMPTY_CATCH = Pattern.compile("catch\\s*\\([^)]*\\)\\s*\\{\\s*\\}");
@@ -185,7 +190,9 @@ class SourceScanRulesTest {
                 checkRecordParams(module, path, lines, i);
               }
             }
-            if (METHOD_DECL.matcher(lines.get(i)).matches() && !isInvocationLine(lines.get(i))) {
+            if (METHOD_DECL.matcher(lines.get(i)).matches()
+                && !isInvocationLine(lines.get(i))
+                && !CONSTRUCTOR_DELEGATION.matcher(lines.get(i)).matches()) {
               assertClean(
                   module,
                   path,

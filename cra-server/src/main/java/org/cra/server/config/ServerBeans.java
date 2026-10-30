@@ -209,7 +209,9 @@ public class ServerBeans {
         8000,
         3,
         "never",
-        PipelineOptions.DEFAULT_SPOTCHECK_PERCENT);
+        PipelineOptions.DEFAULT_SPOTCHECK_PERCENT,
+        // 02§4.4：测试文件默认不进入评审范围（服务端暂无独立开关，与 CLI 默认一致）
+        PipelineOptions.DEFAULT_INCLUDE_TEST_FILES);
   }
 
   /**

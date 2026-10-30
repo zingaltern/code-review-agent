@@ -300,6 +300,27 @@ class CliArgsTest {
   }
 
   @Test
+  void reviewTestsDefaultsOffAndParsesFlagAndEnv() {
+    // 02§4.4 评审范围：测试文件默认不评审；flag > env > 默认
+    assertThat(CliArgs.parse(baseArgs(), ENV).includeTestFiles()).isFalse();
+    assertThat(CliArgs.parse(concat(baseArgs(), "--review-tests"), ENV).includeTestFiles())
+        .isTrue();
+    assertThat(CliArgs.parse(concat(baseArgs(), "--review-tests=true"), ENV).includeTestFiles())
+        .isTrue();
+    Map<String, String> envOn =
+        Map.of(
+            "GITHUB_TOKEN", "gh-env-token",
+            "CRA_LLM_API_KEY", "sk-env",
+            "CRA_LLM_BASE_URL", "https://llm.example/v1",
+            "CRA_LLM_MODEL", "glm-x",
+            "CRA_REVIEW_TESTS", "true");
+    assertThat(CliArgs.parse(baseArgs(), envOn).includeTestFiles()).isTrue();
+    // 显式 --review-tests=false 覆盖环境变量
+    assertThat(CliArgs.parse(concat(baseArgs(), "--review-tests=false"), envOn).includeTestFiles())
+        .isFalse();
+  }
+
+  @Test
   void crossCheckerRejectsInvalidModesAndWeeks() {
     assertThatThrownBy(
             () ->

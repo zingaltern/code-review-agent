@@ -56,6 +56,7 @@ final class ReviewPublisher {
       String convergenceAdvice,
       Set<String> unverifiedIds,
       int unverifiedUnpublished,
+      boolean noReviewableChanges,
       Map<String, String> templateVersions,
       SignoffAdvice signoff) {
     ReviewMode mode = request.mode();
@@ -108,6 +109,7 @@ final class ReviewPublisher {
             unverifiedIds,
             unverifiedUnpublished,
             !pullRequest,
+            noReviewableChanges,
             signoff);
     if (request.dryRun()) {
       // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧

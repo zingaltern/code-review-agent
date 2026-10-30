@@ -50,9 +50,13 @@ final class ReviewRoutingPolicy {
   }
 
   /**
-   * TestReviewer 触发判定（03§3：逻辑文件变更且测试变更比例低）。 测试文件 = src/test/ 路径；比例阈值 0.5 为实现默认（文档未钉死，覆盖声明如实说明）。
+   * TestReviewer 触发判定（03§3：逻辑文件变更且测试变更比例低）。测试文件 = {@link #isTestPath}；比例阈值 0.5
+   * 为实现默认（文档未钉死，覆盖声明如实说明）。
    *
-   * @param diff 变更 diff
+   * <p>统计口径固定为**过滤前的全量 PR diff**（02§4.4）：测试文件默认不进评审范围，但"本次改了多少测试"仍是触发判定的 依据——用过滤后的计划统计会让"生产 +
+   * 测试同改"的 PR 误触发（测试文件消失 → 比例恒 0）。
+   *
+   * @param diff 全量变更 diff（不是 skip/测试过滤后的评审计划）
    * @return true 触发
    */
   static boolean testReviewerTriggered(DiffResult diff) {
@@ -187,7 +191,22 @@ final class ReviewRoutingPolicy {
     return "配置的 mode 与可用数据不匹配（05§5 agents.crosschecker.mode）";
   }
 
+  /**
+   * 测试文件判定（02§4.4 默认评审范围 + 03§3 TestReviewer 比例口径的唯一定义）：`src/test/` 路径（含任意层级前缀）、 以 `Test.java` 或
+   * `Tests.java` 结尾的文件名。
+   *
+   * <p>路径一律按 diff 的 POSIX 形态（`/` 分隔）判定。
+   *
+   * @param path 变更文件路径
+   * @return true = 测试文件
+   */
   static boolean isTestPath(String path) {
-    return path.startsWith("src/test/") || path.contains("/src/test/");
+    if (path.startsWith("src/test/") || path.contains("/src/test/")) {
+      return true;
+    }
+    // 后缀启发式（非标准目录布局）：要求前缀名非空，避免把恰名为 Test.java/Tests.java 的生产文件误判为测试
+    String simple = path.substring(path.lastIndexOf('/') + 1);
+    return (simple.endsWith("Test.java") && simple.length() > "Test.java".length())
+        || (simple.endsWith("Tests.java") && simple.length() > "Tests.java".length());
   }
 }

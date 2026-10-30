@@ -349,7 +349,7 @@ class VerifierAntiRefutePipelineTest {
         new VerifierAgentDefinition(new TemplateLoader()),
         new JudgeAgentDefinition(new TemplateLoader()),
         runRoot,
-        new PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", spotcheckPercent),
+        new PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", spotcheckPercent, false),
         null);
   }
 

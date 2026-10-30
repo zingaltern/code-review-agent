@@ -50,6 +50,7 @@ import org.cra.common.run.ReviewMode;
  * @param platform Git 平台（`github`|`gitlab`；M4e 第二半，--platform / CRA_GIT_PLATFORM，默认 github）
  * @param gitlab GitLab 连接设置（仅 platform=gitlab 时生效；密钥只从环境/文件读，05§6）
  * @param semanticContext 语义上下文（L2 跨文件切片）配置（M4e，ADR-0014；默认关闭）
+ * @param includeTestFiles 测试文件是否进入评审范围（02§4.4；`--review-tests` / `CRA_REVIEW_TESTS`，默认 false）
  */
 public record CraConfig(
     String repoOwner,
@@ -91,7 +92,8 @@ public record CraConfig(
     SignoffConfig signoff,
     String platform,
     GitLabSettings gitlab,
-    SemanticContextConfig semanticContext) {
+    SemanticContextConfig semanticContext,
+    boolean includeTestFiles) {
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
@@ -225,7 +227,8 @@ public record CraConfig(
         SignoffConfig.defaults(),
         "github",
         GitLabSettings.none(),
-        SemanticContextConfig.defaults());
+        SemanticContextConfig.defaults(),
+        false);
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -336,7 +339,8 @@ public record CraConfig(
         SignoffConfig.defaults(),
         "github",
         GitLabSettings.none(),
-        SemanticContextConfig.defaults());
+        SemanticContextConfig.defaults(),
+        false);
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
@@ -382,7 +386,8 @@ public record CraConfig(
         signoff(),
         platform(),
         gitlab(),
-        semanticContext());
+        semanticContext(),
+        includeTestFiles());
   }
 
   /**
@@ -432,6 +437,7 @@ public record CraConfig(
         signoff(),
         platform(),
         gitlab(),
-        semanticContext());
+        semanticContext(),
+        includeTestFiles());
   }
 }
