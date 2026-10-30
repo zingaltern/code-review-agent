@@ -118,6 +118,17 @@ class VerifierAntiRefutePipelineTest {
         "severity_proposed":"important","pre_existing_suspect":false,"confidence":0.85}]}"""
           .formatted(FILE);
 
+  /** bad-JacksonCore-8 r1 形态的 test 类候选：主张"空缓冲区路径无测试覆盖"。 */
+  private static final String FINDING_TEST =
+      """
+      {"findings":[{"category":"test","title":"空缓冲区路径（getTextBuffer 返回 null）缺少测试覆盖",
+        "description":"diff 移除空检查后，现有测试未断言 _currentSegment 为 null 时的行为",
+        "failure_mode":"触发条件：空缓冲区；缺失：没有测试覆盖调用方收到 null 的分支",
+        "file":"%s","line":12,"side":"RIGHT",
+        "evidence":"L12: if (!_hasSegments)  return _currentSegment; —— 测试清单中无覆盖该分支的用例",
+        "severity_proposed":"important","pre_existing_suspect":false,"confidence":0.80}]}"""
+          .formatted(FILE);
+
   @TempDir Path runRoot;
 
   private GitPlatformAdapter adapter;
@@ -219,6 +230,70 @@ class VerifierAntiRefutePipelineTest {
             """
             {"verdicts":[{"finding_id":"%s","verdict":"REFUTED",
               "rationale":"resultArray() 在 _currentSegment == null 时返回 new char[0]，空缓冲区不会得到 null。",
+              "refutation":{"kind":"GUARD_EXISTS","anchor":"%s:20",
+                "quote":"if (_currentSegment == null) {  return new char[0];","reason":"上游已处理空缓冲区"}}]}"""
+                .formatted(firstIdIn(brief), FILE));
+
+    ReviewResult result = pipeline(0).run(request());
+
+    assertThat(scripted.judgeCalls).isEmpty();
+    assertThat(result.stats().rejected()).isEqualTo(1);
+    assertThat(result.stats().findingsPublished()).isZero();
+    String trace = traceOf(result);
+    assertThat(trace).contains("\"event\":\"refute_evidence_check\"").contains("\"status\":\"OK\"");
+    assertThat(trace).doesNotContain("\"downgraded\":true");
+  }
+
+  @Test
+  void testClassCitationMismatchIsDowngradedAndJudgeSeesTheCoverageClaim() throws Exception {
+    // ADR-0015 §6：test 类纳入纪律——"引述/锚点不符"不再能直接拒掉"缺少覆盖"的主张
+    scripted.review(FINDING_TEST);
+    scripted.verifierScript(
+        brief ->
+            """
+            {"verdicts":[{"finding_id":"%s","verdict":"REFUTED",
+              "rationale":"结论引述的 getCurrentSegment 在 diff 中没有变更，实际修改的是 getTextBuffer（L307），因此该 test 主张不成立。",
+              "refutation":{"kind":"CITATION_MISMATCH","anchor":"%s:12",
+                "quote":"if (!_hasSegments)  return _currentSegment;","reason":"结论锚定的符号与实际变更不符"}}]}"""
+                .formatted(firstIdIn(brief), FILE));
+    scripted.judge(
+        "{\"judgement\":{\"verdict\":\"CONFIRMED\",\"rationale\":\"引述不符不构成反证；空缓冲区路径（getTextBuffer 返回 null）确实没有测试覆盖，主张成立\"}}");
+
+    ReviewResult result = pipeline(0).run(request());
+
+    // 降级 → Judge 按主张本身裁决 → 发布
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(scripted.judgeCalls).hasSize(1);
+    assertThat(result.stats().confirmed()).isEqualTo(1);
+    assertThat(result.stats().findingsPublished()).isEqualTo(1);
+
+    String trace = traceOf(result);
+    assertThat(trace)
+        .contains("\"event\":\"refute_evidence_check\"")
+        .contains("\"status\":\"DOWNGRADE\"")
+        .contains("\"reason\":\"CITATION_MISMATCH\"")
+        .contains("\"downgraded\":true")
+        .contains("\"verdict\":\"INSUFFICIENT_EVIDENCE\"");
+    assertThat(trace).contains("\"refute_downgraded\":1");
+
+    // Judge 看到的是降级后的判定 + 系统校验说明（test 类主张进入仲裁，而非被静默丢弃）
+    String judgeBrief = scripted.judgeCalls.get(0).userPrompt();
+    assertThat(judgeBrief)
+        .contains("INSUFFICIENT_EVIDENCE")
+        .contains("系统校验")
+        .contains("CITATION_MISMATCH")
+        .contains("缺少测试覆盖");
+  }
+
+  @Test
+  void testClassCheckableRefutationKeepsRefutedWithoutJudge() throws Exception {
+    // test 类 + 合法反证 → 保留 REFUTED（纪律扩展不是"test 类一律送仲裁"）
+    scripted.review(FINDING_TEST);
+    scripted.verifierScript(
+        brief ->
+            """
+            {"verdicts":[{"finding_id":"%s","verdict":"REFUTED",
+              "rationale":"resultArray() 在 _currentSegment == null 时返回 new char[0]，空缓冲区路径不会返回 null，无需该测试。",
               "refutation":{"kind":"GUARD_EXISTS","anchor":"%s:20",
                 "quote":"if (_currentSegment == null) {  return new char[0];","reason":"上游已处理空缓冲区"}}]}"""
                 .formatted(firstIdIn(brief), FILE));

@@ -89,7 +89,14 @@ public final class RunCommand {
         index++;
         CaseObservation obs =
             runner.runOnce(
-                loaded, k, args.depth(), args.cliJar(), workDir, env, args.crosscheckerEnabled());
+                loaded,
+                k,
+                args.depth(),
+                args.cliJar(),
+                workDir,
+                env,
+                args.crosscheckerEnabled(),
+                args.semanticContext());
         observations.add(obs);
         ReportWriter.printLines(
             List.of(

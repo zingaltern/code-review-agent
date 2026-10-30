@@ -33,6 +33,7 @@ public final class EvalCliArgs {
    * @param failOnRed 门禁红时以退出码 5 结束（CI L1/L2 判定用）
    * @param sha256Out 报告哈希输出路径（L2 本地跑 + CI 校验，04§2.4）
    * @param crosscheckerEnabled M4f CrossChecker 是否启用（context 类是否计入门禁）
+   * @param semanticContext 是否启用语义上下文（ADR-0014：被测 CLI `--semantic-context` 透传；默认关闭）
    */
   public record RunArgs(
       Path dataset,
@@ -48,7 +49,8 @@ public final class EvalCliArgs {
       String commit,
       boolean failOnRed,
       Path sha256Out,
-      boolean crosscheckerEnabled) {}
+      boolean crosscheckerEnabled,
+      boolean semanticContext) {}
 
   /** annotate 命令参数。 */
   public record AnnotateArgs(
@@ -113,7 +115,8 @@ public final class EvalCliArgs {
       List<Path> previous,
       Path dataset,
       String token,
-      String apiBase) {}
+      String apiBase,
+      java.time.Instant asOf) {}
 
   /**
    * badcase add 命令参数（T3.5）。

@@ -7,7 +7,8 @@ import org.cra.core.internal.VerdictJsonCodec.Refutation;
 import org.cra.core.internal.VerdictJsonCodec.VerifierVerdict;
 
 /**
- * REFUTED 反证机械校验（ADR-0015 §2.1）：bug 类候选的 REFUTED 必须携带可核查反证， 否则降级为 INSUFFICIENT_EVIDENCE 交 Judge 仲裁。
+ * REFUTED 反证机械校验（ADR-0015 §2.1）：bug/test 类候选的 REFUTED 必须携带可核查反证， 否则降级为 INSUFFICIENT_EVIDENCE 交
+ * Judge 仲裁。
  *
  * <p>校验只做"证据形态"判断（确定性、可重放），不做语义裁决：
  *
@@ -19,7 +20,8 @@ import org.cra.core.internal.VerdictJsonCodec.VerifierVerdict;
  *   <li>{@code quote} 归一化后过短（<8 字符，如 "null"）→ QUOTE_TOO_SHORT（无鉴别力）。
  * </ol>
  *
- * <p>非 bug 类或非 REFUTED 判定不适用（NOT_APPLICABLE）；security 类 REFUTED 仍走既有抽查保险丝。
+ * <p>适用类别为 bug/test（test 类于 2026-10-30 修订纳入，见 ADR-0015 §6）；其余类别或非 REFUTED 判定不适用
+ * （NOT_APPLICABLE）。security 类 REFUTED 仍走既有 20% 抽查保险丝，暂不纳入本校验。
  */
 public final class RefuteEvidenceGate {
 
@@ -28,7 +30,7 @@ public final class RefuteEvidenceGate {
 
   /** 校验状态。 */
   public enum Status {
-    /** 不适用（非 bug 类或非 REFUTED） */
+    /** 不适用（bug/test 以外的类别或非 REFUTED） */
     NOT_APPLICABLE,
     /** 反证可核查，REFUTED 成立 */
     OK,
@@ -54,7 +56,7 @@ public final class RefuteEvidenceGate {
   /** 校验结果。 */
   public record Result(Status status, Reason reason) {
 
-    /** 不适用（非 bug 类或非 REFUTED）。 */
+    /** 不适用（bug/test 以外的类别或非 REFUTED）。 */
     public static Result notApplicable() {
       return new Result(Status.NOT_APPLICABLE, Reason.NONE);
     }
@@ -66,10 +68,15 @@ public final class RefuteEvidenceGate {
 
   private RefuteEvidenceGate() {}
 
+  /** 纪律适用范围：bug 与 test（ADR-0015 §6）；security 暂不纳入，走既有抽查保险丝。 */
+  private static boolean appliesTo(FindingCategory category) {
+    return category == FindingCategory.BUG || category == FindingCategory.TEST;
+  }
+
   /**
    * 校验一条判定。
    *
-   * @param category finding 类别（仅 bug 类强制）
+   * @param category finding 类别（仅 bug/test 类强制）
    * @param verdict 验证者判定
    * @param refutation 结构化反证（可空）
    * @param visibleContext 本次简报可见的不可信上下文（codeContext + citedEvidence + followup）
@@ -80,7 +87,7 @@ public final class RefuteEvidenceGate {
       VerifierVerdict verdict,
       Refutation refutation,
       String visibleContext) {
-    if (category != FindingCategory.BUG || verdict != VerifierVerdict.REFUTED) {
+    if (!appliesTo(category) || verdict != VerifierVerdict.REFUTED) {
       return new Result(Status.NOT_APPLICABLE, Reason.NONE);
     }
     if (refutation == null || refutation.malformed() || refutation.kind() == null) {

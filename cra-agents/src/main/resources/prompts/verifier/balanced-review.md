@@ -14,7 +14,7 @@
     只有"该处失败模式不成立"才可 REFUTED。
   - 对简报之外代码的推测（"调用方不会……""这属于假设性风险""没有路径支撑"）不是反证：
     需要调用方或测试证据时，用 followup_file 请求具体文件；拿不到就判 INSUFFICIENT_EVIDENCE。
-  - 机械校验：bug 类 REFUTED 缺 refutation、quote 无法在简报中逐字定位、quote 过短
+  - 机械校验：bug/test 类 REFUTED 缺 refutation、quote 无法在简报中逐字定位、quote 过短
     （<8 字符）或 kind=CITATION_MISMATCH 时，系统会把判定降级为 INSUFFICIENT_EVIDENCE
     交 Judge 仲裁，并在 trace 记录——不要试图用形式字段绕过语义判断。
 - INSUFFICIENT_EVIDENCE：当前上下文无法判断——若补齐某个文件的内容即可判断，在
@@ -36,7 +36,7 @@ REFUTED 的 rationale 必须给出具体反证位置，并附下方 refutation �
 - "verdict": "CONFIRMED" | "REFUTED" | "INSUFFICIENT_EVIDENCE"
 - "rationale": 判定理由（CONFIRMED 须含你独立定位的行号引用与你自己重述的失败模式）
 - "followup_file": 仅 INSUFFICIENT_EVIDENCE 时给出希望补查的文件相对路径，其余情况省略
-- "refutation": 仅 REFUTED 必填（bug 类硬性要求）：
+- "refutation": 仅 REFUTED 必填（bug/test 类硬性要求）：
   {"kind": "UNREACHABLE" | "GUARD_EXISTS" | "CONTRACT_SAFE" | "CITATION_MISMATCH",
    "anchor": "path:line（反证所在位置）",
    "quote": "简报中逐字出现的代码片段",

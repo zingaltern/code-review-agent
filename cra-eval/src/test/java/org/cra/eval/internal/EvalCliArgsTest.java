@@ -182,7 +182,8 @@ class EvalCliArgsTest {
                   "out.json",
                   "--sha256-out",
                   "out.sha256",
-                  "--crosschecker-enabled"
+                  "--crosschecker-enabled",
+                  "--semantic-context"
                 },
                 Map.of());
     assertThat(args.failOnRed()).isTrue();
@@ -191,6 +192,18 @@ class EvalCliArgsTest {
     assertThat(args.commit()).isEqualTo("abc1234");
     assertThat(args.sha256Out()).isEqualTo(Path.of("out.sha256"));
     assertThat(args.crosscheckerEnabled()).isTrue();
+    assertThat(args.semanticContext()).isTrue();
+  }
+
+  @Test
+  void semanticContextDefaultsOffWhenFlagAbsent() throws Exception {
+    Path jar = tmp.resolve("cra-runner-cli-0.1.0.jar");
+    Files.writeString(jar, "stub");
+    EvalCliArgs.RunArgs args =
+        (EvalCliArgs.RunArgs)
+            EvalCliArgs.parse(
+                new String[] {"run", "--dataset", "ds", "--cli-jar", jar.toString()}, Map.of());
+    assertThat(args.semanticContext()).isFalse();
   }
 
   @Test
@@ -375,6 +388,15 @@ class EvalCliArgsTest {
                     new String[] {"report", "--repo", "o/r", "--since", "7d", "stray"}, Map.of()))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("stray");
+  }
+
+  @Test
+  void valueStartingWithDoubleDashIsRejectedAtNonFirstPosition() {
+    assertThatThrownBy(
+            () -> EvalCliArgs.parse(new String[] {"run", "--k", "1", "--tier", "--l2"}, Map.of()))
+        .isInstanceOf(org.cra.common.exception.CraConfigException.class)
+        .hasMessageContaining("参数缺值: --tier")
+        .hasMessageContaining("--l2");
   }
 
   @Test

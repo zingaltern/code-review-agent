@@ -12,16 +12,6 @@ import org.junit.jupiter.api.io.TempDir;
 /** {@code cra-eval report} 端到端（离线回放）：参数 → 取数 → 聚合 → 文本/JSON（T3.4 验收 2）。 */
 class ReportCommandTest {
 
-  @org.junit.jupiter.api.BeforeAll
-  static void pinReplayTime() {
-    // fixture 的合并日期是固定的；不钉住"现在"，2026-10-30 起 PR-104 越过 7 天 ignored 窗口，分母会漂移
-    System.setProperty("cra.eval.replayNow", "2026-10-24T00:00:00Z");
-  }
-
-  @org.junit.jupiter.api.AfterAll
-  static void clearReplayTime() {
-    System.clearProperty("cra.eval.replayNow");
-  }
 
   @TempDir Path tmp;
 
@@ -47,6 +37,8 @@ class ReportCommandTest {
               fixture.resolve("previous/2026-10-11.json")
                   + ","
                   + fixture.resolve("previous/2026-10-18.json"),
+              "--as-of",
+              "2026-10-29T00:00:00Z",
               "--json",
               out.toString()
             },
@@ -62,6 +54,23 @@ class ReportCommandTest {
     assertThat(report.dualVerifierGate().triggered()).isFalse();
     assertThat(report.notes()).anyMatch(n -> n.contains("resolve"));
     assertThat(report.notes()).anyMatch(n -> n.contains("Summary"));
+  }
+
+  @Test
+  void invalidAsOfFailsWithUsageError() {
+    int code =
+        EvalCli.execute(
+            new String[] {
+              "report",
+              "--repo",
+              "acme/demo",
+              "--ledger-fixture",
+              "src/test/resources/report-fixture",
+              "--as-of",
+              "not-a-timestamp"
+            },
+            Map.of());
+    assertThat(code).isEqualTo(2);
   }
 
   @Test

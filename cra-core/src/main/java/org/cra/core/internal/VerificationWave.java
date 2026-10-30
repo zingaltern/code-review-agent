@@ -29,7 +29,7 @@ import org.cra.core.internal.pipeline.SemanticContext;
  * 全文注入，03§4.2 判定要求第三条）；LLM 不可得 → 缩小上下文重试 1 次 → 仍失败 该批全 UNAVAILABLE（02§4.2）；CONFIRMED
  * 过反锚定引用新颖性校验（质控信号 PASS/FAIL 入 trace，不阻断）。
  *
- * <p>v1.4（ADR-0015）：bug 类 REFUTED 过 {@link RefuteEvidenceGate} 机械校验——无可核查反证 → 降级为
+ * <p>v1.4（ADR-0015）：bug/test 类 REFUTED 过 {@link RefuteEvidenceGate} 机械校验——无可核查反证 → 降级为
  * INSUFFICIENT_EVIDENCE 交 Judge 仲裁（trace 记 {@code refute_evidence_check}）； bug 类批次附带确定性调用点索引（{@link
  * CallSiteIndex}），索引随判定结果传给 Judge 案件。
  *

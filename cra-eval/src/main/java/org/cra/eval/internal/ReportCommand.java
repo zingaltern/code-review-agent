@@ -25,21 +25,6 @@ public final class ReportCommand {
 
   private ReportCommand() {}
 
-  /**
-   * 回放时点：默认当前时间；系统属性 {@code cra.eval.replayNow}（ISO-8601）可固定， 使"合并满 7 天"等时点判定在测试与历史回放中可复现（fixture
-   * 合并日期是固定的）。
-   */
-  static Instant replayNow() {
-    String fixed = System.getProperty("cra.eval.replayNow");
-    if (fixed == null || fixed.isBlank()) {
-      return Instant.now();
-    }
-    try {
-      return Instant.parse(fixed.strip());
-    } catch (java.time.format.DateTimeParseException e) {
-      throw new CraConfigException("cra.eval.replayNow 非法（ISO-8601）: " + fixed);
-    }
-  }
 
   /**
    * 执行 report。
@@ -48,7 +33,7 @@ public final class ReportCommand {
    * @param env 环境变量（token 兜底）
    */
   public static void execute(EvalCliArgs.ReportArgs args, Map<String, String> env) {
-    Instant now = replayNow();
+    Instant now = args.asOf() != null ? args.asOf() : Instant.now();
     Duration windowLength = DurationSpec.parse(args.since());
     Instant since = now.minus(windowLength);
     ReportWindowSource source;

@@ -103,6 +103,7 @@ public final class CliProcessRunner {
    * @param stubBaseUrl stub 服务器地址（--github-api）
    * @param workspace 本地仓库根（--workspace：CrossChecker 变更史 jgit 数据面 = 解包快照根；null 用被测进程 cwd）
    * @param crosschecker 是否启用 CrossChecker（--crosschecker，M4f-lite；05§5 agents.crosschecker）
+   * @param semanticContext 是否启用语义上下文（--semantic-context，ADR-0014；被测 CLI 该开关默认关闭）
    * @param runRoot 该次 run 的 trace 根目录
    * @return 进程参数
    */
@@ -117,7 +118,8 @@ public final class CliProcessRunner {
       String stubBaseUrl,
       Path runRoot,
       Path workspace,
-      boolean crosschecker) {
+      boolean crosschecker,
+      boolean semanticContext) {
     List<String> args =
         new java.util.ArrayList<>(
             List.of(
@@ -145,6 +147,9 @@ public final class CliProcessRunner {
     }
     if (crosschecker) {
       args.add("--crosschecker");
+    }
+    if (semanticContext) {
+      args.add("--semantic-context");
     }
     return List.copyOf(args);
   }

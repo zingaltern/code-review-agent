@@ -8,7 +8,7 @@ import org.cra.core.internal.VerdictJsonCodec.RefutationKind;
 import org.cra.core.internal.VerdictJsonCodec.VerifierVerdict;
 import org.junit.jupiter.api.Test;
 
-/** REFUTED 反证机械校验（ADR-0015 §2.1）：「无反证 → 不得 REFUTED（应 INSUFFICIENT）」的核心单测。 */
+/** REFUTED 反证机械校验（ADR-0015 §2.1/§6）：「无反证 → 不得 REFUTED（应 INSUFFICIENT）」的核心单测。 */
 class RefuteEvidenceGateTest {
 
   private static final String CONTEXT =
@@ -110,14 +110,65 @@ class RefuteEvidenceGateTest {
   }
 
   @Test
-  void nonBugCategoriesAndNonRefutedVerdictsAreNotApplicable() {
+  void testRefutedWithoutRefutationDowngradesToInsufficient() {
+    // ADR-0015 §6：test 类纳入纪律后，缺反证同样降级（不再按非 bug 类放行）
+    RefuteEvidenceGate.Result result =
+        RefuteEvidenceGate.check(FindingCategory.TEST, VerifierVerdict.REFUTED, null, CONTEXT);
+    assertThat(result.status()).isEqualTo(RefuteEvidenceGate.Status.DOWNGRADE);
+    assertThat(result.reason()).isEqualTo(RefuteEvidenceGate.Reason.MISSING);
+  }
+
+  @Test
+  void testCitationMismatchIsNotARefutationOfMissingCoverage() {
+    // bad-JacksonCore-8 r1 形态：test 类候选（"空缓冲区场景无测试覆盖"）被"引述/锚点不符"推翻
+    RefuteEvidenceGate.Result result =
+        RefuteEvidenceGate.check(
+            FindingCategory.TEST,
+            VerifierVerdict.REFUTED,
+            refutation(
+                RefutationKind.CITATION_MISMATCH,
+                "src/Foo.java:4",
+                "if (items == null) {\n  return 0;"),
+            CONTEXT);
+    assertThat(result.status()).isEqualTo(RefuteEvidenceGate.Status.DOWNGRADE);
+    assertThat(result.reason()).isEqualTo(RefuteEvidenceGate.Reason.CITATION_MISMATCH);
+  }
+
+  @Test
+  void testResolvableRefutationKeepsRefuted() {
+    // test 类 + 合法反证（quote 可在简报逐字定位、长度达标）→ REFUTED 保留
+    RefuteEvidenceGate.Result result =
+        RefuteEvidenceGate.check(
+            FindingCategory.TEST,
+            VerifierVerdict.REFUTED,
+            refutation(
+                RefutationKind.CONTRACT_SAFE, "src/Foo.java:4", "if (items == null) {  return 0;"),
+            CONTEXT);
+    assertThat(result.status()).isEqualTo(RefuteEvidenceGate.Status.OK);
+    assertThat(result.reason()).isEqualTo(RefuteEvidenceGate.Reason.NONE);
+    assertThat(result.downgraded()).isFalse();
+  }
+
+  @Test
+  void nonInScopeCategoriesAndNonRefutedVerdictsAreNotApplicable() {
+    for (FindingCategory category :
+        new FindingCategory[] {
+          FindingCategory.SECURITY,
+          FindingCategory.CONVENTION,
+          FindingCategory.PERFORMANCE,
+          FindingCategory.CONTEXT
+        }) {
+      assertThat(
+              RefuteEvidenceGate.check(category, VerifierVerdict.REFUTED, null, CONTEXT).status())
+          .as("category=%s", category)
+          .isEqualTo(RefuteEvidenceGate.Status.NOT_APPLICABLE);
+    }
     assertThat(
-            RefuteEvidenceGate.check(
-                    FindingCategory.SECURITY, VerifierVerdict.REFUTED, null, CONTEXT)
+            RefuteEvidenceGate.check(FindingCategory.BUG, VerifierVerdict.CONFIRMED, null, CONTEXT)
                 .status())
         .isEqualTo(RefuteEvidenceGate.Status.NOT_APPLICABLE);
     assertThat(
-            RefuteEvidenceGate.check(FindingCategory.BUG, VerifierVerdict.CONFIRMED, null, CONTEXT)
+            RefuteEvidenceGate.check(FindingCategory.TEST, VerifierVerdict.CONFIRMED, null, CONTEXT)
                 .status())
         .isEqualTo(RefuteEvidenceGate.Status.NOT_APPLICABLE);
     assertThat(

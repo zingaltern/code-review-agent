@@ -40,6 +40,8 @@ public final class EvalRunner {
    * @param cliJar 被测 CLI jar
    * @param workDir 该用例工作目录（trace、日志、stub 数据落盘处）
    * @param processEnv 进程环境（LLM 配置来源）
+   * @param crosschecker 是否透传 --crosschecker（M4f-lite）
+   * @param semanticContext 是否透传 --semantic-context（ADR-0014；快照无 .git 时为如实降级）
    * @return 观测
    */
   public CaseObservation runOnce(
@@ -49,7 +51,8 @@ public final class EvalRunner {
       Path cliJar,
       Path workDir,
       Map<String, String> processEnv,
-      boolean crosschecker) {
+      boolean crosschecker,
+      boolean semanticContext) {
     FixtureMeta meta = loaded.meta();
     Path runRoot = workDir.resolve("run-" + runIndex);
     List<DiffSplitter.PatchedFile> files = DiffSplitter.split(loaded.diffPatch());
@@ -72,7 +75,8 @@ public final class EvalRunner {
               server.baseUrl(),
               runRoot.toAbsolutePath(),
               loaded.snapshotRoot(),
-              crosschecker);
+              crosschecker,
+              semanticContext);
       int exitCode =
           invoker.invoke(
               args,

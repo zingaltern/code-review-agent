@@ -10,6 +10,7 @@
 > **v1.3.3**（2026-10-27，M4f-full，ADR-0012）：§1 L5 增**产品事件史条目**（按 `event <id>` 预取，≤1.5k/批）；§2.2 CrossChecker 增量改"变更史/事件史共享 ≤4k"；§2.4 声明事件史不进 CLI 评测（服务端数据面）。
 > **v1.3.4**（2026-10-28，ADR-0015）：§2.4 补验证层反证纪律的增量成本（预算不变，仅 bug 类降级仲裁有界增加）；§4.2 verifier 骨架补 `refutation` 契约与 bug 类调用点索引的组装纪律。
 > **v1.4**（2026-10-28，M4e 池内项，ADR-0014）：§1 **L2 从"未注入"变为"条件注入（默认关闭）"**——确定性符号索引（Java-only）+ 跨文件切片，仅 dataflow/security/verifier 注入、单 brief ≤4k 且从 L1 预算扣除；§2.2 补 L2 切片算术；§2.4 声明 L2 收益度量不在本轮评测口径内。
+> **v1.4.1**（2026-10-30，ADR-0015 §6）：反证机械校验扩至 test 类——§2.4 降级仲裁成本的上界改为 bug/test 类 REFUTED 候选数；verifier/judge 预算与模型可见契约不变。
 
 ---
 
@@ -66,7 +67,7 @@
 
 **数据集与成本口径校准（2026-10-27）**：L2 数据集已由 M1 基线（bad 12 + clean 8）扩至 M3 的 bad 30 + clean 20，k=2 → **60/40 观测**；表中「≈9M」按原 ~90k/用例规划上限线性推算，「≈1.7M」为最近一次真实 L2（`eval/l2/report.json`，commit `9eb4a82`，k=2 quick）实测：≈1.71M in / 0.15M out，单观测均值 ≈17k in / ≈1.5k out，观测耗时合计 ≈22min。真实成本以报告 `run_metrics` 为准。
 
-**验证层反证纪律的增量成本（v1.4，ADR-0015）**：verifier 输入/输出/轮次预算均不变（调用点索引 ≤700 token 从 codeContext 预留；refutation 对象计入既有 1.5k 输出预算）；judge 案件对 bug 类附索引 ≤500 token（16k 案件预算内）。新增成本只有**bug 类无有效反证 REFUTED 的降级仲裁**：每次 ≤16k in / ≤1k out，上界 = 每 run bug 类 REFUTED 候选数（L3 实测单 case 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
+**验证层反证纪律的增量成本（v1.4，ADR-0015）**：verifier 输入/输出/轮次预算均不变（调用点索引 ≤700 token 从 codeContext 预留；refutation 对象计入既有 1.5k 输出预算）；judge 案件对 bug 类附索引 ≤500 token（16k 案件预算内）。新增成本只有**bug/test 类无有效反证 REFUTED 的降级仲裁**（test 类于 v1.4.1 纳入，ADR-0015 §6）：每次 ≤16k in / ≤1k out，上界 = 每 run bug/test 类 REFUTED 候选数（L3 实测单 case 该类 1–3 条）。该项不改变 L1/L2/L3 的档位、阈值与判定项；L2/L3 报告新增观察字段（`refute_evidence_check` 降级计数、`call_site_index` 可得率），不参与门禁。
 
 **L1 判定语义（v1.3.1 修正——"固定种子=确定性"假设不成立：OpenAI 兼容生态的 `seed` 是 best-effort，多数兼容端点忽略该参数，语义不跨 provider/模型版本稳定，而本项目恰是多模型路由架构）**：
 
@@ -85,7 +86,7 @@
 - **L2 复核（本地跑 + CI 校验哈希）**：本地 `cra-eval run --set l2 --k 2 --depth quick --tier l2 --commit "$(git rev-parse HEAD)" --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256`（`--set l2` = bad 30 + clean 20，60 + 40 观测；M1 基线为 bad 12 + clean 8 的 24 + 16 观测；门禁红时退出码 5）。CI 的 `eval-l2` job 在 **L1 红、prompt/模型/编排路径改动，或评测门禁代码改动（`VerifyCommand`/`ReportHasher`/`GateEvaluator`/`GatePolicy`/`AggregateEngine`）** 时运行（`if: always()`，needs 不阻塞）：要求上述两个文件存在，`cra-eval verify --tier l2 --expect-commit <报告 commit>` 校验哈希、按当前阈值重算的门禁结论与 commit 绑定；同时要求报告 commit 是 PR head 的祖先，且其后仅允许 `eval/l2/` 变更（报告文件自身提交不得夹带代码改动）。缺失、过期或校验红 → job 红 → **L2 也红才整体失败**。L1 绿且无相关改动时跳过（不要求 L2 报告）。
 - **L2 报告路径约定**：`eval/l2/report.json` + `eval/l2/report.json.sha256` 随 PR 提交（`--json` 已含 gate 结论）；服务化形态可改用 `eval/l2/report.json.sig`（服务端信封），CI 以 `cra-eval verify --signature` 验签（M4b，ADR-0008）。报告与哈希同时提交属荣誉制；签名路径把防伪造提升到"持有服务端密钥"。
 - **L3 全量（`eval.yml`）**：workflow_dispatch 输入 `set/k/depth/tier`，里程碑口径 `set=all, k=3, depth=standard, tier=l3`；`--fail-on-red` 让红结论体现为 job 失败，报告 artifact 仍 `if: always()` 上传。`--commit "$GITHUB_SHA"` 记录代码提交。
-- **M4e 语义上下文不进 L1/L2/L3 默认口径（v1.4，ADR-0014）**：`CRA_SEMANTIC_CONTEXT_ENABLED` 默认 false，评测组合根不开启 → L1/L2/L3 不度量 L2 切片收益，也不因该数据面改变观测口径；关闭态字节级一致由 `SemanticContextPipelineTest` 断言。开/关收益对比是后续独立任务（需新口径与预算）。
+- **M4e 语义上下文不进 L1/L2/L3 默认口径（v1.4，ADR-0014）**：`CRA_SEMANTIC_CONTEXT_ENABLED` 默认 false，评测组合根不开启 → L1/L2/L3 不度量 L2 切片收益，也不因该数据面改变观测口径；关闭态字节级一致由 `SemanticContextPipelineTest` 断言。开/关收益对比是后续独立任务（需新口径与预算）。`eval.yml` 已增 `semantic_context` 输入（默认 false，仅透传 `--semantic-context`，不改 tier/k/depth 语义）；**限制**：bad/clean 快照由 `git archive` 生成、不含 `.git`，语义索引在这些用例上"不可得"为如实降级，开启后目前只有 adv-ctx 6 个用例可度量。
 - **M4f-full 事件史不进 L1/L2/L3（v1.3.3，ADR-0012）**：事件史是服务端数据面（PG + 调度采集），CLI 评测组合根未装配 `EventHistoryQuery`；context 门禁仍由 M4f-lite 数据面（git 变更史 + REVIEW.md）驱动。事件史路径的验收 = 单测 + PG 集成 + `CrossCheckPipelineTest` 的脚本化 LLM fixture（08§3.1），不靠评测集自证；如未来要让评测覆盖事件史，需在评测组合根装配端口与 fixture 数据集（独立任务）。
 - **CI 时长**：L1 自带 10min 守护；它与 verify 并行，工作流墙钟 ≈ max(verify, L1)，符合 08§4 的 10min 预算；L2 job 只做哈希校验（<2min），不在 CI 内跑 30–40min 的评测本身——这是"门禁权威优先于门禁频率"的成本纪律，不是绕过。
 

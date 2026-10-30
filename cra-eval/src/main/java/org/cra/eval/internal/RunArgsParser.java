@@ -24,6 +24,7 @@ final class RunArgsParser {
           "--commit",
           "--fail-on-red",
           "--crosschecker-enabled",
+          "--semantic-context",
           "--sha256-out");
 
   private RunArgsParser() {}
@@ -63,6 +64,7 @@ final class RunArgsParser {
     }
     boolean failOnRed = "true".equals(named.get("--fail-on-red"));
     boolean crosschecker = "true".equals(named.get("--crosschecker-enabled"));
+    boolean semanticContext = "true".equals(named.get("--semantic-context"));
     return new EvalCliArgs.RunArgs(
         datasetPath,
         set,
@@ -77,6 +79,7 @@ final class RunArgsParser {
         commit == null || commit.isBlank() ? null : commit,
         failOnRed,
         sha256Out == null ? null : Path.of(sha256Out),
-        crosschecker);
+        crosschecker,
+        semanticContext);
   }
 }

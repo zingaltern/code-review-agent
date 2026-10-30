@@ -34,6 +34,12 @@ on:
         default: 'false'
         type: choice
         options: ['false', 'true']
+      semantic_context:
+        description: '启用语义上下文（ADR-0014；透传被测 CLI --semantic-context；bad/clean 快照无 .git 时索引不可得为如实降级）'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['false', 'true']
       model_strong:
         description: 'strong 档模型名（verifier/judge 用；空 = 继承 standard，安全默认）'
         required: false
@@ -97,6 +103,7 @@ jobs:
             --dataset cra-eval/dataset --set ${{ inputs.set }} --k ${{ inputs.k }} --depth ${{ inputs.depth }} \
             --tier ${{ inputs.tier }} --commit "$GITHUB_SHA" --fail-on-red \
             ${{ inputs.crosschecker == 'true' && '--crosschecker-enabled' || '' }} \
+            ${{ inputs.semantic_context == 'true' && '--semantic-context' || '' }} \
             ${{ inputs.cases != '' && format('--case {0}', inputs.cases) || '' }} \
             --work-dir cra-eval-work --json cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json \
             --sha256-out cra-eval-work/report-${{ inputs.set }}-k${{ inputs.k }}.json.sha256 \
@@ -112,6 +119,7 @@ jobs:
         run: |
           java -jar cra-eval/target/cra-eval-0.1.0.jar run \
             --dataset cra-eval/dataset --set adversarial --k 3 --depth ${{ inputs.depth }} \
+            ${{ inputs.semantic_context == 'true' && '--semantic-context' || '' }} \
             --work-dir cra-eval-work-adv --json cra-eval-work-adv/report-adv-k3.json \
             --timeout-sec 600
       - name: 记录报告哈希（验收证据；artifact 同时保留 .sha256 文件）
