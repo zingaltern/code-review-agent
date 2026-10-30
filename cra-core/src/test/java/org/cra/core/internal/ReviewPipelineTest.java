@@ -1240,6 +1240,31 @@ class ReviewPipelineTest {
   }
 
   @Test
+  void emptyPlanNoteDistinguishesMixedTestAndPolicySkips() {
+    // 02§4.4：测试文件跳过与 skip_paths/hard-cap 裁剪并存时，声明必须给出两个真实原因
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(diffOf("src/test/java/demo/FooTest.java", "generated/Gen.java"));
+    when(adapter.readFile(any(), anyString(), anyString()))
+        .thenAnswer(
+            inv -> {
+              String path = inv.getArgument(2);
+              if ("REVIEW.md".equals(path)) {
+                return FileContent.ofText("REVIEW.md", "## Skip paths\n- generated/**\n");
+              }
+              return FileContent.ofText(path, "class X {}");
+            });
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(scripted.totalCalls()).isZero();
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("测试文件 1 个按默认策略跳过");
+    assertThat(summary).contains("另 1 个被 skip_paths/hard-cap 裁剪");
+    assertThat(summary).doesNotContain("仅测试文件/无可评审变更");
+  }
+
+  @Test
   void reviewTestsSwitchRestoresTestFileScope() {
     // --review-tests / CRA_REVIEW_TESTS=true：测试文件恢复评审，覆盖声明不再出现"按策略不评审"
     pipeline =
