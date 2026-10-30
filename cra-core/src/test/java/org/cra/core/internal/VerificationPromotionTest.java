@@ -211,7 +211,7 @@ class VerificationPromotionTest {
     pipeline =
         newPipeline(
             new org.cra.core.api.PipelineOptions(
-                500_000, 0.70, 0.85, 2000, 8000, 3, "labeled", 20));
+                500_000, 0.70, 0.85, 2000, 8000, 3, "labeled", 20, false));
     scripted.review(oneFinding("bug", "important")).verifierUnavailable();
     ReviewResult result = pipeline.run(request());
     assertThat(result.stats().unverified()).isZero(); // labeled 发布的不计"未发布"
@@ -258,7 +258,7 @@ class VerificationPromotionTest {
     pipeline =
         newPipeline(
             new org.cra.core.api.PipelineOptions(
-                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100)); // 100% 命中抽查
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100, false)); // 100% 命中抽查
     scripted
         .review(oneFinding("bug", "important"))
         .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null));
@@ -298,7 +298,7 @@ class VerificationPromotionTest {
     pipeline =
         newPipeline(
             new org.cra.core.api.PipelineOptions(
-                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100)); // 100% 必命中
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100, false)); // 100% 必命中
     scripted
         .review(oneFinding("bug", "important"))
         .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null));
@@ -317,7 +317,8 @@ class VerificationPromotionTest {
     // 保险丝未命中（0%）：important REFUTED 直接丢弃，不调 Judge
     pipeline =
         newPipeline(
-            new org.cra.core.api.PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", 0));
+            new org.cra.core.api.PipelineOptions(
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 0, false));
     scripted
         .review(oneFinding("bug", "important"))
         .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null));
@@ -332,7 +333,8 @@ class VerificationPromotionTest {
     // 抽查复核的 judge 不可得 → 维持 REFUTED（保守不发布，02§4.2 同侧语义）
     pipeline =
         newPipeline(
-            new org.cra.core.api.PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100));
+            new org.cra.core.api.PipelineOptions(
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100, false));
     scripted
         .review(oneFinding("bug", "important"))
         .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null))
@@ -507,7 +509,8 @@ class VerificationPromotionTest {
     // 03§6：Judge 上下文按案件界定 ≤3 文件
     pipeline =
         newPipeline(
-            new org.cra.core.api.PipelineOptions(500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100));
+            new org.cra.core.api.PipelineOptions(
+                500_000, 0.70, 0.85, 2000, 8000, 3, "never", 100, false));
     scripted
         .review(oneFinding("bug", "important"))
         .verifierScript(brief -> verdictJson(firstIdIn(brief), "REFUTED", "L3 已有防护", null));

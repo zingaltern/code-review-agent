@@ -4,6 +4,7 @@
 > **v1.2**：处置信号修正（删 GraphQL-only resolve）；聚合 Wilson CI 门禁 + 三级分级；Defects4J 双侧数据集；转化漏斗护栏。
 > **v1.2.1**：Wilson 数值按正确公式修正；L1 升级语义与 L2 聚合护栏；阈值分档；Defects4J 净化工序。
 > **v1.3.1**：对抗集增**第 4 类 context 用例**（v1.3 CrossChecker 的召回此前仅靠 M4f-lite 单一 fixture 自证，无度量归属）；L1 注入用例口径与 04§2.4 统一为**负向不变量断言**（seed best-effort 局限）。
+> **v1.3.2**（2026-10-30，02§4.4）：§3 声明数据集与"测试文件默认不评审"的口径关系——bad diff 已过滤测试 hunk（口径不变）；clean 集部分用例含测试文件，误报均值可能小幅下降，由下一次 L2 按新口径复核（阈值不变）。
 
 ---
 
@@ -180,6 +181,8 @@ prompt/模型改动与 run 关联（`prompt_template_versions`），线上问题
 |---|---|---|
 | bad-PR | Defects4J buggy 侧：`git diff <fixed> <buggy>` 得缺陷引入 diff（逆向 patch），从 patch hunk + 元数据标注 expected findings（文件/行/类别/断言关键词）；**净化工序 ①（v1.2.1）**：hunk 级过滤测试文件（`src/test/**`、`*Test.java` 等）——逆向 diff 必然含"删除触发测试"，不过滤则"删测试"类 finding 干扰断言匹配 | 整仓 fixture 快照 + diff + 标注 |
 | clean-PR | Defects4J 宿主项目的 **git 历史 benign commit**（文档、测试增补、重命名等真实代码仓库的非缺陷提交，人工快筛）；**净化工序 ②（v1.2.1）**：`cra-eval recheck` 复核通道——快筛误标样本（实含 bug）会把真阳性记为 FP，向沉默优化施压（第一公理所防）；复核发现误标 → 打 `relabeled` 标签（§2 出口）、样本挪 bad 集、**当次门禁统计作废重跑** | 同上，expected_findings = ∅（复核后） |
+
+**与"测试文件默认不评审"的关系（v1.3.2，02§4.4）**：净化工序 ① 已在生成期把测试文件 hunk 从 **bad** diff 中移除，故该策略**不改变 bad 集的既有评测口径**（召回/断言匹配的输入面不变）。**clean** 集是真实 benign commit，部分用例的 diff 仍含测试文件（如 `clean-Jsoup-fix26` 的 `src/test/java/org/jsoup/safety/CleanerTest.java`、`clean-Gson-fix1` 的 `src/test/...`）：这些文件今后不再进入评审 chunk，clean 集上的误报均值**可能小幅下降**（测试代码上的 nit 类误报消失），属口径变化而非能力变化——下一次 L2 按新口径复核（06§1.2 门禁阈值不变，红线按新基线重算并记录）。
 
 **整仓 fixture 规格（07 T1.9 独立任务，v1.1 把它塞进一个 checkbox 是低估）**：
 

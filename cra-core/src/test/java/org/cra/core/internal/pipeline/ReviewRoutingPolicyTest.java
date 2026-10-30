@@ -67,6 +67,43 @@ class ReviewRoutingPolicyTest {
   }
 
   @Test
+  void testReviewerTriggerSeesTestFilesOutsideDefaultReviewScope() {
+    // 02§4.4：测试文件默认不进评审计划，但触发比例必须按过滤前全量 diff 统计——
+    // 改用过滤后计划（只剩 2 个生产文件）会让本用例误判为"测试比例 0 → 触发"
+    DiffResult twoProdOneTest =
+        new DiffResult(
+            "b",
+            "h",
+            List.of(
+                new DiffFile("src/main/A.java", null, "modified", "@@ -1 +1 @@", List.of()),
+                new DiffFile("src/main/B.java", null, "modified", "@@ -1 +1 @@", List.of()),
+                new DiffFile("src/main/ATest.java", null, "modified", "@@ -1 +1 @@", List.of())),
+            List.of());
+    assertThat(ReviewRoutingPolicy.testReviewerTriggered(twoProdOneTest)).isTrue();
+    DiffResult oneProdOneTest =
+        new DiffResult(
+            "b",
+            "h",
+            List.of(
+                new DiffFile("src/main/A.java", null, "modified", "@@ -1 +1 @@", List.of()),
+                new DiffFile("src/main/BTest.java", null, "modified", "@@ -1 +1 @@", List.of())),
+            List.of());
+    assertThat(ReviewRoutingPolicy.testReviewerTriggered(oneProdOneTest)).isFalse();
+  }
+
+  @Test
+  void isTestPathCoversDirectoryAndFilenamePatterns() {
+    // 02§4.4：测试文件 = src/test/ 路径 或 *Test.java / *Tests.java
+    assertThat(ReviewRoutingPolicy.isTestPath("src/test/java/demo/Foo.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("cra-core/src/test/resources/case.json")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/FooTest.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("test/com/demo/FooTests.java")).isTrue();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/Foo.java")).isFalse();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/Testing.java")).isFalse();
+    assertThat(ReviewRoutingPolicy.isTestPath("src/main/java/demo/TestSupport.java")).isFalse();
+  }
+
+  @Test
   void conventionTriggeredOnlyWithConventionsConfigured() {
     assertThat(ReviewRoutingPolicy.conventionTriggered(ReviewPolicy.empty())).isFalse();
     ReviewPolicy withConventions =

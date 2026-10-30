@@ -373,7 +373,8 @@ public final class ReviewPipeline implements Orchestrator {
       DepthPlan depthPlan =
           DepthPolicy.resolve(request.depth(), reviewDiff.totalPatchLines(), options);
       ChunkPlanner.Plan plan =
-          ChunkPlanner.plan(reviewDiff.files(), policy, depthPlan.priorityOnly());
+          ChunkPlanner.plan(
+              reviewDiff.files(), policy, depthPlan.priorityOnly(), options.includeTestFiles());
       trace.emit(
           "plan",
           Map.of(
@@ -381,8 +382,10 @@ public final class ReviewPipeline implements Orchestrator {
               "window_lines", depthPlan.windowLines(),
               "conditional_full_text", depthPlan.conditionalFullText(),
               "priority_only", depthPlan.priorityOnly(),
+              "include_test_files", options.includeTestFiles(),
               "chunks", plan.chunks().size(),
               "skipped", plan.skippedPaths().size(),
+              "skipped_test_files", plan.skippedTestCount(),
               "notes", plan.notes()));
 
       // T2.2：评审扇出（视角路由/并发 8/失败隔离/精确合并）——run 级预算账目在 run() 持有，随派发记账
@@ -635,6 +638,7 @@ public final class ReviewPipeline implements Orchestrator {
               null,
               unverifiedLabeled.stream().map(s -> s.finding().id()).collect(Collectors.toSet()),
               unverifiedCount,
+              !plan.hasReviewableFiles(),
               outcome.templateVersions(),
               signoff);
       if (degradations.contains("summary-publish-failed")) {

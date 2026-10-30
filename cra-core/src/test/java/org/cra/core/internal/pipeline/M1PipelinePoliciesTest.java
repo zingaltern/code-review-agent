@@ -78,6 +78,7 @@ class M1PipelinePoliciesTest {
                     file("src/main/D.java"),
                     file("app/E.java")),
                 ReviewPolicy.empty(),
+                false,
                 false)
             .chunks();
     // src/main 4 文件 → 3+1；app 1 文件 → 1
@@ -104,6 +105,7 @@ class M1PipelinePoliciesTest {
                 List.of(),
                 List.of(),
                 List.of()),
+            false,
             false);
     assertThat(plan.chunks()).hasSize(1);
     assertThat(plan.chunks().get(0).files().get(0).path()).isEqualTo("src/A.java");
@@ -127,14 +129,97 @@ class M1PipelinePoliciesTest {
                 List.of(),
                 List.of(),
                 List.of()),
-            true);
+            true,
+            false);
     assertThat(filtered.chunks().get(0).files().get(0).path()).isEqualTo("billing/C.java");
     assertThat(filtered.skippedPaths()).anyMatch(s -> s.startsWith("misc/O.java"));
 
     ChunkPlanner.Plan fallback =
-        ChunkPlanner.plan(List.of(file("misc/O.java")), ReviewPolicy.empty(), true);
+        ChunkPlanner.plan(List.of(file("misc/O.java")), ReviewPolicy.empty(), true, false);
     assertThat(fallback.chunks()).hasSize(1);
     assertThat(fallback.notes()).anyMatch(n -> n.contains("未配置 priority_paths"));
+  }
+
+  @Test
+  void testFilesExcludedByDefaultAndCounted() {
+    // 02§4.4：默认策略下测试文件不进评审范围，跳过数量必须可声明
+    ChunkPlanner.Plan plan =
+        ChunkPlanner.plan(
+            List.of(
+                file("src/main/java/demo/A.java"),
+                file("src/test/java/demo/ATest.java"),
+                file("src/main/java/demo/BTests.java")),
+            ReviewPolicy.empty(),
+            false,
+            false);
+    assertThat(plan.chunks()).hasSize(1);
+    assertThat(plan.chunks().get(0).files())
+        .extracting(DiffFile::path)
+        .containsExactly("src/main/java/demo/A.java");
+    assertThat(plan.skippedTestPaths())
+        .containsExactly("src/test/java/demo/ATest.java", "src/main/java/demo/BTests.java");
+    assertThat(plan.skippedTestCount()).isEqualTo(2);
+    assertThat(plan.hasReviewableFiles()).isTrue();
+  }
+
+  @Test
+  void testFilesReviewedWhenSwitchOn() {
+    // --review-tests / CRA_REVIEW_TESTS=true：恢复测试文件评审
+    ChunkPlanner.Plan plan =
+        ChunkPlanner.plan(
+            List.of(file("src/main/java/demo/A.java"), file("src/test/java/demo/ATest.java")),
+            ReviewPolicy.empty(),
+            false,
+            true);
+    assertThat(
+            plan.chunks().stream()
+                .flatMap(chunk -> chunk.files().stream())
+                .map(DiffFile::path)
+                .toList())
+        .containsExactly("src/main/java/demo/A.java", "src/test/java/demo/ATest.java");
+    assertThat(plan.skippedTestCount()).isZero();
+    assertThat(plan.skippedTestPaths()).isEmpty();
+  }
+
+  @Test
+  void pureTestChangeDeclaredAsNotReviewable() {
+    // 02§4.4：纯测试变更 = 无可评审文件（完整声明与"不派发"由 ReviewStage/Summary 给出）
+    ChunkPlanner.Plan plan =
+        ChunkPlanner.plan(
+            List.of(file("src/test/java/demo/ATest.java")), ReviewPolicy.empty(), false, false);
+    assertThat(plan.chunks()).isEmpty();
+    assertThat(plan.hasReviewableFiles()).isFalse();
+    assertThat(plan.skippedTestCount()).isEqualTo(1);
+    assertThat(plan.skippedTestPaths()).containsExactly("src/test/java/demo/ATest.java");
+  }
+
+  @Test
+  void reviewMdSkipPathsStillStackWhenTestsIncluded() {
+    // 04§3.1：REVIEW.md 的 Skip paths 与测试文件开关叠加生效（开关打开也不绕过 skip_paths）
+    ReviewPolicy policy =
+        new ReviewPolicy(
+            false,
+            List.of(),
+            null,
+            List.of(),
+            List.of("generated/**"),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of());
+    ChunkPlanner.Plan plan =
+        ChunkPlanner.plan(
+            List.of(file("generated/GTest.java"), file("src/test/java/demo/ATest.java")),
+            policy,
+            false,
+            true);
+    assertThat(plan.skippedPaths()).containsExactly("generated/GTest.java");
+    assertThat(plan.skippedTestCount()).isZero();
+    assertThat(plan.chunks().get(0).files())
+        .extracting(DiffFile::path)
+        .containsExactly("src/test/java/demo/ATest.java");
   }
 
   // ---------- RunBudgetTracker ----------

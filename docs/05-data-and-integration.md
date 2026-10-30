@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.9（2026-10-30，02§4.4 评审范围：§3/§5 新增 `--review-tests` / `CRA_REVIEW_TESTS` / `review.include-test-files`（默认 false——测试文件默认不评审））
 > 文档版本：v1.8（2026-10-28，M4e 池内项"语义索引/跨文件上下文"第一版：§5 新增 `semantic_context.*` 配置项与环境变量（ADR-0014；默认关闭））
 > 文档版本：v1.7（2026-10-27，M4e 第二半 + M4f-full：CLI/server 平台选择与 GitLab webhook（ADR-0013）；§1.6 产品事件史 JSONL/PG/检索/引用（ADR-0012）；调试/契约不变）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：GitLab 适配器端点差异/账本映射/待验证项落 ADR-0011 与 docs/deployment-gitlab.md；SPI 签名不变）
@@ -381,6 +382,8 @@ comment 账本解析"上一完成 commit"（`--lookback` 默认 20；首次 = �
 
 M4a 签字建议输入（05§5 `agents.signoff`）：`--pr-author`（缺省 `CRA_PR_AUTHOR` → `GITHUB_ACTOR`；未知作者不满足低风险 0 人签）、`--tests-status passed|failed|unknown`（缺省 `CRA_TESTS_STATUS`；本地 pre-PR 由实跑退出码覆盖）、`--signoff` / `--signoff=false`（缺省 `CRA_SIGNOFF_ENABLED=true`）、`--trusted-authors a,b`（缺省 `CRA_SIGNOFF_TRUSTED_AUTHORS`）。建议绑定 `--head` commit；新 commit 出现后由账本完成标记比对旧建议并标 stale。
 
+评审范围（02§4.4）：`--review-tests` / `--review-tests=true|false`（缺省 `CRA_REVIEW_TESTS=false`，`sweep` 只认环境变量）打开或关闭测试文件评审。默认 `false`——`src/test/**`、`*Test.java`、`*Tests.java` 不进评审计划，Summary 覆盖声明写"测试文件按策略不评审：N 个"；纯测试 PR 声明"仅测试文件/无可评审变更，按策略不评审"且仍为 `SUCCESS` + DONE 标记。REVIEW.md 的 `Skip paths` 与该开关叠加生效。
+
 退出码：`0` 正常完成（**有 finding 不是失败**）；`2` 自身故障；`3` `--security-block` 模式下存在 confirmed 安全 finding（供需要阻塞语义的仓库）；**`4` 本地 pre-PR 实跑构建/测试失败**（v1.3.2 撞墙定点修订：v1 基线只定义了 0/2/3，而 07 T2.10 验收 8 要求"报告如实展示测试失败输出且退出码非零"——需一个区别于"工具自身故障"的确定性信号。优先级高于评审结论：构建失败时评审照常运行、结果入报告，但退出码恒为 4）。
 
 ### 3.1 cra-eval 评测命令契约（T3.1/T3.3 落地，2026-10-25）
@@ -532,6 +535,7 @@ cra:
     hard-cap-lines: 8000
     nit-budget-default: 3
     publish-unverified: never       # never | labeled
+    include-test-files: false       # 02§4.4：测试文件默认不评审（--review-tests / CRA_REVIEW_TESTS）
   trust:
     review-policy-source: base      # v1.1：固定 base，禁 head（04§3.2）
 ```
@@ -551,6 +555,7 @@ cra:
 | `CRA_SEMANTIC_CONTEXT_MAX_FILES` / `--semantic-context-max-files` | 索引扫描 Java 文件数上限（升序截断并声明） | `2000` |
 | `CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES` / `--semantic-context-max-file-bytes` | 单文件字节上限（超限跳过并声明） | `262144` |
 | `CRA_SEMANTIC_CONTEXT_SLICE_TOKENS` / `--semantic-context-slice-tokens` | 单 brief 切片 token 上限（500–12000；从 L1 预算扣除） | `4000` |
+| `CRA_REVIEW_TESTS` / `--review-tests` | 评审范围是否含测试文件（02§4.4）：`false` 时 `src/test/**`、`*Test.java`、`*Tests.java` 不进评审计划（Summary 声明跳过数）；`sweep` 无独立 flag，只认该环境变量 | `false` |
 
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 

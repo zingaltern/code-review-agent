@@ -10,6 +10,7 @@
 > **v1.3.3**（2026-10-27，M4f-full，ADR-0012）：§1 L5 增**产品事件史条目**（按 `event <id>` 预取，≤1.5k/批）；§2.2 CrossChecker 增量改"变更史/事件史共享 ≤4k"；§2.4 声明事件史不进 CLI 评测（服务端数据面）。
 > **v1.3.4**（2026-10-28，ADR-0015）：§2.4 补验证层反证纪律的增量成本（预算不变，仅 bug 类降级仲裁有界增加）；§4.2 verifier 骨架补 `refutation` 契约与 bug 类调用点索引的组装纪律。
 > **v1.4**（2026-10-28，M4e 池内项，ADR-0014）：§1 **L2 从"未注入"变为"条件注入（默认关闭）"**——确定性符号索引（Java-only）+ 跨文件切片，仅 dataflow/security/verifier 注入、单 brief ≤4k 且从 L1 预算扣除；§2.2 补 L2 切片算术；§2.4 声明 L2 收益度量不在本轮评测口径内。
+> **v1.4.2**（2026-10-30，02§4.4）：§3.1 补**评审范围默认值**——测试文件默认不评审（`review.include-test-files: false`，`--review-tests`/`CRA_REVIEW_TESTS=true` 打开），与 `Skip paths` 叠加；覆盖声明的三条事实口径。
 > **v1.4.1**（2026-10-30，ADR-0015 §6）：反证机械校验扩至 test 类——§2.4 降级仲裁成本的上界改为 bug/test 类 REFUTED 候选数；verifier/judge 预算与模型可见契约不变。
 
 ---
@@ -32,6 +33,7 @@
 ### 2.1 预算参数（默认，配置可覆盖）
 
 - run 级总预算 **500k token**（Standard，v1.2.1 从 400k 上调——见下）；降档阶梯 **70%/85%**（02§4.4）；
+- 评审范围默认**不含测试文件**（`review.include-test-files: false`，`--review-tests` / `CRA_REVIEW_TESTS=true` 打开，02§4.4）——下方算术中的"文件数"只计生产代码与文档，测试文件不消耗评审 token；
 - LLM 并发默认 8（02§4.5）；
 - token 估算：字符数 / 3.5 近似。
 
@@ -109,7 +111,7 @@
 ## Priority paths                <!-- 大 diff 裁剪时优先保留 -->
 - billing/**
 
-## Skip paths                    <!-- 完全跳过 -->
+## Skip paths                    <!-- 完全跳过（与测试文件默认策略叠加：开关打开也不绕过） -->
 - generated/**
 
 ## Evidence requirements         <!-- 证据要求覆写 -->
@@ -131,6 +133,8 @@
 ```
 
 **三类新段落的定位（"写下来→边界外推"的落地，01§3.4）**：人的 cross check 经验（数量级直觉、产品历史、事故教训）一旦写入这些段落，就变成机器可确定性执行的检查——owner 的维护动作即"把核对经验外推给 AI"的过程。三类段落与 `Conventions` 的分工：Conventions 是**代码约定**（ConventionReviewer 对照 diff 检查代码），新三类是**业务/产品上下文**（CrossChecker 以它们为证据主体核对隐含假设的矛盾——diff 仍参与假设推导，03§3.1 v1.3.1 表述）。tribal knowledge（只在人脑子里的）永远不可见——这是硬边界，不是工具缺陷。
+
+**评审范围默认值（v1.4.2，02§4.4）**：测试文件（`src/test/**`、`*Test.java`、`*Tests.java`）默认不进入评审范围——`review.include-test-files: false`，`--review-tests` / `CRA_REVIEW_TESTS=true` 打开。该默认与 `Skip paths` **叠加**：开关打开时 Skip paths 仍照常排除。覆盖声明必须逐条写出范围事实：非空时"测试文件按策略不评审：N 个"；纯测试变更（无任何可评审文件）时"仅测试文件/无可评审变更，按策略不评审"，RunStatus 仍为 `SUCCESS` 且照常发布 DONE 标记（幂等语义不变）。范围裁决在 ChunkPlanner（04§2.2 分 chunk 之前），TestReviewer 的触发比例用**过滤前全量 diff**（03§3 v1.4.3）。
 
 ### 3.2 信任模型（v1.1 新增，堵住 v1.0 的旁路漏洞）
 

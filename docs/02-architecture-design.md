@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.7（2026-10-30，评审范围产品化：测试文件默认不进入评审范围（`include-test-files=false`），TestReviewer 比例仍按全量 diff、纯测试 PR 如实声明）
 > 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：新增 cra-git-gitlab（ADR-0011），GitLab 触发边界表见 docs/deployment-gitlab.md）
 > 文档版本：v1.4（2026-10-26，M4b 服务化：cra-server 第二组合根 + PG 账本 + 报告签名，ADR-0008；M4c/M4d：账本载体扩展为 PR 评论 / commit comment / issue 三形态，触发边界表补 push 与夜间定时两行）
@@ -137,6 +138,7 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 - **run 级降档阶梯（v1.2.1 阈值重校）**：消耗 <70% 正常（旗舰算术示例 330k/500k = 66%，正常 PR 不触发任何降档——v1.2 的 400k 预算下该示例为 82.5%，坐在旧 80% 档之上，会使 top-10 截断与 `suppressed_by_truncation>0` 报警常态化，属护栏"狼来了"）；≥70% → 砍 light 角色与 1 个视角；≥85% → 候选 finding 按 severity 排序只验证 top-10；100% → 终止剩余代理，DEGRADED 收尾；
 - **截断必须可见（梯度沉默护栏）**：top-10 截断与预算终止产生的**丢弃候选数**计入 run stats（`suppressed_by_truncation`）并在 Summary 中逐条声明"因预算截断未验证 N 条候选"；该计数进入 L3 健康度（06§1.3）与门禁趋势监控——"发 1 条丢 9 条"不允许对护栏 invisible；
 - 大 diff 策略：>2k 行自动降为 Quick 质量；>8k 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围。
+- **评审范围默认不含测试文件（v1.4.1 产品默认）**：`src/test/**` 与 `*Test.java` / `*Tests.java` 默认不进入评审计划——单测正确性由 `mvn verify` 与测试自身保障，评审只为生产代码与文档投入 token。Summary 覆盖声明写明"测试文件按策略不评审：N 个"；`--review-tests` / `CRA_REVIEW_TESTS=true`（`review.include-test-files`）恢复评审，REVIEW.md 的 `Skip paths` 与其**叠加**生效（开关打开也不绕过 skip 段）。三条边界：① TestReviewer 触发比例固定按**过滤前全量 diff** 统计（否则"生产+测试同改"的 PR 会误触发）；② TestReviewer brief 仍列出按策略跳过的测试文件（"缺测试覆盖"结论的输入面不变）；③ 纯测试 PR（无任何可评审文件）Summary 明确"仅测试文件/无可评审变更，按策略不评审"，RunStatus `SUCCESS`、DONE 标记照旧（幂等语义不变）。
 
 ### 4.5 LLM 并发与限流（v1.1 新增）
 

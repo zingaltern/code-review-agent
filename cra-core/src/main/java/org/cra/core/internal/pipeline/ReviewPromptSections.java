@@ -69,7 +69,15 @@ final class ReviewPromptSections {
     return out.toString();
   }
 
-  /** TestReviewer 的测试文件清单附加段（全 PR 级输入）。 */
+  /**
+   * TestReviewer 的测试文件清单附加段（全 PR 级输入）。
+   *
+   * <p>测试文件默认不进评审 chunk（02§4.4），但"本次改了什么测试"是"缺测试覆盖"结论的正向证据面：计划内测试文件
+   * （开关打开时）与按策略跳过的测试文件都要列出，否则该角色的核心主张在默认策略下失去输入（03§3）。
+   *
+   * @param plan 评审计划（含测试文件策略跳过的路径）
+   * @return 附加段
+   */
   static String testExtraSection(ChunkPlanner.Plan plan) {
     StringBuilder sb = new StringBuilder();
     sb.append("### 本次变更的测试相关文件\n");
@@ -82,8 +90,12 @@ final class ReviewPromptSections {
         }
       }
     }
+    for (String path : plan.skippedTestPaths()) {
+      any = true;
+      sb.append("- ").append(path).append("（按策略不评审，仅作测试覆盖判断依据）\n");
+    }
     if (!any) {
-      sb.append("-（本次变更未触及 src/test/ 路径）\n");
+      sb.append("-（本次变更未触及测试文件）\n");
     }
     return sb.toString();
   }

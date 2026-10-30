@@ -155,6 +155,7 @@ cra-review:
 | `review --local --depth quick\|standard\|deep` | 选择评审深度档位 |
 | `review --local --security-block` | 存在 confirmed 安全 finding 时返回退出码 3 |
 | `review --local --crosschecker --crosschecker-modes assumption,sniff` | 启用 CrossChecker 上下文核对；仅 standard/deep 触发，默认关闭 |
+| `review --local --review-tests` | 把测试文件纳入评审范围（默认不评审，见下） |
 | `review --repo owner/name --pr N --base SHA --head SHA` | CI 模式：评审指定 PR 并回帖 |
 | `review --platform gitlab --gitlab-project group/project --pr N --base SHA --head SHA` | GitLab CI 模式：MR 评审并回帖（token 走 `CRA_GITLAB_TOKEN`） |
 | `sweep --platform gitlab --gitlab-project group/project --since 30d` | GitLab 夜间存量评审（逐 PR issue + 汇总） |
@@ -179,6 +180,15 @@ cra-review:
 | `CRA_GITLAB_BASE_URL` | GitLab API 根（默认 `https://gitlab.com/api/v4`） |
 | `CRA_GITLAB_BOT_USERNAME` | `/user` 不可读时的 bot 身份回退 |
 | `CRA_CROSSCHECKER_ENABLED` | 是否启用 CrossChecker，默认 `false` |
+| `CRA_REVIEW_TESTS` / `--review-tests` | 测试文件是否进入评审范围，默认 `false`（见下方"评审范围"） |
+
+### 评审范围（默认不含测试文件）
+
+`src/test/**`、`*Test.java`、`*Tests.java` 默认**不进入评审计划**：单测正确性由构建与测试自身保障，评审只为生产代码与文档投入 token。Summary 覆盖声明会写明"测试文件按策略不评审：N 个"；纯测试 PR 明确写"仅测试文件/无可评审变更，按策略不评审"，状态仍为 `SUCCESS` 并照常写 DONE 标记（同 head 重跑幂等跳过）。
+
+- 需要评审测试代码：`--review-tests`（或 `--review-tests=true`），或设 `CRA_REVIEW_TESTS=true`；
+- `REVIEW.md` 的 `Skip paths` **始终叠加生效**——开关打开也不会绕过 skip 段；
+- TestReviewer 的触发比例仍按**过滤前全量 diff** 统计，"缺测试覆盖"结论的输入面不变（见 [docs/03 §3](docs/03-multi-agent-design.md)）。
 
 ## 项目状态
 

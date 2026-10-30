@@ -26,7 +26,8 @@ public final class SummarySections {
       Collection<String> policyWarnings,
       Collection<String> blameNotes,
       int nitDropped,
-      int suppressedByTruncation) {}
+      int suppressedByTruncation,
+      int skippedTestFiles) {}
 
   /**
    * 生成覆盖声明行。
@@ -52,6 +53,13 @@ public final class SummarySections {
                 input.skippedPaths().isEmpty()
                     ? ""
                     : "；跳过 " + fold(input.skippedPaths()) + "（skip/hard-cap 裁剪）"));
+    if (input.skippedTestFiles() > 0) {
+      // 02§4.4：测试文件默认不评审——排除范围与原因必须可见（默认策略不是静默裁剪）
+      out.add(
+          "测试文件按策略不评审："
+              + input.skippedTestFiles()
+              + " 个（默认不评审测试代码；--review-tests / CRA_REVIEW_TESTS=true 打开）");
+    }
     input.plannerNotes().forEach(n -> out.add("范围：" + n));
     input.contextNotes().forEach(n -> out.add("上下文：" + n));
     input.trimDecisions().forEach(n -> out.add("裁剪：" + n));

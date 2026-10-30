@@ -99,7 +99,8 @@ class AppConfig {
         config.hardCapLines(),
         config.nitBudget(),
         config.publishUnverified(),
-        config.spotCheckPercent());
+        config.spotCheckPercent(),
+        config.includeTestFiles());
   }
 
   @Bean

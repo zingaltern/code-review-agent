@@ -9,6 +9,7 @@
 > **v1.4**（2026-10-27，M4f-full，ADR-0012）：§3.1 模式 A 输入 b 增**产品事件史**（工单/事故复盘 JSONL → PG）；§4.2 context 类增事件条目预取与 `event <id>` 引用；§6 预算行改为"变更史/事件史合计 ≤4k"。
 > **v1.4.1**（2026-10-28，ADR-0015）：§4.2 bug 类增**确定性调用点索引**与 **REFUTED 反证纪律/机械校验**（无可核查反证 → 降级 INSUFFICIENT 交 Judge）；§4.3 晋升流增降级分支；§4.4 Judge 增反证审查；§6 速查表补索引预算说明。阈值/数据集不变。
 > **v1.4.2**（2026-10-30，ADR-0015 §6）：反证机械校验适用范围 bug → **bug/test**（security 维持 20% 抽查保险丝，暂不扩）；§4.2 与 §4.3 同步口径，降级逻辑/阈值/trace 语义不变。
+> **v1.4.3**（2026-10-30，02§4.4）：评审范围默认不含测试文件；§3 补 TestReviewer 的触发比例与 brief 输入口径（按过滤前全量 diff / 仍列出被策略跳过的测试文件）。
 
 ## 0. 三功能框架映射（框架与案例见 01§3.4）
 
@@ -87,6 +88,8 @@ interface SubAgent<I, O> {
 | ConventionReviewer | REVIEW.md 定义约定时 | diff + REVIEW.md 约定段 | 约定违反（多为 nit） |
 | PerfReviewer | Deep 或命中 perf 路径 | diff + 热点标注 | 性能风险类 |
 | **CrossChecker**（详设见 §3.1，v1.3） | M4f-lite / f-full | **diff（假设推导用）+ 额外上下文输入**：上下游变更史、产品背景段、产品事件史（M4f-full，ADR-0012） | "代码本身正确但与上下文假设矛盾"类 finding（category=context） |
+
+**测试文件与评审范围（v1.4.3，02§4.4）**：测试文件（`src/test/**`、`*Test.java`、`*Tests.java`）默认不进入评审 chunk（不消耗评审 token）；TestReviewer 不受影响地保留两项输入语义——① 触发比例按**过滤前全量 diff** 统计（用过滤后计划会让"生产+测试同改"的 PR 比例恒 0 → 误触发）；② brief 的"本次变更的测试相关文件"清单同时列出按策略跳过的测试文件，故"某行为缺测试覆盖"这一负向主张仍有正向证据面。`--review-tests` / `CRA_REVIEW_TESTS=true` 恢复测试文件评审；REVIEW.md `Skip paths` 与其叠加生效。
 
 Reviewer prompt 原则（模板见 04）：
 

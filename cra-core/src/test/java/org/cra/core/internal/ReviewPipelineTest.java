@@ -738,7 +738,7 @@ class ReviewPipelineTest {
     scripted.autoTokensIn = 30;
     scripted.autoTokensOut = 6;
     org.cra.core.api.PipelineOptions tiny =
-        new org.cra.core.api.PipelineOptions(830, 0.70, 0.85, 2000, 8000, 3, "never", 20);
+        new org.cra.core.api.PipelineOptions(830, 0.70, 0.85, 2000, 8000, 3, "never", 20, false);
     pipeline =
         new ReviewPipeline(
             adapter,
@@ -1171,5 +1171,143 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).doesNotContain("### 签字建议");
+  }
+
+  // ---------- 评审范围默认不含测试文件（02§4.4） ----------
+
+  private static DiffResult diffOf(String... paths) {
+    return new DiffResult(
+        BASE,
+        HEAD,
+        java.util.Arrays.stream(paths)
+            .map(
+                path ->
+                    new DiffFile(path, null, "modified", PATCH, List.of(new DiffHunk(1, 5, 1, 6))))
+            .toList(),
+        List.of(new org.cra.common.git.CommitSummary("c1", "fix: something")));
+  }
+
+  private static org.cra.core.api.PipelineOptions optionsWithTestFiles(boolean includeTestFiles) {
+    return new org.cra.core.api.PipelineOptions(
+        500_000, 0.70, 0.85, 2000, 8000, 3, "never", 20, includeTestFiles);
+  }
+
+  private ReviewPipeline pipelineWith(org.cra.core.api.PipelineOptions options, ReviewCrew crew) {
+    return new ReviewPipeline(
+        adapter,
+        ledger,
+        scripted,
+        crew,
+        new VerifierAgentDefinition(new TemplateLoader()),
+        new JudgeAgentDefinition(new TemplateLoader()),
+        runRoot,
+        options,
+        null);
+  }
+
+  private static ReviewCrew crewWithTestReviewer() {
+    return new ReviewCrew(
+        List.of(
+            new BugHunterDefinition(BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+            new BugHunterDefinition(
+                BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader())),
+        null,
+        new org.cra.agents.api.SpecialistReviewers.TestReviewer(new TemplateLoader()),
+        null,
+        null,
+        null);
+  }
+
+  @Test
+  void pureTestChangeDeclaredNotReviewableAndPublishesDoneWithoutLlmCalls() {
+    // 02§4.4：纯测试 PR = 无可评审变更——Summary 如实声明、SUCCESS、DONE 标记照旧（幂等），零 LLM 调用
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(diffOf("src/test/java/demo/FooTest.java"));
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(scripted.totalCalls()).isZero();
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("仅测试文件/无可评审变更，按策略不评审");
+    assertThat(summary).contains("测试文件按策略不评审：1 个");
+    assertThat(summary).contains("本次无可评审变更");
+    assertThat(summary).doesNotContain("本次未发现问题");
+    assertThat(summary).contains("status=DONE");
+    assertThat(captor.getValue().inlineComments()).isEmpty();
+    assertThat(result.stats().coverage().filesReviewed()).isZero();
+    assertThat(result.stats().coverage().filesChanged()).isEqualTo(1);
+  }
+
+  @Test
+  void reviewTestsSwitchRestoresTestFileScope() {
+    // --review-tests / CRA_REVIEW_TESTS=true：测试文件恢复评审，覆盖声明不再出现"按策略不评审"
+    pipeline =
+        pipelineWith(
+            optionsWithTestFiles(true),
+            ReviewCrew.ofBugHunters(
+                List.of(
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.DATAFLOW, new TemplateLoader()),
+                    new BugHunterDefinition(
+                        BugHunterDefinition.Perspective.BOUNDARY, new TemplateLoader()))));
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(diffOf("src/main/java/demo/A.java", "src/test/java/demo/ATest.java"));
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    String summary = captor.getValue().summaryBody();
+    assertThat(summary).contains("覆盖：评审 2/2 个变更文件");
+    assertThat(summary).doesNotContain("测试文件按策略不评审");
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(2);
+  }
+
+  @Test
+  void testReviewerTriggerAndBriefUseFullDiffNotFilteredPlan() {
+    // 02§4.4：2 生产 + 1 测试（比例 1/3 < 0.5）→ 触发；brief 仍列出被策略跳过的测试文件（"缺测试覆盖"的正向证据面不变）
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(
+            diffOf(
+                "src/main/java/demo/A.java",
+                "src/main/java/demo/B.java",
+                "src/test/java/demo/ATest.java"));
+    pipeline = pipelineWith(optionsWithTestFiles(false), crewWithTestReviewer());
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    List<org.cra.llm.api.LlmRequest> testCalls =
+        scripted.reviewCalls.stream()
+            .filter(call -> "test-reviewer".equals(call.caller()))
+            .toList();
+    assertThat(testCalls).hasSize(1);
+    assertThat(testCalls.get(0).userPrompt())
+        .contains("src/test/java/demo/ATest.java")
+        .contains("按策略不评审");
+    // 生产文件只评审 2 个（测试文件不进 chunk）
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(2);
+  }
+
+  @Test
+  void testReviewerTriggerKeepsFullDiffRatioWhenTestsAreOutsideScope() {
+    // 02§4.4：1 生产 + 1 测试（比例 0.5 ≥ 阈值）→ 不触发。
+    // 若改用过滤后计划（只剩生产文件）比例恒为 0，会误触发 TestReviewer
+    when(adapter.fetchDiff(any(), anyString(), anyString()))
+        .thenReturn(diffOf("src/main/java/demo/A.java", "src/test/java/demo/ATest.java"));
+    pipeline = pipelineWith(optionsWithTestFiles(false), crewWithTestReviewer());
+    gatewayReturns("{\"findings\":[]}");
+    ReviewResult result = pipeline.run(request(false));
+    assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
+    assertThat(scripted.reviewCalls)
+        .extracting(org.cra.llm.api.LlmRequest::caller)
+        .doesNotContain("test-reviewer");
+    // 混合变更的覆盖声明：只评审生产文件，测试文件跳过数可见
+    ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
+    verify(adapter).postReview(captor.capture());
+    assertThat(captor.getValue().summaryBody())
+        .contains("覆盖：评审 1/2 个变更文件")
+        .contains("测试文件按策略不评审：1 个");
+    assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
   }
 }

@@ -16,6 +16,8 @@ import java.util.Objects;
  *     UNVERIFIED 标签发布的生效路径，02§4.2）
  * @param importantRefutedSpotCheckPercent important/security 级 REFUTED 抽查保险丝百分比（03§4.3，
  *     agents.verifier.important-refuted-spotcheck 的百分数形态；sha256(run_id|finding_id) mod 100 < pct）
+ * @param includeTestFiles 是否把测试文件纳入评审范围（02§4.4；默认 false——测试正确性由构建与测试自身保障，评审只为 生产代码与文档投入
+ *     token；REVIEW.md 的 Skip paths 仍叠加生效）
  */
 public record PipelineOptions(
     long runTotalTokens,
@@ -25,7 +27,8 @@ public record PipelineOptions(
     int hardCapLines,
     int nitBudgetDefault,
     String publishUnverified,
-    int importantRefutedSpotCheckPercent) {
+    int importantRefutedSpotCheckPercent,
+    boolean includeTestFiles) {
 
   /** run 级预算默认（02§4.4 v1.2.1：500k）。 */
   public static final long DEFAULT_RUN_TOTAL_TOKENS = 500_000;
@@ -33,6 +36,10 @@ public record PipelineOptions(
   /** important/security 级 REFUTED 抽查保险丝默认百分比（03§4.3 important-refuted-spotcheck=0.20）。 */
   public static final int DEFAULT_SPOTCHECK_PERCENT = 20;
 
+  /** 测试文件是否进入评审范围的默认值（02§4.4：默认不评审测试代码）。 */
+  public static final boolean DEFAULT_INCLUDE_TEST_FILES = false;
+
+  /** 规范构造：校验阈值与枚举取值（05§5 默认值；非法配置在组装期即失败，05§3 退出码 2）。 */
   public PipelineOptions {
     Objects.requireNonNull(publishUnverified, "publishUnverified");
     if (runTotalTokens <= 0) {
@@ -70,6 +77,14 @@ public record PipelineOptions(
    */
   public static PipelineOptions defaults() {
     return new PipelineOptions(
-        DEFAULT_RUN_TOTAL_TOKENS, 0.70, 0.85, 2000, 8000, 3, "never", DEFAULT_SPOTCHECK_PERCENT);
+        DEFAULT_RUN_TOTAL_TOKENS,
+        0.70,
+        0.85,
+        2000,
+        8000,
+        3,
+        "never",
+        DEFAULT_SPOTCHECK_PERCENT,
+        DEFAULT_INCLUDE_TEST_FILES);
   }
 }

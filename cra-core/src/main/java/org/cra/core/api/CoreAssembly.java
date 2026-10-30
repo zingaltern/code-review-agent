@@ -31,7 +31,7 @@ public final class CoreAssembly {
    * @param verifier 验证子代理定义（T2.4，balanced-review）
    * @param judge 仲裁子代理定义（T2.6，arbitrate）
    * @param runRoot trace/brief 落盘根目录（如 .cra/runs）
-   * @param options 编排参数（null 用默认）
+   * @param options 编排参数（null 用默认；默认 {@code includeTestFiles=false}——测试文件不进入评审范围，02§4.4）
    * @param localRepoContext 本地仓库上下文（jgit blame + 被引 commit diff；null 时相应检测降级声明）
    * @return Orchestrator
    */

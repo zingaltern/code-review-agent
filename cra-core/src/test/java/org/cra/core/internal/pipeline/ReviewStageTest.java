@@ -218,7 +218,7 @@ class ReviewStageTest {
             stubCrew(),
             gateway,
             Depth.STANDARD,
-            new PipelineOptions(150, 0.70, 0.85, 2000, 8000, 3, "never", 20),
+            new PipelineOptions(150, 0.70, 0.85, 2000, 8000, 3, "never", 20, false),
             5);
 
     // c1–c4 各 2 视角 + DEGRADE 后 chunk5 仅 dataflow = 9 派发（dataflow 5 / boundary 4）
@@ -242,7 +242,7 @@ class ReviewStageTest {
             stubCrew(),
             gateway,
             Depth.STANDARD,
-            new PipelineOptions(10, 0.70, 0.85, 2000, 8000, 3, "never", 20),
+            new PipelineOptions(10, 0.70, 0.85, 2000, 8000, 3, "never", 20, false),
             5);
 
     assertThat(outcome.degradations()).contains("budget-exhausted-stop");
@@ -419,7 +419,7 @@ class ReviewStageTest {
             crew,
             gateway,
             Depth.QUICK,
-            new PipelineOptions(250, 0.70, 0.85, 2000, 8000, 3, "never", 20),
+            new PipelineOptions(250, 0.70, 0.85, 2000, 8000, 3, "never", 20, false),
             2,
             new DiffResult(
                 "b",

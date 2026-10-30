@@ -293,9 +293,12 @@ public final class ReviewStage {
     LinkedHashSet<String> sliceNotes = new LinkedHashSet<>();
     List<ChunkPlanner.Chunk> chunks = plan.chunks();
     if (chunks.isEmpty()) {
-      // 跳过/裁剪后无可评审文件是合法结果（policy skip_paths / hard-cap），不是代理故障：
+      // 跳过/裁剪后无可评审文件是合法结果（测试文件策略 / policy skip_paths / hard-cap），不是代理故障：
       // 不得走空 L0 派发 → 全部 agent-failed → DEGRADED 的误判路径
-      trace.emit("plan_empty", Map.of("files_changed", diff.files().size()));
+      trace.emit(
+          "plan_empty",
+          Map.of(
+              "files_changed", diff.files().size(), "skipped_test_files", plan.skippedTestCount()));
       return new StageOutcome(
           List.of(),
           0,
@@ -304,7 +307,7 @@ public final class ReviewStage {
           null,
           List.of(),
           List.of(),
-          List.of("无可评审文件：变更 " + diff.files().size() + " 个文件全部被 skip/hard-cap 裁剪，本次不派发评审代理"),
+          List.of(emptyPlanNote(diff.files().size(), plan)),
           List.of(),
           false,
           false,
@@ -425,6 +428,7 @@ public final class ReviewStage {
     // 70% 档砍 light 的 Convention（02§4.4），100% 终止
     RunBudgetTracker.Phase phase = budget.phase();
     if (phase != RunBudgetTracker.Phase.STOP) {
+      // 触发比例按过滤前的全量 PR diff 统计（02§4.4：测试文件默认不进评审范围，但仍影响触发判定）
       if (crew.testReviewer() != null && ReviewRoutingPolicy.testReviewerTriggered(diff)) {
         futures.add(
             dispatcher.submitWholePr(
@@ -636,6 +640,24 @@ public final class ReviewStage {
       throw new IllegalStateException(
           "评审代理派发失败: " + cause.getClass().getSimpleName() + ": " + cause.getMessage(), cause);
     }
+  }
+
+  /**
+   * 无可评审文件时的覆盖声明（02§4.4：纯测试变更与 skip/hard-cap 裁剪原因必须可区分，不静默合并）。
+   *
+   * @param filesChanged 变更文件数
+   * @param plan 评审计划（含被测试文件策略跳过的路径）
+   * @return Summary 上下文声明
+   */
+  private static String emptyPlanNote(int filesChanged, ChunkPlanner.Plan plan) {
+    if (plan.skippedTestCount() > 0) {
+      return "仅测试文件/无可评审变更，按策略不评审：变更 "
+          + filesChanged
+          + " 个文件，其中测试文件 "
+          + plan.skippedTestCount()
+          + " 个按默认策略跳过（--review-tests / CRA_REVIEW_TESTS=true 可恢复），本次不派发评审代理";
+    }
+    return "无可评审文件：变更 " + filesChanged + " 个文件全部被 skip/hard-cap 裁剪，本次不派发评审代理";
   }
 
   private SubAgent<ReviewAgentInput> agentOf(BugHunterDefinition.Perspective perspective) {

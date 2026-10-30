@@ -43,6 +43,8 @@ final class CliArgs {
     boolean signoffSeen = false;
     boolean semanticContext = false;
     boolean semanticContextSeen = false;
+    boolean reviewTests = false;
+    boolean reviewTestsSeen = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -92,6 +94,18 @@ final class CliArgs {
         case "--semantic-context=false" -> {
           semanticContext = false;
           semanticContextSeen = true;
+        }
+        case "--review-tests" -> {
+          reviewTests = true;
+          reviewTestsSeen = true;
+        }
+        case "--review-tests=true" -> {
+          reviewTests = true;
+          reviewTestsSeen = true;
+        }
+        case "--review-tests=false" -> {
+          reviewTests = false;
+          reviewTestsSeen = true;
         }
         case "--repo",
             "--pr",
@@ -272,6 +286,11 @@ final class CliArgs {
         crossCheckerSeen
             ? crossChecker
             : Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
+    // 02§4.4 评审范围：测试文件默认不评审（测过的代码由构建/测试保障；--review-tests 恢复）
+    boolean includeTestFiles =
+        reviewTestsSeen
+            ? reviewTests
+            : Boolean.parseBoolean(envOr(env, "CRA_REVIEW_TESTS", "false"));
     String crossCheckerModes =
         named.getOrDefault(
             "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));
@@ -358,7 +377,8 @@ final class CliArgs {
         signoffConfig,
         platform,
         gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
-        semanticContextConfig);
+        semanticContextConfig,
+        includeTestFiles);
   }
 
   /**

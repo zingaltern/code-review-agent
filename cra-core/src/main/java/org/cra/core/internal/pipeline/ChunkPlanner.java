@@ -9,8 +9,9 @@ import org.cra.common.context.ReviewPolicy;
 import org.cra.common.git.DiffFile;
 
 /**
- * 评审计划：变更文件分 chunk（04§2.2：按模块分组、2–3 文件/chunk）+ skip/priority 范围裁决（04§3.1）。 skip
- * 命中的文件整体不进评审；hard-cap 触发时仅保留 priority_paths 命中文件（未配置 priority 时如实降级为全量并声明）。
+ * 评审计划：变更文件分 chunk（04§2.2：按模块分组、2–3 文件/chunk）+ skip/priority/测试文件范围裁决（04§3.1）。 skip
+ * 命中的文件整体不进评审；测试文件默认不评审（02§4.4，{@code includeTestFiles=false}）；hard-cap 触发时仅保留 priority_paths
+ * 命中文件（未配置 priority 时如实降级为全量并声明）。
  */
 public final class ChunkPlanner {
 
@@ -23,15 +24,42 @@ public final class ChunkPlanner {
    * 评审范围规划结果。
    *
    * @param chunks 分块列表（保持 diff 文件顺序）
-   * @param skippedPaths 被策略 skip 的文件路径
-   * @param notes 范围裁决说明（未配置 priority 降级等）
+   * @param skippedPaths 被 REVIEW.md skip_paths 与 hard-cap 排除的文件路径
+   * @param notes 范围裁决说明（未配置 priority 降级、纯测试变更等）
+   * @param skippedTestPaths 因测试文件策略（includeTestFiles=false）不评审的文件路径
    */
-  public record Plan(List<Chunk> chunks, List<String> skippedPaths, List<String> notes) {
+  public record Plan(
+      List<Chunk> chunks,
+      List<String> skippedPaths,
+      List<String> notes,
+      List<String> skippedTestPaths) {
 
     public Plan {
       chunks = List.copyOf(chunks == null ? List.of() : chunks);
       skippedPaths = List.copyOf(skippedPaths == null ? List.of() : skippedPaths);
       notes = List.copyOf(notes == null ? List.of() : notes);
+      skippedTestPaths = List.copyOf(skippedTestPaths == null ? List.of() : skippedTestPaths);
+    }
+
+    /**
+     * 兼容构造（无测试文件策略时的规划结果，02§4.4 前形态）。
+     *
+     * @param chunks 分块列表
+     * @param skippedPaths skip/hard-cap 路径
+     * @param notes 范围裁决说明
+     */
+    public Plan(List<Chunk> chunks, List<String> skippedPaths, List<String> notes) {
+      this(chunks, skippedPaths, notes, List.of());
+    }
+
+    /** 按测试文件策略跳过的文件数（Summary 覆盖声明口径，02§4.4）。 */
+    public int skippedTestCount() {
+      return skippedTestPaths.size();
+    }
+
+    /** 是否有可评审文件（false = 纯测试变更或全部被 skip/hard-cap 裁剪）。 */
+    public boolean hasReviewableFiles() {
+      return !chunks.isEmpty();
     }
   }
 
@@ -54,14 +82,20 @@ public final class ChunkPlanner {
    * @param files 变更文件（diff 顺序）
    * @param policy base 分支评审策略
    * @param priorityOnly true 时仅评审 priority_paths（hard-cap，02§4.4）
+   * @param includeTestFiles true 时测试文件进入评审范围（默认 false，02§4.4）
    * @return 规划结果
    */
-  public static Plan plan(List<DiffFile> files, ReviewPolicy policy, boolean priorityOnly) {
+  public static Plan plan(
+      List<DiffFile> files, ReviewPolicy policy, boolean priorityOnly, boolean includeTestFiles) {
     List<String> skipped = new ArrayList<>();
     List<String> notes = new ArrayList<>();
+    List<String> skippedTests = new ArrayList<>();
     List<DiffFile> scoped = new ArrayList<>();
     for (DiffFile file : files) {
-      if (PathGlobs.matchesAny(policy.skipPaths(), file.path())) {
+      // 测试文件策略先行：默认策略下的排除原因是"测试文件"而非 skip_paths，覆盖声明必须能说出真实原因
+      if (!includeTestFiles && ReviewRoutingPolicy.isTestPath(file.path())) {
+        skippedTests.add(file.path());
+      } else if (PathGlobs.matchesAny(policy.skipPaths(), file.path())) {
         skipped.add(file.path());
       } else {
         scoped.add(file);
@@ -82,7 +116,9 @@ public final class ChunkPlanner {
         scoped = filtered;
       }
     }
-    return new Plan(groupByModule(scoped), skipped, notes);
+    // 纯测试变更的完整声明由派发侧统一给出（ReviewStage.emptyPlanNote = 原因 + 不派发 + 开关提示），
+    // Plan 只保留可计数的事实，避免 Summary 同一事实重复声明
+    return new Plan(groupByModule(scoped), skipped, notes, skippedTests);
   }
 
   private static List<Chunk> groupByModule(List<DiffFile> files) {
