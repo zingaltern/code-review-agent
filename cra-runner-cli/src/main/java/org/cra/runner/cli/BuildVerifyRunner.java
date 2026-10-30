@@ -1,6 +1,7 @@
 package org.cra.runner.cli;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
@@ -40,12 +41,22 @@ final class BuildVerifyRunner {
   private static final Pattern TIMEOUT_PROP = Pattern.compile("\\d{1,6}");
 
   private final Path runRoot;
+  private final int maxCapturedChars;
 
   /**
    * @param runRoot 实跑日志落盘根（与 trace 同根，.cra/runs）
    */
   BuildVerifyRunner(Path runRoot) {
+    this(runRoot, MAX_CAPTURED_CHARS);
+  }
+
+  /** 测试形态：自定义内存留存上限（日志文件始终完整）。 */
+  BuildVerifyRunner(Path runRoot, int maxCapturedChars) {
+    if (maxCapturedChars <= 0) {
+      throw new IllegalArgumentException("maxCapturedChars must be positive");
+    }
     this.runRoot = runRoot;
+    this.maxCapturedChars = maxCapturedChars;
   }
 
   /**
@@ -86,6 +97,12 @@ final class BuildVerifyRunner {
     }
     StringBuilder captured = new StringBuilder();
     boolean[] truncated = {false};
+    boolean[] logFailed = {false};
+    Path logFile = runRoot.resolve("build-" + LocalDateTime.now().format(TS) + ".log");
+    BufferedWriter logWriter = openLog(logFile, command);
+    if (logWriter == null) {
+      logFile = null;
+    }
     Thread reader =
         new Thread(
             () -> {
@@ -96,8 +113,17 @@ final class BuildVerifyRunner {
                 while ((line = stdout.readLine()) != null) {
                   // 真实输出逐行实时回显——pre-PR 的第一公民是输出本身，不是结论
                   System.out.println(line);
+                  // 完整落盘：内存可以截断，日志文件不能（"完整输出见日志文件"必须为真）
+                  if (logWriter != null) {
+                    try {
+                      logWriter.write(line);
+                      logWriter.newLine();
+                    } catch (IOException e) {
+                      logFailed[0] = true;
+                    }
+                  }
                   synchronized (captured) {
-                    if (captured.length() < MAX_CAPTURED_CHARS) {
+                    if (captured.length() < maxCapturedChars) {
                       captured.append(line).append('\n');
                     } else {
                       truncated[0] = true;
@@ -124,19 +150,65 @@ final class BuildVerifyRunner {
       }
       reader.join(5_000);
       int exitCode = process.exitValue();
+      if (logWriter != null) {
+        try {
+          logWriter.write("exit code: " + exitCode);
+          logWriter.newLine();
+          logWriter.flush();
+        } catch (IOException e) {
+          logFailed[0] = true;
+        }
+      }
+      if (logFailed[0]) {
+        // 边读边写失败：不能再声称完整输出在日志文件里
+        Path partial = logFile;
+        logFile = null;
+        try {
+          Files.deleteIfExists(partial);
+        } catch (IOException e) {
+          System.out.println("⚠️ 实跑日志文件清理失败（保留部分日志）: " + e.getMessage());
+        }
+      }
       String output;
       synchronized (captured) {
         output = captured.toString();
         if (truncated[0]) {
-          output += "\n…（输出超过 " + MAX_CAPTURED_CHARS + " 字符，内存留存已截断；完整输出仍见日志文件）\n";
+          output +=
+              "\n…（输出超过 "
+                  + maxCapturedChars
+                  + " 字符，内存留存已截断"
+                  + (logFile != null ? "；完整输出仍见日志文件" : "；日志文件不可用")
+                  + "）\n";
         }
       }
-      Path logFile = persistQuietly(command, exitCode, output);
       return new ExecResult(exitCode, output, logFile, System.currentTimeMillis() - start);
     } catch (InterruptedException e) {
       process.destroyForcibly();
       Thread.currentThread().interrupt();
       throw new CraIntegrationException("实跑被中断", e);
+    } finally {
+      if (logWriter != null) {
+        try {
+          logWriter.close();
+        } catch (IOException e) {
+          System.out.println("⚠️ 实跑日志文件关闭失败: " + e.getMessage());
+        }
+      }
+    }
+  }
+
+  /** 打开完整日志文件并写入命令头；失败时返回 null（报告声明日志不可用）。 */
+  private static BufferedWriter openLog(Path logFile, String command) {
+    try {
+      Files.createDirectories(logFile.getParent());
+      BufferedWriter writer = Files.newBufferedWriter(logFile, StandardCharsets.UTF_8);
+      writer.write("command: " + command);
+      writer.newLine();
+      writer.flush();
+      return writer;
+    } catch (IOException e) {
+      System.out.println("⚠️ 实跑日志文件创建失败，报告不含日志路径: " + e.getMessage());
+      return null;
     }
   }
 
@@ -188,20 +260,5 @@ final class BuildVerifyRunner {
       }
     }
     return errors > EXCERPT_CAP || (errors == 0 && count > 20);
-  }
-
-  private Path persistQuietly(String command, int exitCode, String output) {
-    try {
-      Files.createDirectories(runRoot);
-      Path logFile = runRoot.resolve("build-" + LocalDateTime.now().format(TS) + ".log");
-      String header =
-          "command: " + command + "\nexit code: " + exitCode + "\n" + "-".repeat(60) + "\n";
-      Files.writeString(logFile, header + output, StandardCharsets.UTF_8);
-      return logFile;
-    } catch (IOException e) {
-      // 日志落盘失败不吞掉实跑结论：退出码与摘录仍在，报告声明日志缺失（LocalPrePrReport 处理 null）
-      System.out.println("⚠️ 实跑日志落盘失败，报告不含日志路径: " + e.getMessage());
-      return null;
-    }
   }
 }

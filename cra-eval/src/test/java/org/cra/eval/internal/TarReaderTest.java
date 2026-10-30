@@ -101,6 +101,45 @@ class TarReaderTest {
   }
 
   @Test
+  void rejectsPaxPathWithNewlineOrCarriageReturn() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    for (String value : new String[] {"safe\n.java", "safe\r.java"}) {
+      byte[] pax = paxRecord("path", value);
+      ByteArrayOutputStream tar = new ByteArrayOutputStream();
+      writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+      writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
+      assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+          .isInstanceOf(CraIntegrationException.class)
+          .hasMessageContaining("路径非法");
+    }
+  }
+
+  @Test
+  void paxPathOverrideAppliesToDirectoryEntries() throws Exception {
+    byte[] pax = paxRecord("path", "deep/newdir");
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
+    writeEntry(tar, header("trunc", 0, '5'), new byte[0]);
+    tar.writeBytes(new byte[BLOCK * 2]);
+
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    assertThat(result.dirs()).isEqualTo(1);
+    assertThat(out.resolve("deep/newdir")).isDirectory();
+  }
+
+  @Test
+  void rejectsDirectoryEntryWithNonZeroSize() throws Exception {
+    Path out = Files.createDirectories(tmp.resolve("out"));
+    ByteArrayOutputStream tar = new ByteArrayOutputStream();
+    writeEntry(tar, header("dir", 1, '5'), "x".getBytes(StandardCharsets.UTF_8));
+    tar.writeBytes(new byte[BLOCK * 2]);
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("目录条目");
+  }
+
+  @Test
   void rejectsParentTraversalForFilesAndDirectories() throws Exception {
     Path out = Files.createDirectories(tmp.resolve("out"));
     assertThatThrownBy(

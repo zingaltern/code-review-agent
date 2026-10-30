@@ -6,7 +6,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.cra.agents.api.BugHunterDefinition;
@@ -21,6 +20,7 @@ import org.cra.common.git.FileContent;
 import org.cra.context.api.ContextAssembler;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.internal.AgentRunner;
+import org.cra.core.internal.TaskHandle;
 import org.cra.core.internal.TraceWriter;
 import org.cra.core.internal.pipeline.ReviewAgentDispatcher.DispatchOutcome;
 
@@ -41,8 +41,8 @@ import org.cra.core.internal.pipeline.ReviewAgentDispatcher.DispatchOutcome;
  */
 public final class ReviewStage {
 
-  /** 代理等待硬限（最长的仲裁代理 240s 预算 + 重试/退避余量）。 */
-  private static final long AGENT_WAIT_TIMEOUT_MS = 360_000L;
+  /** 代理等待硬限（历史下限；实际值由 LlmGatewayConfig 推导，见 ReviewPipeline/TimeoutBudgets）。 */
+  private static final long DEFAULT_AGENT_WAIT_TIMEOUT_MS = 360_000L;
 
   /** 扇出并发（02§4.5 LLM 并发信号量同宽；网关侧信号量仍为硬限）。 */
   static final int MAX_PARALLEL = ReviewAgentDispatcher.MAX_PARALLEL;
@@ -50,6 +50,7 @@ public final class ReviewStage {
   private final ReviewCrew crew;
   private final ReviewAgentDispatcher dispatcher;
   private final CrossCheckerOptions crossCheckerOptions;
+  private final long waitTimeoutMs;
 
   /**
    * M2 形态兼容构造（CrossChecker 关闭）。
@@ -73,10 +74,40 @@ public final class ReviewStage {
       AgentRunner agentRunner,
       ContextAssembler contextAssembler,
       CrossCheckerOptions crossCheckerOptions) {
+    this(crew, agentRunner, contextAssembler, crossCheckerOptions, DEFAULT_AGENT_WAIT_TIMEOUT_MS);
+  }
+
+  /**
+   * 测试/组合根形态：自定义外层等待 backstop。
+   *
+   * @param waitTimeoutMs 单个代理任务等待毫秒（须为正）
+   */
+  public ReviewStage(
+      ReviewCrew crew,
+      AgentRunner agentRunner,
+      ContextAssembler contextAssembler,
+      long waitTimeoutMs) {
+    this(crew, agentRunner, contextAssembler, CrossCheckerOptions.disabled(), waitTimeoutMs);
+  }
+
+  /**
+   * @param crossCheckerOptions CrossChecker 触发配置（05§5 agents.crosschecker；默认关闭）
+   * @param waitTimeoutMs 单个代理任务等待毫秒（应覆盖网关最坏重试链，见 TimeoutBudgets）
+   */
+  public ReviewStage(
+      ReviewCrew crew,
+      AgentRunner agentRunner,
+      ContextAssembler contextAssembler,
+      CrossCheckerOptions crossCheckerOptions,
+      long waitTimeoutMs) {
+    if (waitTimeoutMs <= 0) {
+      throw new IllegalArgumentException("waitTimeoutMs must be positive");
+    }
     this.crew = crew;
     this.dispatcher = new ReviewAgentDispatcher(agentRunner, contextAssembler);
     this.crossCheckerOptions =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
+    this.waitTimeoutMs = waitTimeoutMs;
   }
 
   /** 全部代理的汇聚产出（对齐原 RunOutcome 形状，publish 段无感）。 */
@@ -253,7 +284,7 @@ public final class ReviewStage {
     boolean securityEnabled = crew.securityReviewer() != null;
     boolean perfEnabled =
         ReviewRoutingPolicy.perfTriggered(depthPlan) && crew.perfReviewer() != null;
-    List<Future<DispatchOutcome>> futures = new ArrayList<>();
+    List<TaskHandle<DispatchOutcome>> futures = new ArrayList<>();
     List<DispatchOutcome> collected = new ArrayList<>();
     List<String> degradations = new ArrayList<>();
     List<String> contextNotes = new ArrayList<>();
@@ -571,13 +602,18 @@ public final class ReviewStage {
   /**
    * 有界等待代理产出（09§6 强制：带超时 Future）。超时即取消任务并收敛为该代理空产出 + 降级声明， 不把整个 wave 卡死；网关/LLM
    * 的单次调用超时仍在其内部生效，这里是最后一道硬限。
+   *
+   * <p>共享池下 360s 含排队时间：按任务是否已开始区分 queue-timeout（池被其它 run 占满）与 execution-timeout（代理卡住），
+   * 两者分别声明，避免把排队误报成执行超时。
    */
-  private static DispatchOutcome await(Future<DispatchOutcome> future, List<String> degradations) {
+  private DispatchOutcome await(TaskHandle<DispatchOutcome> task, List<String> degradations) {
     try {
-      return future.get(AGENT_WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+      return task.future().get(waitTimeoutMs, TimeUnit.MILLISECONDS);
     } catch (TimeoutException e) {
-      future.cancel(true);
-      degradations.add("agent-timeout");
+      boolean started = task.started();
+      task.cancel();
+      String degradation = started ? "agent-timeout" : "agent-queue-timeout";
+      degradations.add(degradation);
       return new DispatchOutcome(
           "unknown",
           null,
@@ -587,15 +623,15 @@ public final class ReviewStage {
           false,
           null,
           List.of(),
-          List.of("agent-timeout"),
           List.of(),
+          List.of(started ? "代理执行超时（已开始）" : "代理排队超时（未开始执行）"),
           List.of());
     } catch (InterruptedException e) {
-      future.cancel(true);
+      task.cancel();
       Thread.currentThread().interrupt();
       throw new IllegalStateException("评审扇出被中断", e);
     } catch (ExecutionException e) {
-      future.cancel(true);
+      task.cancel();
       Throwable cause = e.getCause() == null ? e : e.getCause();
       throw new IllegalStateException(
           "评审代理派发失败: " + cause.getClass().getSimpleName() + ": " + cause.getMessage(), cause);

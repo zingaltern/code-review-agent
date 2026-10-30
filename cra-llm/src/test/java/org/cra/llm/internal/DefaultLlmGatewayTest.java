@@ -204,6 +204,46 @@ class DefaultLlmGatewayTest {
   }
 
   @Test
+  void queueTimeoutDoesNotConsumeRpmSlot() throws Exception {
+    // 并发排队超时的请求未触达模型，不得占用预算内的 RPM 配额（02§4.5 "实际请求"口径）
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    CountDownLatch gate = new CountDownLatch(1);
+    transport.holdUntil(gate);
+    AtomicLong clock = new AtomicLong(0);
+    List<Long> waits = new ArrayList<>();
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 50, java.util.Map.of(ModelTier.STANDARD, 2, ModelTier.LIGHT, 60)),
+            transport,
+            ms -> {
+              waits.add(ms);
+              clock.addAndGet(ms);
+            },
+            clock::get);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      var first = pool.submit(() -> gateway.complete(request(ModelTier.STANDARD)));
+      // 让首个请求进入传输层并占住并发许可
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+      while (transport.inFlight.get() == 0 && System.nanoTime() < deadline) {
+        Thread.sleep(10);
+      }
+      assertThat(transport.inFlight.get()).isEqualTo(1);
+      LlmResponse queued = gateway.complete(request(ModelTier.STANDARD));
+      assertThat(queued.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+      assertThat(queued.errorMessage()).contains("queue timeout");
+      gate.countDown();
+      assertThat(first.get(2, TimeUnit.SECONDS).status()).isEqualTo(LlmStatus.OK);
+      // 排队超时未消耗第 2 个 RPM 槽：后续请求应立即放行（若被消耗会等待 60s）
+      assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+      assertThat(waits).isEmpty();
+    } finally {
+      gate.countDown();
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
   void baseUrlTrailingSlashHandled() throws Exception {
     ScriptedTransport transport = new ScriptedTransport(200);
     DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});

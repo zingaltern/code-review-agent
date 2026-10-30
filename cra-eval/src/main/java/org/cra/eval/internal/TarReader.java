@@ -100,6 +100,10 @@ public final class TarReader {
       pendingPathOverride = null;
       pendingSizeOverride = null;
       if (type == '5') {
+        if (size > 0) {
+          // 目录条目不应有负载：非零 size 会让后续 skip 与流位置不一致（PAX size 覆盖可构造）
+          throw new CraIntegrationException("tar 目录条目负载大小非法（必须为 0）: " + path);
+        }
         if (isAppleDouble(path)) {
           skipped++;
           skipFully(tar, padded);

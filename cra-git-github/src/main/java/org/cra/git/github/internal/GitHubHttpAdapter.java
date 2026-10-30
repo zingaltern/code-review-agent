@@ -361,14 +361,18 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private void collectPaged(
       RepoRef repo, String path, String login, String kind, List<LedgerComment> out) {
-    for (int page = 1; page <= MAX_PAGES; page++) {
+    // 与 GitLab 同语义：恰好 MAX_PAGES 个满页后探第 MAX_PAGES+1 页，空=恰好 10k 正常结束，非空=超限
+    for (int page = 1; page <= MAX_PAGES + 1; page++) {
       JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
-      if (!root.isArray() || root.isEmpty()) {
+      if (page == MAX_PAGES + 1) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new org.cra.common.exception.CraIntegrationException(
+              "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
+        }
         return;
       }
-      if (page == MAX_PAGES && root.size() >= PAGE_SIZE) {
-        throw new org.cra.common.exception.CraIntegrationException(
-            "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
+      if (!root.isArray() || root.isEmpty()) {
+        return;
       }
       for (JsonNode c : root) {
         if (!login.equals(c.path("user").path("login").asText())) {

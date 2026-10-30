@@ -8,6 +8,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.AgentBudget;
 import org.cra.agents.api.AgentRole;
@@ -24,6 +27,7 @@ import org.cra.common.git.DiffResult;
 import org.cra.common.run.Depth;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.internal.AgentRunner;
+import org.cra.core.internal.CorePools;
 import org.cra.core.internal.TraceWriter;
 import org.cra.llm.api.LlmGateway;
 import org.cra.llm.api.LlmResponse;
@@ -91,13 +95,24 @@ class ReviewStageTest {
 
   private ReviewStage.StageOutcome runStage(
       ReviewCrew crew, LlmGateway gateway, Depth depth, PipelineOptions options, int chunkCount) {
+    return runStage(crew, gateway, depth, options, chunkCount, 360_000L);
+  }
+
+  private ReviewStage.StageOutcome runStage(
+      ReviewCrew crew,
+      LlmGateway gateway,
+      Depth depth,
+      PipelineOptions options,
+      int chunkCount,
+      long waitTimeoutMs) {
     ReviewStage stage =
         new ReviewStage(
             crew,
             new AgentRunner(gateway),
             input ->
                 new AssembledContext(
-                    "diff-text", "window-text", 1, 1, List.of(), List.of(), 10, List.of()));
+                    "diff-text", "window-text", 1, 1, List.of(), List.of(), 10, List.of()),
+            waitTimeoutMs);
     List<ChunkPlanner.Chunk> chunks = new ArrayList<>();
     for (int i = 0; i < chunkCount; i++) {
       chunks.add(new ChunkPlanner.Chunk("mod" + i, List.of()));
@@ -420,6 +435,68 @@ class ReviewStageTest {
     assertThat(java.util.Collections.frequency(gateway.callers(), "test-reviewer")).isZero();
     assertThat(outcome.degradations()).contains("budget-truncate-85");
     assertThat(outcome.contextNotes()).anyMatch(n -> n.contains("全 PR 级专角色未派发"));
+  }
+
+  @Test
+  void queueTimeoutIsDistinctFromExecutionTimeout() throws Exception {
+    // 共享池被其它 run 占满：任务未开始即超时 → queue-timeout，不得误报执行超时
+    int width = CorePools.REVIEW_PARALLEL;
+    CountDownLatch gate = new CountDownLatch(1);
+    CountDownLatch occupied = new CountDownLatch(width);
+    List<Future<?>> blockers = new ArrayList<>();
+    for (int i = 0; i < width; i++) {
+      blockers.add(
+          CorePools.reviewPool()
+              .submit(
+                  () -> {
+                    occupied.countDown();
+                    try {
+                      gate.await();
+                    } catch (InterruptedException e) {
+                      Thread.currentThread().interrupt();
+                    }
+                  }));
+    }
+    assertThat(occupied.await(2, TimeUnit.SECONDS)).isTrue();
+    try {
+      ReviewStage.StageOutcome outcome =
+          runStage(
+              stubCrew(),
+              new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m")),
+              Depth.QUICK,
+              PipelineOptions.defaults(),
+              1,
+              200L);
+      assertThat(outcome.degradations())
+          .contains("agent-queue-timeout")
+          .doesNotContain("agent-timeout");
+      assertThat(outcome.findings()).isEmpty();
+    } finally {
+      gate.countDown();
+      for (Future<?> blocker : blockers) {
+        blocker.get(2, TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  @Test
+  void executionTimeoutIsReportedWhenTaskStarted() {
+    // 任务已开始（进入网关调用）后才卡住：报执行超时，不得误报排队超时
+    LlmGateway blocking =
+        request -> {
+          try {
+            Thread.sleep(60_000);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+          }
+          return LlmResponse.unavailable("interrupted", 0, 0);
+        };
+    ReviewStage.StageOutcome outcome =
+        runStage(stubCrew(), blocking, Depth.QUICK, PipelineOptions.defaults(), 1, 400L);
+    assertThat(outcome.degradations())
+        .contains("agent-timeout")
+        .doesNotContain("agent-queue-timeout");
+    assertThat(outcome.findings()).isEmpty();
   }
 
   private ReviewStage.StageOutcome runStageWithDiff(

@@ -99,6 +99,7 @@ public final class ReviewPipeline implements Orchestrator {
   private final SignoffAdvisor signoffAdvisor;
   private final ExecutorService verifyPool;
   private final EventHistoryQuery eventHistoryQuery;
+  private final long verificationWaitTimeoutMs;
 
   public ReviewPipeline(
       GitPlatformAdapter adapter,
@@ -251,9 +252,15 @@ public final class ReviewPipeline implements Orchestrator {
     CrossCheckerOptions effectiveCrossChecker =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
     this.signoffAdvisor = new SignoffAdvisor(signoffOptions);
+    long agentWaitTimeoutMs = TimeoutBudgets.agentBackstopMs(gateway);
+    this.verificationWaitTimeoutMs = TimeoutBudgets.verificationBackstopMs(gateway);
     this.reviewStage =
         new ReviewStage(
-            crew, agentRunner, ContextAssembly.createContextAssembler(), effectiveCrossChecker);
+            crew,
+            agentRunner,
+            ContextAssembly.createContextAssembler(),
+            effectiveCrossChecker,
+            agentWaitTimeoutMs);
     this.dataLoader =
         new PipelineDataLoader(
             adapter,
@@ -465,7 +472,8 @@ public final class ReviewPipeline implements Orchestrator {
                   d.startsWith("agent-failed:")
                       || d.startsWith("agent-budget-exceeded:")
                       || d.startsWith("llm-unavailable-agents:")
-                      || d.equals("agent-timeout"))) {
+                      || d.equals("agent-timeout")
+                      || d.equals("agent-queue-timeout"))) {
         degraded = true;
       }
 
@@ -525,7 +533,8 @@ public final class ReviewPipeline implements Orchestrator {
                       reviewDiff,
                       javaFileIndex,
                       path -> dataLoader.contentOf(path, request.headSha(), request, contentCache)),
-              semanticContext);
+              semanticContext,
+              verificationWaitTimeoutMs);
       // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）
       List<String> testFileIndex =
           candidates.stream()
@@ -566,6 +575,7 @@ public final class ReviewPipeline implements Orchestrator {
               d ->
                   d.startsWith("verifier-budget-exhausted")
                       || d.startsWith("verifier-timeout")
+                      || d.startsWith("verifier-queue-timeout")
                       || d.startsWith("verifier-batch-failed")
                       || d.equals("verifier-unavailable"))) {
         degraded = true;

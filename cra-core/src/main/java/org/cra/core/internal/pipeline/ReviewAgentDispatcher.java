@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.function.Supplier;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.ReviewAgentInput;
@@ -21,6 +20,7 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.FileContent;
 import org.cra.context.api.ContextAssembler;
 import org.cra.core.internal.AgentRunner;
+import org.cra.core.internal.TaskHandle;
 import org.cra.core.internal.TraceWriter;
 
 /**
@@ -61,7 +61,7 @@ final class ReviewAgentDispatcher {
       List<String> trimDecisions) {}
 
   /** 按 chunk 派发（BugHunter 视角 / Security / Perf；上下文预算 = 该角色输入预算）。 */
-  Future<DispatchOutcome> submitChunk(
+  TaskHandle<DispatchOutcome> submitChunk(
       SubAgent<ReviewAgentInput> agent,
       ChunkPlanner.Chunk chunk,
       Map<String, FileContent> headFiles,
@@ -93,7 +93,7 @@ final class ReviewAgentDispatcher {
    *
    * @param slices 本 chunk 的 L2 切片（未启用/不可得为 {@link CrossFileSlices#empty()}）
    */
-  Future<DispatchOutcome> submitChunk(
+  TaskHandle<DispatchOutcome> submitChunk(
       SubAgent<ReviewAgentInput> agent,
       ChunkPlanner.Chunk chunk,
       Map<String, FileContent> headFiles,
@@ -118,7 +118,8 @@ final class ReviewAgentDispatcher {
             agent.budget().maxInputTokens(),
             sliceTokens,
             TokenMath.estimateTokens(extraSection));
-    return pool.submit(
+    return TaskHandle.submit(
+        pool,
         () ->
             dispatch(
                 agent,
@@ -135,7 +136,7 @@ final class ReviewAgentDispatcher {
   }
 
   /** 全 PR 级专角色派发（Test/Convention：仅 L0 diff，无窗口/全文；scope = 全部 chunk 文件）。 */
-  Future<DispatchOutcome> submitWholePr(
+  TaskHandle<DispatchOutcome> submitWholePr(
       SubAgent<ReviewAgentInput> agent,
       ChunkPlanner.Plan plan,
       Map<String, FileContent> headFiles,
@@ -146,7 +147,8 @@ final class ReviewAgentDispatcher {
       String runId,
       TraceWriter trace) {
     WholePrScope whole = wholePr(plan, headFiles);
-    return pool.submit(
+    return TaskHandle.submit(
+        pool,
         () ->
             dispatch(
                 agent,
@@ -166,7 +168,7 @@ final class ReviewAgentDispatcher {
    * CrossChecker 派发（M4f-lite，03§3.1）：全 PR 单实例，输入 = diff 精简视图（L0 槽）+ 变更史（extraSection 槽，不可信）+
    * 产品段（reviewPolicySection 槽，可信）。材料在 {@link CrossCheckMaterials} 按 03§6 预算裁剪。
    */
-  Future<DispatchOutcome> submitCrossCheck(
+  TaskHandle<DispatchOutcome> submitCrossCheck(
       SubAgent<ReviewAgentInput> agent,
       ChunkPlanner.Plan plan,
       Map<String, FileContent> headFiles,
@@ -176,7 +178,8 @@ final class ReviewAgentDispatcher {
       String runId,
       TraceWriter trace) {
     WholePrScope whole = wholePr(plan, headFiles);
-    return pool.submit(
+    return TaskHandle.submit(
+        pool,
         () ->
             executeGuarded(
                 agent,

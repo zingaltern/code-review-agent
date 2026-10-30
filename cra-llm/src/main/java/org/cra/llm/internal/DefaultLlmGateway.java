@@ -45,6 +45,11 @@ public final class DefaultLlmGateway implements LlmGateway {
   }
 
   @Override
+  public java.util.Optional<LlmGatewayConfig> config() {
+    return java.util.Optional.of(config);
+  }
+
+  @Override
   public LlmResponse complete(LlmRequest request) {
     long start = System.currentTimeMillis();
     List<ModelTier> sequence = attemptSequence(request.tier());
@@ -94,10 +99,12 @@ public final class DefaultLlmGateway implements LlmGateway {
   }
 
   /**
-   * 单端点尝试（02§4.5）：每次实际 HTTP 调用独立的 退避 → RPM 取槽 → 并发许可 → 请求。 退避与 RPM 等待都在持有并发许可之前完成，不占用全局信号量；每次重试都受
-   * RPM 约束 （per-model RPM 语义按"实际请求"计）。
+   * 单端点尝试（02§4.5）：每次实际 HTTP 调用独立的 退避 → 并发许可 → RPM 取槽 → 请求。
    *
-   * @throws InterruptedException 退避/RPM 等待被中断（上抛终止整条链）
+   * <p>先取并发许可再取 RPM 槽：并发排队超时意味着请求从未触达模型，不消耗 RPM 配额（02§4.5 per-model RPM 按"实际请求"计）。代价是 RPM
+   * 排队期间持有并发许可——单档位等待由串行化排队兜底，不再放大其它档位的等待面。
+   *
+   * @throws InterruptedException 退避/并发排队/RPM 等待被中断（上抛终止整条链）
    */
   private LlmResponse attempt(
       LlmGatewayConfig.ModelEndpoint endpoint,
@@ -124,8 +131,6 @@ public final class DefaultLlmGateway implements LlmGateway {
       if (attempt > 0) {
         sleeper.sleep(backoff.delayForAttempt(attempt));
       }
-      // RPM 槽按“实际触达模型的请求”计：排队超时不消耗配额、重试同样受限（02§4.5）
-      rpmLimiter.awaitSlot(tier, config.rpmOf(tier));
       LlmTransport.TransportResponse response;
       boolean acquired;
       try {
@@ -134,11 +139,14 @@ public final class DefaultLlmGateway implements LlmGateway {
         throw e;
       }
       if (!acquired) {
+        // 未触达模型：不消耗 RPM 槽（02§4.5 per-model RPM 按实际请求计）
         String failure = tierName(tier) + ": concurrency queue timeout";
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
       }
       try {
+        // 许可已取得才排队 RPM：排队超时（上面分支）不占配额；RPM 等待期间持有许可由本端点串行队列约束
+        rpmLimiter.awaitSlot(tier, config.rpmOf(tier));
         response =
             transport.post(
                 url,
