@@ -80,3 +80,21 @@
 - `mvn -B -ntp verify`：**BUILD SUCCESS**（20:32，含 spotless）；`cra-eval` 144 tests、`cra-archtest` 1415 tests 全绿。
 - 提交前根级 `mvn -q spotless:check` 复检时，并行 agent 正在修改的 `cra-llm/.../LlmGateway.java` 报格式违规并阻断该命令；该文件不在本 PR 修改范围，本 agent 未触碰。
 - 未执行 eval（按协调者纪律）；未 push。
+
+## 四、并行修复（core/llm/cli/git-github，提交 `f3eb1f5`）
+
+三份审计中的高风险/可观测性问题，已由并行修复落地并由协调者独立复核：
+
+| 项 | 审计结论 | 修复 |
+|---|---|---|
+| H1/M3 共享池 + 360s 超时 | 排队时间计入超时；360s 短于网关最坏重试链 → 服务端并发下假超时 | `TaskHandle` 记录实际开始时间，区分 `agent-queue-timeout` / `agent-timeout`（验证波同构）；`TimeoutBudgets` 按 `max(360s, requestTimeout×(maxRetries+1)+60s)` 推导，无配置回退 720s；验证波取 2× |
+| M4 构建日志不实 | “完整输出仍见日志文件”实际写的是被截断的内存缓冲 | 边读边写完整日志文件；内存只保留展示窗口；日志不可用时不再声称完整 |
+| M5 trace 静默降级 | 写失败只 WARN、永久关闭写入面；interrupt 可触发 | 恢复首次失败即抛；`ClosedByInterruptException` 清中断重试一次，重试失败才抛 |
+| 评审 #5/#15 batches | 成功批双计且无测试 | 每批恰计一次 + 成功/超时/失败测试 |
+| RPM 配额（低） | 排队超时仍消耗 RPM 配额与注释不符 | 先取并发许可后取 RPM 槽；排队超时不消耗配额 |
+| M8 GitHub 分页 | GitHub 满页即抛、GitLab 探页，语义不一致 | GitHub 对齐 GitLab：探第 101 页，空则恰好 10k 正常返回，非空抛错 |
+| #17 PAX 目录/换行 | 目录条目非零 size 可致流错位；path 换行用例缺失 | 目录 `size>0` 明确拒绝；补 LF/CR 拒绝与 PAX path 覆盖目录用例 |
+
+**协调者独立验证**：`mvn -q spotless:check` 通过；`mvn -B -ntp verify` 全绿（archtest 1415）；回退点复核（拒绝率分母 `completed`、`judge(inline, "", summaryOf)`、`detected` 完成门保留、零发布 `sampleRatio` 保留）。
+
+**未纳入本 PR（记录在案，另行决策）**：GitHub compare 截断声明（已知限制已入 docs/05）、`DiffRenderer` 空 patch 二进制猜测、verify 重判 crosschecker 开关持久化。
