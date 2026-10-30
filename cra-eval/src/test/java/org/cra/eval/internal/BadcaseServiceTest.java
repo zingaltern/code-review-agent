@@ -141,6 +141,7 @@ class BadcaseServiceTest {
             null,
             false,
             null,
+            false,
             false);
     assertThatThrownBy(() -> RunCommand.execute(runArgs, Map.of()))
         .isInstanceOf(CraConfigException.class)

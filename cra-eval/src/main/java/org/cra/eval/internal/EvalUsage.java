@@ -11,7 +11,7 @@ final class EvalUsage {
           cra-eval run --dataset <dir> [--set all|bad|clean|l2|adversarial|adv-injection|adv-hallucination|adv-refusal]
               [--k N] [--depth quick|standard] [--cli-jar PATH] [--work-dir DIR] [--json PATH]
               [--tier auto|l1|l2|l3] [--commit SHA] [--fail-on-red] [--sha256-out PATH]
-              [--crosschecker-enabled] [--timeout-sec N] [--case ID[,ID...]]
+              [--crosschecker-enabled] [--semantic-context] [--timeout-sec N] [--case ID[,ID...]]
           cra-eval annotate --fixture <caseDir> [--action prefill|confirm|relabel] [--to-set bad|clean]
               [--annotator NAME] [--reason TEXT]
           cra-eval verify --report <json> [--sha256 <hex>|--sha256-file <path>] [--tier l1|l2|l3]
