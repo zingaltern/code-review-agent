@@ -9,7 +9,8 @@ import org.cra.common.run.ReviewMode;
  * `cra sweep` 参数解析（M4d 夜间存量评审，05§3/§2.5）。
  *
  * <p>扫描范围 = {@code --since}（默认 30d）与 {@code --max-prs}（默认 10）；深度默认 quick（夜间批量成本纪律，
- * 06§4）。仓库身份、token、LLM 配置与 review 形态同源（环境变量优先规则一致，05§6）。
+ * 06§4）。仓库身份、token、LLM 配置与 review 形态同源（环境变量优先规则一致，05§6）—— 共享解析在 {@link PlatformArgs}（R5：与 CliArgs
+ * 同语义收敛）；tri-state 旗标（--dry-run/--crosschecker）取值 = env 先行、显式 flag 覆盖，与 review 的 seen 语义净效果一致。
  */
 final class SweepArgs {
 
@@ -28,12 +29,17 @@ final class SweepArgs {
     boolean crossChecker = Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
+      PlatformArgs.TriState dryRunFlag = PlatformArgs.matchTriState(arg, "--dry-run");
+      if (dryRunFlag != null) {
+        dryRun = dryRunFlag.value();
+        continue;
+      }
+      PlatformArgs.TriState crossCheckerFlag = PlatformArgs.matchTriState(arg, "--crosschecker");
+      if (crossCheckerFlag != null) {
+        crossChecker = crossCheckerFlag.value();
+        continue;
+      }
       switch (arg) {
-        case "--dry-run" -> dryRun = true;
-        case "--dry-run=true", "--dry-run=false" -> dryRun = arg.endsWith("true");
-        case "--crosschecker" -> crossChecker = true;
-        case "--crosschecker=true" -> crossChecker = true;
-        case "--crosschecker=false" -> crossChecker = false;
         case "--repo",
             "--since",
             "--max-prs",
@@ -61,59 +67,16 @@ final class SweepArgs {
     }
     String platform = PlatformArgs.platform(named, env);
     boolean gitlab = PlatformArgs.GITLAB.equals(platform);
-    String repo = named.get("--repo");
-    if (gitlab) {
-      String project =
-          PlatformArgs.firstNonBlank(
-              named.get("--gitlab-project"),
-              env.get("CRA_GITLAB_PROJECT"),
-              env.get("CI_PROJECT_PATH"),
-              repo);
-      if (project != null) {
-        repo = project;
-      }
-    } else if (repo == null || repo.isBlank()) {
-      repo = env.get("GITHUB_REPOSITORY");
-    }
-    if (repo == null || repo.isBlank()) {
-      throw new CraConfigException(
-          gitlab
-              ? "缺参数: --gitlab-project / CRA_GITLAB_PROJECT / CI_PROJECT_PATH（group/project）"
-              : "缺参数: --repo（或 GITHUB_REPOSITORY）");
-    }
-    String[] ownerRepo = PlatformArgs.splitRepo(repo, gitlab);
-    String token;
-    if (gitlab) {
-      if (named.containsKey("--token")) {
-        throw new CraConfigException(
-            "GitLab token 只从 CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE 读取（--token 仅 GitHub）");
-      }
-      token = PlatformArgs.gitlabToken(env);
-    } else {
-      token = named.get("--token");
-      if (token == null || token.isBlank()) {
-        token = env.get("GITHUB_TOKEN");
-      }
-    }
+    String[] ownerRepo = PlatformArgs.requireOwnerRepo(named, env, gitlab);
+    String token = PlatformArgs.tokenOrGitlabGuard(named, env, gitlab);
     if (token == null || token.isBlank()) {
       throw new CraConfigException(
           gitlab
               ? "CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件）"
               : "缺参数: --token（或 GITHUB_TOKEN）");
     }
-    String llmApiKey = env.get("CRA_LLM_API_KEY");
-    String llmBaseUrl = env.get("CRA_LLM_BASE_URL");
-    String llmModel = env.get("CRA_LLM_MODEL");
-    if (llmApiKey == null || llmApiKey.isBlank()) {
-      throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
-    }
-    if (llmBaseUrl == null || llmBaseUrl.isBlank() || llmModel == null || llmModel.isBlank()) {
-      throw new CraConfigException("CRA_LLM_BASE_URL / CRA_LLM_MODEL 未设置");
-    }
-    String depth = named.getOrDefault("--depth", "quick");
-    if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
-      throw new CraConfigException("depth 非法: " + depth + "（quick|standard|deep）");
-    }
+    PlatformArgs.LlmEnvTriple llm = PlatformArgs.llmEnvTriple(env, true);
+    String depth = PlatformArgs.depthCheck(named.getOrDefault("--depth", "quick"));
     int maxPrs = positiveInt("--max-prs", named.getOrDefault("--max-prs", "10"));
     String since = named.getOrDefault("--since", "30d");
     SweepScope.parseSince(since); // 早失败：非法区间在组装前拒绝（退出码 2）
@@ -122,16 +85,13 @@ final class SweepArgs {
             "--crosschecker-history-weeks",
             named.getOrDefault(
                 "--crosschecker-history-weeks", envOr(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", "8")));
-    String modes =
-        named.getOrDefault(
-            "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));
-    if (modes.isBlank()) {
-      throw new CraConfigException("--crosschecker-modes 不能为空（assumption,sniff）");
-    }
+    String modes = PlatformArgs.crosscheckerModes(named, env);
+    // flag 优先、env 次之；空白值（含 GitHub Actions 空 input ""）等同未配置 = 不传温度
     String temperature =
-        named.containsKey("--llm-temperature")
-            ? named.get("--llm-temperature")
-            : blankToNull(env.get("CRA_LLM_TEMPERATURE"));
+        blankToNull(
+            named.containsKey("--llm-temperature")
+                ? named.get("--llm-temperature")
+                : env.get("CRA_LLM_TEMPERATURE"));
     CraConfig config =
         new CraConfig(
             ownerRepo[0],
@@ -144,9 +104,9 @@ final class SweepArgs {
             false,
             token,
             named.getOrDefault("--github-api", "https://api.github.com"),
-            llmApiKey,
-            llmBaseUrl,
-            llmModel,
+            llm.apiKey(),
+            llm.baseUrl(),
+            llm.model(),
             named.getOrDefault("--run-root", ".cra/runs"),
             named.getOrDefault("--workspace", "."),
             org.cra.core.api.PipelineOptions.DEFAULT_LARGE_DIFF_LINES,
@@ -167,7 +127,7 @@ final class SweepArgs {
             crossChecker,
             modes,
             historyWeeks,
-            blankToNull(temperature),
+            temperature,
             CraConfig.DEFAULT_PUSH_LOOKBACK,
             ReviewMode.ISSUE,
             SignoffConfig.defaults(),
@@ -192,10 +152,6 @@ final class SweepArgs {
     }
   }
 
-  private static String blankToNull(String value) {
-    return value == null || value.isBlank() ? null : value;
-  }
-
   /**
    * 解析结果。
    *
@@ -209,5 +165,10 @@ final class SweepArgs {
   private static String envOr(Map<String, String> env, String key, String defaultValue) {
     String value = env.get(key);
     return value == null || value.isBlank() ? defaultValue : value;
+  }
+
+  /** 空白值归一为 null（与 CliArgs 同语义：空白 = 未配置，原值不剥空白）。 */
+  private static String blankToNull(String value) {
+    return value == null || value.isBlank() ? null : value;
   }
 }

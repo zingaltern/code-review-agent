@@ -1,14 +1,12 @@
 package org.cra.runner.cli;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.llm.api.LlmParsing;
 
 /**
- * Git 平台选择与 GitLab 连接参数解析（M4e 第二半；ADR-0013）。
+ * Git 平台选择与 GitLab 连接参数解析（M4e 第二半；ADR-0013），兼作 CLI/sweep 的共享解析家（R5）： 仓库标识回退、token 解析（含 GitLab 拒收
+ * --token）、LLM env 三键、深度档位与 CrossChecker 模式串在 CliArgs 与 SweepArgs 的重复段收敛于此—— 错误文案保留各命令既有 key 名。
  *
  * <p>平台优先级：`--platform` &gt; `CRA_GIT_PLATFORM` &gt; `github`（默认保持既有行为）。GitLab 的仓库标识、token 与 API
  * 根沿用 GitLab CI 变量；token 只认环境变量/文件，命令行 `--token` 仅属于 GitHub（避免跨平台串用密钥）。
@@ -71,6 +69,167 @@ final class PlatformArgs {
   }
 
   /**
+   * 仓库标识回退（R5 共享，review/sweep 同语义）：GitLab = `--gitlab-project` &gt; `CRA_GITLAB_PROJECT` &gt;
+   * `CI_PROJECT_PATH` &gt; `--repo`；GitHub = `--repo` &gt; `GITHUB_REPOSITORY`。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @param gitlab 是否 GitLab 平台
+   * @return 仓库标识；未配置为 null
+   */
+  static String repoOrProject(Map<String, String> named, Map<String, String> env, boolean gitlab) {
+    String repo = named.get("--repo");
+    if (gitlab) {
+      return firstNonBlank(
+          named.get("--gitlab-project"),
+          env.get("CRA_GITLAB_PROJECT"),
+          env.get("CI_PROJECT_PATH"),
+          repo);
+    }
+    return repo == null || repo.isBlank() ? env.get("GITHUB_REPOSITORY") : repo;
+  }
+
+  /**
+   * 仓库标识解析为 `[owner, name]`，缺失即拒绝（R5 共享；CI 必填形态与 sweep 用）。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @param gitlab 是否 GitLab 平台
+   * @return `[owner, name]`
+   * @throws CraConfigException 仓库标识缺失（文案见 {@link #missingRepoMessage}）或格式非法
+   */
+  static String[] requireOwnerRepo(
+      Map<String, String> named, Map<String, String> env, boolean gitlab) {
+    String repo = repoOrProject(named, env, gitlab);
+    if (repo == null || repo.isBlank()) {
+      throw new CraConfigException(missingRepoMessage(gitlab));
+    }
+    return splitRepo(repo, gitlab);
+  }
+
+  /** 仓库标识缺失的报错文案（review 本地形态可缺省，必填分支引用同一文案，避免双份拷贝漂移）。 */
+  static String missingRepoMessage(boolean gitlab) {
+    return gitlab
+        ? "缺参数: --gitlab-project / CRA_GITLAB_PROJECT / CI_PROJECT_PATH（group/project）"
+        : "缺参数: --repo（或 GITHUB_REPOSITORY）";
+  }
+
+  /**
+   * token 解析（R5 共享，review/sweep 同语义）：GitHub = `--token` &gt; `GITHUB_TOKEN`；GitLab 拒收命令行
+   * `--token`（跨平台串用密钥防护），只认 `CRA_GITLAB_TOKEN` / `CRA_GITLAB_TOKEN_FILE`。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @param gitlab 是否 GitLab 平台
+   * @return token；未配置为 null（必填性由调用方按形态校验——review 本地形态可缺省）
+   */
+  static String tokenOrGitlabGuard(
+      Map<String, String> named, Map<String, String> env, boolean gitlab) {
+    if (gitlab) {
+      if (named.containsKey("--token")) {
+        throw new CraConfigException(
+            "GitLab token 只从 CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE 读取（--token 仅 GitHub）");
+      }
+      return gitlabToken(env);
+    }
+    String token = named.get("--token");
+    return token == null || token.isBlank() ? env.get("GITHUB_TOKEN") : token;
+  }
+
+  /**
+   * LLM env 三键（R5 共享：`CRA_LLM_API_KEY` / `CRA_LLM_BASE_URL` / `CRA_LLM_MODEL`）。required=true
+   * 时逐键缺失即拒绝（密钥只从环境变量读， 05§6）；review 本地形态传 false（缺省 = 评审段如实跳过）。
+   *
+   * @param env 环境变量
+   * @param required 是否必填（CI 形态）
+   * @return 三键原始值（未配置项为 null）
+   */
+  static LlmEnvTriple llmEnvTriple(Map<String, String> env, boolean required) {
+    String apiKey = env.get("CRA_LLM_API_KEY");
+    String baseUrl = env.get("CRA_LLM_BASE_URL");
+    String model = env.get("CRA_LLM_MODEL");
+    if (required) {
+      if (apiKey == null || apiKey.isBlank()) {
+        throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
+      }
+      if (baseUrl == null || baseUrl.isBlank()) {
+        throw new CraConfigException("CRA_LLM_BASE_URL 未设置");
+      }
+      if (model == null || model.isBlank()) {
+        throw new CraConfigException("CRA_LLM_MODEL 未设置");
+      }
+    }
+    return new LlmEnvTriple(apiKey, baseUrl, model);
+  }
+
+  /** LLM env 三键取值（原始值；未配置为 null）。 */
+  record LlmEnvTriple(String apiKey, String baseUrl, String model) {}
+
+  /**
+   * 深度档位校验（R5 共享；quick|standard|deep）。
+   *
+   * @param depth 原始档位
+   * @return 通过校验的档位
+   */
+  static String depthCheck(String depth) {
+    if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
+      throw new CraConfigException("depth 非法: " + depth + "（quick|standard|deep）");
+    }
+    return depth;
+  }
+
+  /**
+   * CrossChecker 模式串解析（R5 共享）：`--crosschecker-modes` &gt; `CRA_CROSSCHECKER_MODES` &gt;
+   * `assumption,sniff`； 逐段校验（assumption|sniff，非法/全空组装期拒绝，03§3.1）。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @return 模式串原值
+   */
+  static String crosscheckerModes(Map<String, String> named, Map<String, String> env) {
+    String modes =
+        named.getOrDefault(
+            "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));
+    boolean any = false;
+    for (String part : modes.split(",")) {
+      if (part.isBlank()) {
+        continue;
+      }
+      try {
+        org.cra.core.api.CrossCheckerOptions.Mode.parse(part);
+      } catch (IllegalArgumentException e) {
+        throw new CraConfigException("--crosschecker-modes 非法: " + modes + "（assumption|sniff）");
+      }
+      any = true;
+    }
+    if (!any) {
+      throw new CraConfigException("--crosschecker-modes 不能为空（assumption|sniff）");
+    }
+    return modes;
+  }
+
+  /**
+   * tri-state 旗标匹配（R5 共享）：{@code --flag} / {@code --flag=true} → true、{@code --flag=false} →
+   * false；其余返回 null。`--flag=value` 形式仅调用方声明的旗标合法——未匹配参数落入调用方的 default 分支，仍按 `=` 截断回显旗标名（密钥掩码语义）。
+   *
+   * @param arg 当前参数
+   * @param flag 旗标名（如 {@code --crosschecker}）
+   * @return 匹配结果；非 tri-state 参数为 null
+   */
+  static TriState matchTriState(String arg, String flag) {
+    if (flag.equals(arg) || (flag + "=true").equals(arg)) {
+      return new TriState(flag, true);
+    }
+    if ((flag + "=false").equals(arg)) {
+      return new TriState(flag, false);
+    }
+    return null;
+  }
+
+  /** tri-state 旗标匹配结果。 */
+  record TriState(String flag, boolean value) {}
+
+  /**
    * 拆分仓库标识：GitHub 只允许 `owner/name`；GitLab 允许嵌套 group（按最后一个 `/` 切分）。
    *
    * @param full `owner/name` 或 `group/subgroup/project`
@@ -93,25 +252,18 @@ final class PlatformArgs {
   }
 
   /**
-   * API 根归一：接受实例根或已含 `/api/v4` 的地址。
+   * API 根归一：接受实例根或已含 `/api/v4` 的地址（公共体见 {@link LlmParsing#normalizeGitLabApiBase}）。
    *
    * @param raw 用户输入
    * @return 以 `/api/v4` 结尾且无尾随 `/` 的 API 根
    */
   static String normalizeApiBase(String raw) {
-    String base = raw.strip().replaceAll("/+$", "");
-    if (base.endsWith("/api/v4")) {
-      return base;
-    }
-    int marker = base.indexOf("/api/v4/");
-    if (marker >= 0) {
-      return base.substring(0, marker + "/api/v4".length());
-    }
-    return base + "/api/v4";
+    return LlmParsing.normalizeGitLabApiBase(raw, DEFAULT_GITLAB_API_BASE);
   }
 
   /**
-   * 密钥读取：`CRA_GITLAB_TOKEN` 优先，其次 `CRA_GITLAB_TOKEN_FILE` 指向的文件（内容去首尾空白）。
+   * 密钥读取：`CRA_GITLAB_TOKEN` 优先，其次 `CRA_GITLAB_TOKEN_FILE` 指向的文件（文件读取公共体见 {@link
+   * LlmParsing#readGitLabTokenFile}）。
    *
    * @param env 环境变量
    * @return token；均未配置为 null
@@ -121,15 +273,13 @@ final class PlatformArgs {
     if (token != null) {
       return token;
     }
-    String tokenFile = blankToNull(env.get("CRA_GITLAB_TOKEN_FILE"));
-    if (tokenFile == null) {
-      return null;
-    }
-    try {
-      return blankToNull(Files.readString(Path.of(tokenFile), StandardCharsets.UTF_8));
-    } catch (IOException | java.nio.file.InvalidPathException e) {
-      throw new CraConfigException("CRA_GITLAB_TOKEN_FILE 读取失败: " + tokenFile);
-    }
+    return LlmParsing.readGitLabTokenFile(blankToNull(env.get("CRA_GITLAB_TOKEN_FILE")));
+  }
+
+  /** 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""，不是 null）。 */
+  static String envOr(Map<String, String> env, String key, String defaultValue) {
+    String value = env.get(key);
+    return value == null || value.isBlank() ? defaultValue : value;
   }
 
   static String firstNonBlank(String... values) {
