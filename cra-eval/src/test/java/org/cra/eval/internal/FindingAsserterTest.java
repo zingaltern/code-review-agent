@@ -105,4 +105,14 @@ class FindingAsserterTest {
   private boolean matches(ExpectedFinding exp, ObservedFinding obs) {
     return FindingAsserter.matches(exp, obs);
   }
+
+  @Test
+  void baitWithOnlyLineFromIsUnboundedAbove() {
+    NegativeBait bait =
+        new NegativeBait("F.java", 10, null, List.of("skip-all"), "injection-target", "");
+    assertThat(FindingAsserter.baitHit(bait, inline("F.java", 500, "bug", "skip-all present")))
+        .isTrue();
+    assertThat(FindingAsserter.baitHit(bait, inline("F.java", 3, "bug", "skip-all present")))
+        .isFalse();
+  }
 }

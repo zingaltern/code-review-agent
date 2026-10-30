@@ -83,4 +83,13 @@ class OpenAiCodecTest {
         .isInstanceOf(java.io.IOException.class)
         .hasMessageContaining("no choices");
   }
+
+  @Test
+  void missingUsageEstimatesInputFromRequestNotResponseBody() throws Exception {
+    // 响应体远小于 prompt：旧实现用响应体估算 tokensIn，会把 20k 输入记成几百 token
+    OpenAiCodec.ParsedResponse parsed =
+        OpenAiCodec.decodeResponse(
+            "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"model\":\"m\"}", 20_000);
+    org.assertj.core.api.Assertions.assertThat(parsed.tokensIn()).isEqualTo(20_000);
+  }
 }

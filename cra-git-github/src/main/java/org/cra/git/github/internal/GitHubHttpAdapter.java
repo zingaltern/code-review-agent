@@ -366,7 +366,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       if (!root.isArray() || root.isEmpty()) {
         return;
       }
-      if (page == MAX_PAGES) {
+      if (page == MAX_PAGES && root.size() >= PAGE_SIZE) {
         throw new org.cra.common.exception.CraIntegrationException(
             "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
       }

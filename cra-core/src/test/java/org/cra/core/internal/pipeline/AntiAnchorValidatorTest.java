@@ -66,4 +66,14 @@ class AntiAnchorValidatorTest {
             "```\nassertThrows(IndexOutOfBoundsException.class, () -> foo.get(List.of()));\n```");
     assertThat(result.status()).isEqualTo(AntiAnchorValidator.Status.PASS);
   }
+
+  @Test
+  void fenceWithLanguageInfoStringIsRecognized() {
+    // ```java 曾是"非围栏"：闭合围栏反而开启 inside，围栏外散文被当成代码行（重叠率被污染）
+    String finding = "```java\ncode line\n```";
+    AntiAnchorValidator.Result result =
+        AntiAnchorValidator.check(finding, "```java\ncode line\n```\n额外说明无引用");
+    assertThat(result.status()).isEqualTo(AntiAnchorValidator.Status.FAIL);
+    assertThat(result.refsTotal()).isEqualTo(1);
+  }
 }
