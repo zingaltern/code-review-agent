@@ -12,7 +12,6 @@ import org.junit.jupiter.api.io.TempDir;
 /** {@code cra-eval report} 端到端（离线回放）：参数 → 取数 → 聚合 → 文本/JSON（T3.4 验收 2）。 */
 class ReportCommandTest {
 
-
   @TempDir Path tmp;
 
   @Test

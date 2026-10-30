@@ -13,7 +13,8 @@ import org.junit.jupiter.api.Test;
 /** 验证窗口（02§4.4 / 04§2.2）：预算 ≥85% 或大 diff 时按 severity 只验证 top-10。 */
 class FindingAggregatorTest {
 
-  private static FindingAggregator.Scored scored(String id, Severity severity, String file, int line) {
+  private static FindingAggregator.Scored scored(
+      String id, Severity severity, String file, int line) {
     CandidateFinding finding =
         new CandidateFinding(
             id,
@@ -33,10 +34,7 @@ class FindingAggregatorTest {
             "bug-hunter/dataflow",
             "m");
     return new FindingAggregator.Scored(
-        finding,
-        "fp" + id,
-        AnchorStatus.INLINE,
-        PreExistingBlameChecker.Verdict.UNKNOWN);
+        finding, "fp" + id, AnchorStatus.INLINE, PreExistingBlameChecker.Verdict.UNKNOWN);
   }
 
   @Test
@@ -54,7 +52,9 @@ class FindingAggregatorTest {
   @Test
   void validationWindowIsNoOpBelowLimit() {
     List<FindingAggregator.Scored> candidates =
-        List.of(scored("f_1", Severity.IMPORTANT, "A.java", 1), scored("f_2", Severity.NIT, "B.java", 2));
+        List.of(
+            scored("f_1", Severity.IMPORTANT, "A.java", 1),
+            scored("f_2", Severity.NIT, "B.java", 2));
     assertThat(FindingAggregator.validationWindow(candidates)).hasSize(2);
   }
 }

@@ -25,8 +25,7 @@ final class SweepArgs {
   static Parsed parse(String[] args, Map<String, String> env) {
     Map<String, String> named = new HashMap<>();
     boolean dryRun = false;
-    boolean crossChecker =
-        Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
+    boolean crossChecker = Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -122,8 +121,7 @@ final class SweepArgs {
         positiveInt(
             "--crosschecker-history-weeks",
             named.getOrDefault(
-                "--crosschecker-history-weeks",
-                envOr(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", "8")));
+                "--crosschecker-history-weeks", envOr(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", "8")));
     String modes =
         named.getOrDefault(
             "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));

@@ -8,7 +8,6 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.zip.GZIPInputStream;
 import org.cra.common.exception.CraIntegrationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -30,8 +29,7 @@ class TarReaderTest {
     tar.writeBytes(new byte[BLOCK * 2]);
 
     Path out = Files.createDirectories(tmp.resolve("out"));
-    TarReader.Result result =
-        TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
+    TarReader.Result result = TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out);
     assertThat(result.files()).isEqualTo(1);
     assertThat(out.resolve("deep/中文.java")).hasContent("class A {}\n");
   }
@@ -61,8 +59,7 @@ class TarReaderTest {
     ByteArrayOutputStream tar = new ByteArrayOutputStream();
     tar.write(header("a.txt", 100, '0'));
     tar.write("short".getBytes(StandardCharsets.UTF_8));
-    assertThatThrownBy(
-            () -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("截断");
   }
@@ -73,9 +70,7 @@ class TarReaderTest {
     byte[] header = header("a.txt", 1, '0');
     header[0] = 'b'; // 改名但不重算校验和
     assertThatThrownBy(
-            () ->
-                TarReader.untar(
-                    new ByteArrayInputStream(tar(header, "x".getBytes())), out))
+            () -> TarReader.untar(new ByteArrayInputStream(tar(header, "x".getBytes())), out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("校验和");
   }

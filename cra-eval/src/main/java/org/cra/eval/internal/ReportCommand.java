@@ -25,7 +25,6 @@ public final class ReportCommand {
 
   private ReportCommand() {}
 
-
   /**
    * 执行 report。
    *
