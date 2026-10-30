@@ -26,7 +26,7 @@ final class SweepArgs {
     Map<String, String> named = new HashMap<>();
     boolean dryRun = false;
     boolean crossChecker =
-        Boolean.parseBoolean(env.getOrDefault("CRA_CROSSCHECKER_ENABLED", "false"));
+        Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
       switch (arg) {
@@ -54,7 +54,10 @@ final class SweepArgs {
           }
           named.put(arg, args[++i]);
         }
-        default -> throw new CraConfigException("未知参数: " + arg);
+        default -> {
+          int eq = arg.indexOf('=');
+          throw new CraConfigException("未知参数: " + (eq > 0 ? arg.substring(0, eq) : arg));
+        }
       }
     }
     String platform = PlatformArgs.platform(named, env);
@@ -120,11 +123,17 @@ final class SweepArgs {
             "--crosschecker-history-weeks",
             named.getOrDefault(
                 "--crosschecker-history-weeks",
-                env.getOrDefault("CRA_CROSSCHECKER_HISTORY_WEEKS", "8")));
+                envOr(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", "8")));
     String modes =
         named.getOrDefault(
-            "--crosschecker-modes", env.getOrDefault("CRA_CROSSCHECKER_MODES", "assumption,sniff"));
-    String temperature = named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"));
+            "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));
+    if (modes.isBlank()) {
+      throw new CraConfigException("--crosschecker-modes 不能为空（assumption,sniff）");
+    }
+    String temperature =
+        named.containsKey("--llm-temperature")
+            ? named.get("--llm-temperature")
+            : blankToNull(env.get("CRA_LLM_TEMPERATURE"));
     CraConfig config =
         new CraConfig(
             ownerRepo[0],
@@ -194,4 +203,10 @@ final class SweepArgs {
    * @param maxPrs 最大评审 PR 数
    */
   record Parsed(CraConfig config, String since, int maxPrs) {}
+
+  /** 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""）。 */
+  private static String envOr(Map<String, String> env, String key, String defaultValue) {
+    String value = env.get(key);
+    return value == null || value.isBlank() ? defaultValue : value;
+  }
 }

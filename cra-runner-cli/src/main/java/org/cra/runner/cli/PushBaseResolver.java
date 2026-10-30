@@ -9,8 +9,6 @@ import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.RepoRef;
 import org.cra.git.api.GitAssembly;
 import org.cra.git.api.LocalRepoContext;
-import org.cra.git.github.api.GitHubAssembly;
-import org.cra.git.github.api.GitHubComponents;
 
 /**
  * push 直推基线解析（M4c，05§2.4）：base = 上一完成 commit。
@@ -29,6 +27,9 @@ import org.cra.git.github.api.GitHubComponents;
  */
 final class PushBaseResolver {
 
+  /** 首次评审向根回溯的硬上限（防异常仓库拖死；触发即要求显式基线）。 */
+  private static final int ROOT_WALK_LIMIT = 100_000;
+
   private PushBaseResolver() {}
 
   /**
@@ -41,8 +42,9 @@ final class PushBaseResolver {
     if (config.baseSha() != null && !config.baseSha().isBlank()) {
       return config.baseSha();
     }
-    GitHubComponents components =
-        GitHubAssembly.createComponents(config.githubApi(), config.githubToken());
+    // 平台中立：GitLab 模式用 GitLab 的 commit comment 账本（ADR-0013 决策 3——
+    // 此前固定 GitHubAssembly 会把 GitLab PAT 发往 api.github.com，且永远查不到 GitLab 完成标记）
+    PlatformComponents components = PlatformComponents.create(config);
     LocalRepoContext local =
         GitAssembly.createLocalRepoContext(Path.of(config.workspace()).toAbsolutePath());
     return resolve(config, components.commentSource(), local);
@@ -74,7 +76,20 @@ final class PushBaseResolver {
         return sha;
       }
     }
-    // 首次评审：仓库初版 commit 作为基线（根 commit 自身变更不计入，05§2.4）
-    return chain.get(chain.size() - 1);
+    // 首次评审：仓库初版 commit 作为基线（根 commit 自身变更不计入，05§2.4）。
+    // 首父链可能被 --lookback 截断：截断时继续走到根，否则 base 会落在历史中段、更早的提交静默漏评
+    List<String> fullChain = chain;
+    if (chain.size() > config.pushLookback()) {
+      fullChain = local.firstParentChain(config.headSha(), ROOT_WALK_LIMIT);
+      if (fullChain.size() >= ROOT_WALK_LIMIT) {
+        throw new CraConfigException(
+            "push 模式无法确定仓库初版 commit（历史超过 " + ROOT_WALK_LIMIT + " 个提交），请显式 --base");
+      }
+    }
+    if (fullChain.isEmpty()) {
+      throw new CraConfigException(
+          "push 模式无法解析基线：本地仓库不可得（" + config.workspace() + "），请显式 --base/--baseline");
+    }
+    return fullChain.get(fullChain.size() - 1);
   }
 }

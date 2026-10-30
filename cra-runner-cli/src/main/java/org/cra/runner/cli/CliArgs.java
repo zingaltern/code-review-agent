@@ -117,6 +117,7 @@ final class CliArgs {
             "--ledger-db",
             "--model-strong",
             "--model-light",
+            "--llm-temperature",
             "--fallback-chain",
             "--rpm",
             "--spot-check-percent",
@@ -133,7 +134,12 @@ final class CliArgs {
           }
           named.put(arg, args[++i]);
         }
-        default -> throw new CraConfigException("未知参数: " + arg);
+        default -> {
+          // 未知参数回显只看旗标名：`--token=ghp_...` 这类写法不得把密钥写进结构化日志（05§6）
+          int eq = arg.indexOf('=');
+          String flag = eq > 0 ? arg.substring(0, eq) : arg;
+          throw new CraConfigException("未知参数: " + flag);
+        }
       }
     }
     // dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）
@@ -246,6 +252,16 @@ final class CliArgs {
     }
     // 05§5 review.* 与 agents.budget（默认值即文档基准值；REVIEW.md 显式配置在 core 内优先于 nit 默认）
     DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", "0.70,0.85"));
+    int largeDiffLines = parseIntOption(named, "--large-diff-lines", 2000);
+    int hardCapLines = parseIntOption(named, "--hard-cap-lines", 8000);
+    if (hardCapLines <= largeDiffLines) {
+      throw new CraConfigException(
+          "--hard-cap-lines 必须大于 --large-diff-lines: " + hardCapLines + " <= " + largeDiffLines);
+    }
+    int spotCheckPercent = parseIntOption(named, "--spot-check-percent", 20);
+    if (spotCheckPercent > 100) {
+      throw new CraConfigException("--spot-check-percent 必须在 [0,100]: " + spotCheckPercent);
+    }
     String publishUnverified = named.getOrDefault("--publish-unverified", "never");
     if (!"never".equals(publishUnverified) && !"labeled".equals(publishUnverified)) {
       throw new CraConfigException(
@@ -255,17 +271,17 @@ final class CliArgs {
     boolean crossCheckerEnabled =
         crossCheckerSeen
             ? crossChecker
-            : Boolean.parseBoolean(env.getOrDefault("CRA_CROSSCHECKER_ENABLED", "false"));
+            : Boolean.parseBoolean(envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
     String crossCheckerModes =
         named.getOrDefault(
-            "--crosschecker-modes", env.getOrDefault("CRA_CROSSCHECKER_MODES", "assumption,sniff"));
+            "--crosschecker-modes", envOr(env, "CRA_CROSSCHECKER_MODES", "assumption,sniff"));
     validateCrossCheckerModes(crossCheckerModes);
     int crossCheckerHistoryWeeks =
         parseIntOption(
             "--crosschecker-history-weeks",
             named.containsKey("--crosschecker-history-weeks")
                 ? named.get("--crosschecker-history-weeks")
-                : env.get("CRA_CROSSCHECKER_HISTORY_WEEKS"),
+                : blankToNull(env.get("CRA_CROSSCHECKER_HISTORY_WEEKS")),
             8);
     // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后仅 standard/deep 档生效
     SemanticContextConfig semanticContextConfig =
@@ -275,17 +291,14 @@ final class CliArgs {
             "--lookback",
             named.containsKey("--lookback")
                 ? named.get("--lookback")
-                : env.get("CRA_PUSH_LOOKBACK"),
+                : blankToNull(env.get("CRA_PUSH_LOOKBACK")),
             CraConfig.DEFAULT_PUSH_LOOKBACK);
     // 05§5 agents.signoff（M4a）：默认开启；作者/测试状态未知时低风险 0 人签条件不满足
     boolean signoffEnabled =
-        signoffSeen
-            ? signoff
-            : Boolean.parseBoolean(env.getOrDefault("CRA_SIGNOFF_ENABLED", "true"));
+        signoffSeen ? signoff : Boolean.parseBoolean(envOr(env, "CRA_SIGNOFF_ENABLED", "true"));
     List<String> trustedAuthors =
         parseCsv(
-            named.getOrDefault(
-                "--trusted-authors", env.getOrDefault("CRA_SIGNOFF_TRUSTED_AUTHORS", "")));
+            named.getOrDefault("--trusted-authors", envOr(env, "CRA_SIGNOFF_TRUSTED_AUTHORS", "")));
     String prAuthor = blankToNull(named.get("--pr-author"));
     if (prAuthor == null) {
       prAuthor = blankToNull(env.get("CRA_PR_AUTHOR"));
@@ -294,7 +307,7 @@ final class CliArgs {
       prAuthor = blankToNull(env.get("GITHUB_ACTOR"));
     }
     String testsStatus =
-        named.getOrDefault("--tests-status", env.getOrDefault("CRA_TESTS_STATUS", "unknown"));
+        named.getOrDefault("--tests-status", envOr(env, "CRA_TESTS_STATUS", "unknown"));
     try {
       org.cra.common.signoff.TestsStatus.parse(testsStatus);
     } catch (IllegalArgumentException e) {
@@ -312,29 +325,30 @@ final class CliArgs {
         depth,
         dryRun,
         securityBlock,
-        token,
+        // GitLab 模式下 token 只属于 GitLabSettings：带上 githubToken 会让 push 基线解析把 PAT 发给 GitHub
+        gitlab ? null : token,
         named.getOrDefault("--github-api", "https://api.github.com"),
         llmApiKey,
         llmBaseUrl,
         llmModel,
         named.getOrDefault("--run-root", ".cra/runs"),
         named.getOrDefault("--workspace", "."),
-        parseIntOption(named, "--large-diff-lines", 2000),
-        parseIntOption(named, "--hard-cap-lines", 8000),
+        largeDiffLines,
+        hardCapLines,
         parseNitBudget(named),
         parseLongOption(named, "--run-total-tokens", 500_000L),
         degradeAt.first(),
         degradeAt.second(),
         publishUnverified,
-        parseIntOption(named, "--spot-check-percent", 20),
+        spotCheckPercent,
         local,
         named.getOrDefault("--exec", DEFAULT_EXEC),
         expandUserHome(named.getOrDefault("--ledger-db", "~/.cra/ledger.db")),
         blankToNull(named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))),
         blankToNull(named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
         named.getOrDefault(
-            "--fallback-chain", env.getOrDefault("CRA_LLM_FALLBACK_CHAIN", "standard,light")),
-        named.getOrDefault("--rpm", env.getOrDefault("CRA_LLM_RPM", "")),
+            "--fallback-chain", envOr(env, "CRA_LLM_FALLBACK_CHAIN", "standard,light")),
+        named.getOrDefault("--rpm", envOr(env, "CRA_LLM_RPM", "")),
         crossCheckerEnabled,
         crossCheckerModes,
         crossCheckerHistoryWeeks,
@@ -359,7 +373,7 @@ final class CliArgs {
     boolean enabled =
         flagSeen
             ? flagValue
-            : Boolean.parseBoolean(env.getOrDefault("CRA_SEMANTIC_CONTEXT_ENABLED", "false"));
+            : Boolean.parseBoolean(envOr(env, "CRA_SEMANTIC_CONTEXT_ENABLED", "false"));
     String maxFilesValue =
         optionValue(named, env, "--semantic-context-max-files", "CRA_SEMANTIC_CONTEXT_MAX_FILES");
     String maxFileBytesValue =
@@ -396,6 +410,12 @@ final class CliArgs {
   /** 空白值归一为 null：GitHub Actions 的空 env 是 ""，语义等同未设置（档位缺省继承 standard）。 */
   private static String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value;
+  }
+
+  /** 环境变量读取：空白值等同未设置（GitHub Actions 的空 input 是 ""，不是 null）。 */
+  private static String envOr(Map<String, String> env, String key, String defaultValue) {
+    String value = blankToNull(env.get(key));
+    return value == null ? defaultValue : value;
   }
 
   /** 模式串校验（assumption|sniff，逗号分隔，至少一个；03§3.1）。 */
@@ -449,7 +469,11 @@ final class CliArgs {
     try {
       double first = Double.parseDouble(parts[0].strip());
       double second = Double.parseDouble(parts[1].strip());
-      if (first <= 0 || second <= first || second > 1.0) {
+      if (!Double.isFinite(first)
+          || !Double.isFinite(second)
+          || first <= 0
+          || second <= first
+          || second > 1.0) {
         throw new NumberFormatException();
       }
       return new DegradeAt(first, second);

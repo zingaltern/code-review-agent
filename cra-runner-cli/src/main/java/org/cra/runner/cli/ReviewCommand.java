@@ -24,10 +24,10 @@ final class ReviewCommand {
    * @return 进程退出码
    */
   int execute(CraConfig config) {
-    if (config.local()) {
-      return new LocalPrePrCommand().execute(config);
-    }
     try {
+      if (config.local()) {
+        return new LocalPrePrCommand().execute(config);
+      }
       CraConfig effective =
           config.reviewMode() == org.cra.common.run.ReviewMode.COMMIT
               ? config.withResolvedPushBase(PushBaseResolver.resolve(config))
