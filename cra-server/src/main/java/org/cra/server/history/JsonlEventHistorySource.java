@@ -116,9 +116,10 @@ public final class JsonlEventHistorySource implements EventHistorySource {
             ? parseInstant(node.get("collected_at").asText())
             : clock.instant();
     String rawJson =
-        node.hasNonNull("raw_json") && node.get("raw_json").isObject()
-            ? mapper.writeValueAsString(node.get("raw_json"))
-            : mapper.writeValueAsString(node);
+        mapper.writeValueAsString(
+            node.hasNonNull("raw_json") && node.get("raw_json").isObject()
+                ? node.get("raw_json")
+                : node);
     return new ProductEvent(
         requiredText(node, "event_id"),
         requiredText(node, "repo"),

@@ -64,12 +64,7 @@ public final class GitLabMergeRequestEventParser {
     if (!EVENT_NAME.equals(eventName)) {
       return Result.ignored("unsupported_event");
     }
-    JsonNode root;
-    try {
-      root = MAPPER.readTree(body);
-    } catch (IOException e) {
-      throw new IllegalArgumentException("webhook body 不是合法 JSON: " + e.getMessage());
-    }
+    JsonNode root = parseRoot(body);
     JsonNode attributes = root.get("object_attributes");
     if (attributes == null || !attributes.isObject()) {
       throw new IllegalArgumentException("merge_request payload 缺 object_attributes");
@@ -79,6 +74,55 @@ public final class GitLabMergeRequestEventParser {
       return Result.ignored("unsupported_object_kind");
     }
     String action = text(attributes, "action");
+    Result ignored = ignoredByState(attributes, action);
+    if (ignored != null) {
+      return ignored;
+    }
+    String normalizedAction = normalizeAction(action, attributes);
+    if (normalizedAction == null) {
+      return Result.ignored(unsupportedActionReason(action));
+    }
+    if (isDraft(attributes)) {
+      return Result.ignored("draft");
+    }
+    DiffShas shas = requireDiffShas(attributes);
+    String projectPath = requireProjectPath(root);
+    int lastSlash = projectPath.lastIndexOf('/');
+    int iid = requireIid(attributes);
+    String deliveryId = deliveryId(eventName, eventUuid, body);
+    return Result.accepted(
+        new PullRequestEvent(
+            deliveryId,
+            normalizedAction,
+            projectPath.substring(0, lastSlash),
+            projectPath.substring(lastSlash + 1),
+            iid,
+            shas.baseSha(),
+            shas.headSha()));
+  }
+
+  /**
+   * 解析请求体 JSON（非法 JSON → 400）。
+   *
+   * @param body 原始请求体
+   * @return 根节点
+   */
+  private static JsonNode parseRoot(byte[] body) {
+    try {
+      return MAPPER.readTree(body);
+    } catch (IOException e) {
+      throw new IllegalArgumentException("webhook body 不是合法 JSON: " + e.getMessage());
+    }
+  }
+
+  /**
+   * merged/closed 状态忽略（02§ webhook 幂等：终态事件不入评审队列）。
+   *
+   * @param attributes object_attributes
+   * @param action 原始 action
+   * @return 忽略结果；null = 继续处理
+   */
+  private static Result ignoredByState(JsonNode attributes, String action) {
     String state = textOrNull(attributes, "state");
     if ("merged".equals(state) || "merge".equals(action)) {
       return Result.ignored("merged");
@@ -86,19 +130,32 @@ public final class GitLabMergeRequestEventParser {
     if ("closed".equals(state) || "close".equals(action)) {
       return Result.ignored("closed");
     }
-    String normalizedAction = normalizeAction(action, attributes);
-    if (normalizedAction == null) {
-      if ("update".equals(action)) {
-        return Result.ignored("metadata_update");
-      }
-      if (action.startsWith("approv") || action.startsWith("unapprov")) {
-        return Result.ignored("approval_event");
-      }
-      return Result.ignored("unsupported_action");
+    return null;
+  }
+
+  /**
+   * 不可评审 action 的忽略原因。
+   *
+   * @param action 原始 action
+   * @return 忽略原因
+   */
+  private static String unsupportedActionReason(String action) {
+    if ("update".equals(action)) {
+      return "metadata_update";
     }
-    if (isDraft(attributes)) {
-      return Result.ignored("draft");
+    if (action.startsWith("approv") || action.startsWith("unapprov")) {
+      return "approval_event";
     }
+    return "unsupported_action";
+  }
+
+  /**
+   * 取 base/head sha（diff_refs，head 可回退 last_commit.id）。
+   *
+   * @param attributes object_attributes
+   * @return sha 对
+   */
+  private static DiffShas requireDiffShas(JsonNode attributes) {
     JsonNode diffRefs = attributes.path("diff_refs");
     String baseSha = textOrNull(diffRefs, "base_sha");
     String headSha =
@@ -108,6 +165,16 @@ public final class GitLabMergeRequestEventParser {
       throw new IllegalArgumentException(
           "merge_request payload 缺 diff_refs.base_sha/head_sha（无法确定评审基线）");
     }
+    return new DiffShas(baseSha, headSha);
+  }
+
+  /**
+   * 取并校验 project.path_with_namespace（group/project）。
+   *
+   * @param root 根节点
+   * @return 项目路径
+   */
+  private static String requireProjectPath(JsonNode root) {
     String projectPath = textOrNull(root.path("project"), "path_with_namespace");
     if (projectPath == null) {
       throw new IllegalArgumentException("merge_request payload 缺 project.path_with_namespace");
@@ -117,22 +184,44 @@ public final class GitLabMergeRequestEventParser {
       throw new IllegalArgumentException(
           "project.path_with_namespace 形如 group/project: " + projectPath);
     }
+    return projectPath;
+  }
+
+  /**
+   * 取并校验 MR iid。
+   *
+   * @param attributes object_attributes
+   * @return iid
+   */
+  private static int requireIid(JsonNode attributes) {
     int iid = attributes.path("iid").asInt(0);
     if (iid <= 0) {
       throw new IllegalArgumentException("merge_request payload 缺合法 iid: " + iid);
     }
-    String deliveryId =
-        eventUuid != null && !eventUuid.isBlank() ? eventUuid : fallbackDeliveryId(eventName, body);
-    return Result.accepted(
-        new PullRequestEvent(
-            deliveryId,
-            normalizedAction,
-            projectPath.substring(0, lastSlash),
-            projectPath.substring(lastSlash + 1),
-            iid,
-            baseSha,
-            headSha));
+    return iid;
   }
+
+  /**
+   * 投递 ID：优先 X-Gitlab-Event-UUID，缺失时按 payload 生成确定性摘要。
+   *
+   * @param eventName X-Gitlab-Event
+   * @param eventUuid X-Gitlab-Event-UUID（可空）
+   * @param body 原始请求体
+   * @return 投递 ID
+   */
+  private static String deliveryId(String eventName, String eventUuid, byte[] body) {
+    return eventUuid != null && !eventUuid.isBlank()
+        ? eventUuid
+        : fallbackDeliveryId(eventName, body);
+  }
+
+  /**
+   * base/head sha 对。
+   *
+   * @param baseSha 基线 sha
+   * @param headSha 目标 sha
+   */
+  private record DiffShas(String baseSha, String headSha) {}
 
   /**
    * 事件 ID 回退：确定性摘要，保证同一 payload 重投命中同一 delivery。

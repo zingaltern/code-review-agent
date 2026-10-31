@@ -132,6 +132,36 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     int tickets = (int) batch.stream().filter(ProductEvent::ticketLike).count();
     int incidents = (int) batch.stream().filter(ProductEvent::incidentLike).count();
     int skipped = outsideWindow + duplicateKeys + (ordered.size() - batch.size());
+    return new CollectionResult(
+        true,
+        tickets,
+        incidents,
+        buildNote(read, upsert, skipped, watermarkNote, truncated, warnings),
+        read.events().size(),
+        upsert.inserted(),
+        upsert.updated(),
+        skipped,
+        read.failures().size());
+  }
+
+  /**
+   * 采集结果说明（09§4：截断/解析失败/重试记录如实带出，不静默）。
+   *
+   * @param read 事件源读取结果
+   * @param upsert 入库结果
+   * @param skipped 跳过条数（窗口外 + 批内重复 + 单次上限）
+   * @param watermarkNote 水位说明
+   * @param truncated 是否触发单次上限
+   * @param warnings 重试记录
+   * @return 说明文本
+   */
+  private String buildNote(
+      EventHistorySource.ReadResult read,
+      EventHistoryStore.UpsertResult upsert,
+      int skipped,
+      String watermarkNote,
+      boolean truncated,
+      List<String> warnings) {
     StringBuilder note =
         new StringBuilder("事件史采集完成：读取 ")
             .append(read.linesRead())
@@ -156,16 +186,7 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     if (!warnings.isEmpty()) {
       note.append("；重试记录: ").append(String.join(" | ", warnings));
     }
-    return new CollectionResult(
-        true,
-        tickets,
-        incidents,
-        note.toString(),
-        read.events().size(),
-        upsert.inserted(),
-        upsert.updated(),
-        skipped,
-        read.failures().size());
+    return note.toString();
   }
 
   private String advanceWatermark(
