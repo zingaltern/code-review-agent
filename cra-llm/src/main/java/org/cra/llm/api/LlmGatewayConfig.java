@@ -65,6 +65,21 @@ public record LlmGatewayConfig(
     models = models == null ? Map.of() : Map.copyOf(models);
     fallbackChain = List.copyOf(fallbackChain == null ? List.of() : fallbackChain);
     perModelRpm = perModelRpm == null ? Map.of() : Map.copyOf(perModelRpm);
+    validateModels(models, fallbackChain);
+    validatePerModelRpm(perModelRpm);
+    validateConcurrency(maxConcurrency, maxRetries);
+    validateTimeouts(queueTimeoutMs, requestTimeoutMs, backoffBaseMs, backoffMaxMs);
+    extraHeaders = normalizeExtraHeaders(extraHeaders);
+  }
+
+  /**
+   * 校验模型表与降级链（05§5：至少 standard；链内条目必须已配置端点）。
+   *
+   * @param models 档位 → 端点
+   * @param fallbackChain 降级链
+   */
+  private static void validateModels(
+      Map<ModelTier, ModelEndpoint> models, List<ModelTier> fallbackChain) {
     if (!models.containsKey(ModelTier.STANDARD)) {
       throw new IllegalArgumentException("models 必须至少配置 standard 档（05§5）");
     }
@@ -73,31 +88,67 @@ public record LlmGatewayConfig(
         throw new IllegalArgumentException("fallback-chain 条目未配置模型端点: " + tier);
       }
     }
+  }
+
+  /**
+   * 校验 per-model RPM（05§5：必须为正整数）。
+   *
+   * @param perModelRpm 档位 → RPM
+   */
+  private static void validatePerModelRpm(Map<ModelTier, Integer> perModelRpm) {
     for (Integer rpm : perModelRpm.values()) {
       if (rpm == null || rpm <= 0) {
         throw new IllegalArgumentException("per-model RPM 必须为正整数");
       }
     }
+  }
+
+  /**
+   * 校验并发与重试限值（02§4.5）。
+   *
+   * @param maxConcurrency 并发上限
+   * @param maxRetries 重试次数
+   */
+  private static void validateConcurrency(int maxConcurrency, int maxRetries) {
     if (maxConcurrency <= 0 || maxRetries < 0) {
       throw new IllegalArgumentException(
           "maxConcurrency must be positive, maxRetries must be non-negative");
     }
+  }
+
+  /**
+   * 校验超时与退避限值（02§4.5）。
+   *
+   * @param queueTimeoutMs 排队预算
+   * @param requestTimeoutMs 请求超时
+   * @param backoffBaseMs 退避基值
+   * @param backoffMaxMs 退避封顶
+   */
+  private static void validateTimeouts(
+      long queueTimeoutMs, long requestTimeoutMs, long backoffBaseMs, long backoffMaxMs) {
     if (queueTimeoutMs <= 0
         || requestTimeoutMs <= 0
         || backoffBaseMs <= 0
         || backoffMaxMs < backoffBaseMs) {
       throw new IllegalArgumentException("timeouts must be positive and backoff capped");
     }
+  }
+
+  /**
+   * 校验并防御拷贝附加请求头（09§6：外部 Map 后续变更不影响已装配配置）。
+   *
+   * @param extraHeaders 原始附加头（可空）
+   * @return 不可变副本（null 归为空 map）
+   */
+  private static Map<String, String> normalizeExtraHeaders(Map<String, String> extraHeaders) {
     if (extraHeaders == null) {
-      extraHeaders = Map.of();
-    } else {
-      for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
-        requireHeader(header.getKey(), "附加头名");
-        requireHeader(header.getValue(), "附加头值");
-      }
-      // 防御拷贝（与 models/perModelRpm 同纪律，09§6）：外部 Map 后续变更不影响已装配配置
-      extraHeaders = Map.copyOf(extraHeaders);
+      return Map.of();
     }
+    for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
+      requireHeader(header.getKey(), "附加头名");
+      requireHeader(header.getValue(), "附加头值");
+    }
+    return Map.copyOf(extraHeaders);
   }
 
   /** 请求头必须在组装期可被 JDK HttpClient 接受（运行期抛 IAE 会穿出网关边界，09§4）。 */
