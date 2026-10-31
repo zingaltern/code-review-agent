@@ -1,6 +1,7 @@
 package org.cra.server.webhook;
 
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -72,7 +73,7 @@ public final class WebhookSignatureVerifier {
       Mac mac = Mac.getInstance("HmacSHA256");
       mac.init(new SecretKeySpec(key, "HmacSHA256"));
       return mac.doFinal(body);
-    } catch (NoSuchAlgorithmException | java.security.InvalidKeyException e) {
+    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
       throw new IllegalStateException("HMAC-SHA256 不可用", e);
     }
   }
