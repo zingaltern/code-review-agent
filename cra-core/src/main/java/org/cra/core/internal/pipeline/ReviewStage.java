@@ -289,282 +289,537 @@ public final class ReviewStage {
       CrossCheckHistory crossCheckHistory,
       CrossCheckEvents crossCheckEvents,
       SemanticContext semanticContext) {
+    CrossInputs crossInputs = crossInputs(crossCheckHistory, crossCheckEvents);
+    StageCtx ctx =
+        new StageCtx(
+            runId,
+            trace,
+            plan,
+            headFiles,
+            policy,
+            depthPlan,
+            budget,
+            prTitle,
+            commitMessages,
+            policySection,
+            semanticContext);
+    List<BugHunterDefinition.Perspective> basePerspectives = routedPerspectives(depthPlan);
+    boolean securityEnabled = crew.securityReviewer() != null;
+    boolean perfEnabled =
+        ReviewRoutingPolicy.perfTriggered(depthPlan) && crew.perfReviewer() != null;
+    List<String> degradations = new ArrayList<>();
+    if (plan.chunks().isEmpty()) {
+      // 跳过/裁剪后无可评审文件是合法结果（测试文件策略 / policy skip_paths / hard-cap），不是代理故障：
+      // 不得走空 L0 派发 → 全部 agent-failed → DEGRADED 的误判路径
+      return emptyPlanOutcome(ctx, diff, plan);
+    }
+    LoopResult loop =
+        runChunkLoop(ctx, basePerspectives, securityEnabled, perfEnabled, degradations);
+    // 全 PR 级专角色（Test/Convention）：chunk 扇出后派发——预算阶梯下先保评审主力；
+    // 70% 档砍 light 的 Convention（02§4.4），100% 终止
+    if (budget.phase() != RunBudgetTracker.Phase.STOP) {
+      // 主循环退出时 futures 必为空（两处 break 均以其为条件），专角色复用等价的空队列
+      List<TaskHandle<DispatchOutcome>> futures = new ArrayList<>();
+      dispatchSpecialists(
+          ctx, diff, crossInputs.history(), crossInputs.events(), futures, loop.contextNotes());
+      while (!futures.isEmpty()) {
+        collectOne(
+            await(futures.remove(0), degradations),
+            ctx,
+            loop.collected(),
+            degradations,
+            loop.contextNotes(),
+            loop.trimDecisions());
+      }
+    } else {
+      noteBudgetSkipped(ctx, loop.contextNotes());
+    }
+    // 终态复查（02§4.4）：消耗只增不减，最后一批调用跨越 85%/100% 线时截断同样生效
+    boolean truncationReached = finalTruncation(ctx, degradations) || loop.truncationReached();
+    return aggregate(loop, ctx, degradations, truncationReached);
+  }
+
+  /**
+   * 交叉检查输入的 null 归一（原 execute 顶部的两个三元式原样搬移）：未启用/未命中传 null 时收敛为空形态。
+   *
+   * @param crossCheckHistory 上下游变更史（可 null）
+   * @param crossCheckEvents 产品事件史（可 null）
+   * @return 归一后的非 null 组合
+   */
+  private static CrossInputs crossInputs(
+      CrossCheckHistory crossCheckHistory, CrossCheckEvents crossCheckEvents) {
     CrossCheckHistory crossHistory =
         crossCheckHistory == null ? CrossCheckHistory.none() : crossCheckHistory;
     CrossCheckEvents crossEvents =
         crossCheckEvents == null ? CrossCheckEvents.none() : crossCheckEvents;
+    return new CrossInputs(crossHistory, crossEvents);
+  }
+
+  /**
+   * 深度档对应的评审视角及其降档（原 execute 顶部的路由 + perspectiveDrop 循环原样搬移）。
+   *
+   * @param depthPlan 深度计划
+   * @return 降档后的视角列表（drop=0 时即路由结果）
+   */
+  private static List<BugHunterDefinition.Perspective> routedPerspectives(DepthPlan depthPlan) {
     List<BugHunterDefinition.Perspective> basePerspectives =
         ReviewRoutingPolicy.routePerspectives(depthPlan.effectiveDepth());
     for (int drop = 0; drop < depthPlan.perspectiveDrop(); drop++) {
       basePerspectives = ReviewRoutingPolicy.degradePerspectives(basePerspectives);
     }
-    boolean securityEnabled = crew.securityReviewer() != null;
-    boolean perfEnabled =
-        ReviewRoutingPolicy.perfTriggered(depthPlan) && crew.perfReviewer() != null;
-    List<TaskHandle<DispatchOutcome>> futures = new ArrayList<>();
-    List<DispatchOutcome> collected = new ArrayList<>();
-    List<String> degradations = new ArrayList<>();
-    List<String> contextNotes = new ArrayList<>();
-    List<String> trimDecisions = new ArrayList<>();
-    // chunk 级切片声明去重（同一句在每 chunk 重复没有信息量）
-    LinkedHashSet<String> sliceNotes = new LinkedHashSet<>();
-    List<ChunkPlanner.Chunk> chunks = plan.chunks();
-    if (chunks.isEmpty()) {
-      // 跳过/裁剪后无可评审文件是合法结果（测试文件策略 / policy skip_paths / hard-cap），不是代理故障：
-      // 不得走空 L0 派发 → 全部 agent-failed → DEGRADED 的误判路径
-      trace.emit(
-          "plan_empty",
-          Map.of(
-              "files_changed", diff.files().size(), "skipped_test_files", plan.skippedTestCount()));
-      return new StageOutcome(
-          List.of(),
-          0,
-          0,
-          false,
-          null,
-          List.of(),
-          List.of(),
-          List.of(emptyPlanNote(diff.files().size(), plan)),
-          List.of(),
-          false,
-          false,
-          Map.of());
-    }
-    int chunkIndex = 0;
-    boolean stopped = false;
-    boolean truncationReached = false;
+    return basePerspectives;
+  }
+
+  /**
+   * 无可评审文件的空产出（原 chunks.isEmpty() 早退分支原样搬移）：emit {@code plan_empty} + 仅含覆盖声明的空 StageOutcome。
+   *
+   * @param ctx 阶段上下文（trace 来源）
+   * @param diff 变更 diff（计数来源）
+   * @param plan 评审计划（跳过计数来源）
+   * @return 空 StageOutcome
+   */
+  private StageOutcome emptyPlanOutcome(StageCtx ctx, DiffResult diff, ChunkPlanner.Plan plan) {
+    ctx.trace()
+        .emit(
+            "plan_empty",
+            Map.of(
+                "files_changed", diff.files().size(),
+                "skipped_test_files", plan.skippedTestCount()));
+    return new StageOutcome(
+        List.of(),
+        0,
+        0,
+        false,
+        null,
+        List.of(),
+        List.of(),
+        List.of(emptyPlanNote(diff.files().size(), plan)),
+        List.of(),
+        false,
+        false,
+        Map.of());
+  }
+
+  /**
+   * 主循环（原 chunk 扇出 while 循环原样搬移）：逐轮读预算相位——STOP 帪只声明一次并继续收集在飞产出，其余相位走降档阶梯 + chunk 原子派发；每轮恰 await 一个
+   * future（逐 iteration 收集节奏与两处 break 条件不变）。
+   *
+   * @param ctx 阶段上下文
+   * @param basePerspectives 降档前的基准视角
+   * @param securityEnabled Security 专角色是否装配
+   * @param perfEnabled Perf 专角色是否装配（含触发判定）
+   * @param degradations 降级事件（主循环与后续专角色阶段共享同一列表）
+   * @return 主循环汇聚结果
+   */
+  private LoopResult runChunkLoop(
+      StageCtx ctx,
+      List<BugHunterDefinition.Perspective> basePerspectives,
+      boolean securityEnabled,
+      boolean perfEnabled,
+      List<String> degradations) {
+    ChunkLoop loop =
+        new ChunkLoop(ctx, basePerspectives, securityEnabled, perfEnabled, degradations);
     while (true) {
-      RunBudgetTracker.Phase phase = budget.phase();
+      RunBudgetTracker.Phase phase = ctx.budget().phase();
       if (phase == RunBudgetTracker.Phase.STOP) {
         // 100%：终止剩余派发，已派发的照常收集（02§4.4 DEGRADED 收尾）
-        if (chunkIndex < chunks.size() && !stopped) {
-          degradations.add(Degradations.BUDGET_EXHAUSTED_STOP);
-          stopped = true;
-          trace.emit(
+        loop.stopped = announceStopOnce(loop);
+        if (loop.futures.isEmpty()) {
+          break;
+        }
+      } else {
+        loop.truncationReached |= applyLadder(phase, loop);
+        loop.chunkIndex = dispatchReadyChunks(phase, loop);
+        if (loop.futures.isEmpty()) {
+          break;
+        }
+      }
+      collectOne(
+          await(loop.futures.remove(0), degradations),
+          ctx,
+          loop.collected,
+          degradations,
+          loop.contextNotes,
+          loop.trimDecisions);
+    }
+    return new LoopResult(
+        loop.collected,
+        loop.contextNotes,
+        loop.trimDecisions,
+        loop.sliceNotes,
+        loop.stopped,
+        loop.truncationReached);
+  }
+
+  /**
+   * STOP 相位的 stop 声明（仅一次）：原 `chunkIndex &lt; size &amp;&amp; !stopped` 才 add BUDGET_EXHAUSTED_STOP
+   * + emit {@code budget_check} phase=stop（含 skipped_chunks）并置位；已声明或无剩余 chunk 时原样返回。
+   *
+   * @param loop 主循环运行时（读 chunkIndex/stopped，写 stopped）
+   * @return 置位后的 stopped
+   */
+  private boolean announceStopOnce(ChunkLoop loop) {
+    if (loop.chunkIndex < loop.ctx.plan().chunks().size() && !loop.stopped) {
+      loop.degradations.add(Degradations.BUDGET_EXHAUSTED_STOP);
+      loop.stopped = true;
+      loop.ctx
+          .trace()
+          .emit(
               "budget_check",
               Map.of(
                   "phase",
                   "stop",
                   "ratio",
-                  budget.ratio(),
+                  loop.ctx.budget().ratio(),
                   "skipped_chunks",
-                  chunks.size() - chunkIndex));
-        }
-        if (futures.isEmpty()) {
-          break;
-        }
-      } else {
-        boolean simplified = phase != RunBudgetTracker.Phase.NORMAL;
-        if (phase == RunBudgetTracker.Phase.DEGRADE
-            && !degradations.contains(Degradations.BUDGET_DEGRADE_70)) {
-          degradations.add(Degradations.BUDGET_DEGRADE_70);
-          trace.emit("budget_check", Map.of("phase", "degrade", "ratio", budget.ratio()));
-        }
-        if (phase == RunBudgetTracker.Phase.TRUNCATE) {
-          truncationReached = true;
-          if (!degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
-            degradations.add(Degradations.BUDGET_TRUNCATE_85);
-            trace.emit("budget_check", Map.of("phase", "truncate", "ratio", budget.ratio()));
-          }
-        }
-        // 70% 档：剩余 chunk 砍 1 视角（下限 1）+ 简化上下文（02§4.4）
-        List<BugHunterDefinition.Perspective> effective =
-            phase == RunBudgetTracker.Phase.DEGRADE
-                ? ReviewRoutingPolicy.degradePerspectives(basePerspectives)
-                : basePerspectives;
-        int waveSize = effective.size() + (securityEnabled ? 1 : 0) + (perfEnabled ? 1 : 0);
-        // chunk 原子派发：整个 chunk 的全部代理都能入队才取下一个 chunk——
-        // 在飞派发严格 ≤ MAX_PARALLEL（网关侧信号量仍为硬限，02§4.5），降档相位对未开始的 chunk 语义确定
-        while (chunkIndex < chunks.size() && futures.size() + waveSize <= MAX_PARALLEL) {
-          ChunkPlanner.Chunk chunk = chunks.get(chunkIndex++);
-          // M4e（ADR-0014）：本 chunk 的 L2 跨文件切片（关闭/不可得时为空，不产生声明）
-          CrossFileSlices slices = semanticContext.slicesFor(chunk.files());
-          // 分层核对契约（04§2.6）：仅跨层索引可用时注入（dataflow 模板引用该段，其余模板无占位符）
-          String layerContract = semanticContext.available() ? LayerContract.SECTION : "";
-          sliceNotes.addAll(slices.notes());
-          for (BugHunterDefinition.Perspective perspective : effective) {
-            SubAgent<ReviewAgentInput> agent = agentOf(perspective);
-            futures.add(
-                dispatcher.submitChunk(
-                    agent,
-                    chunk,
-                    headFiles,
-                    depthPlan,
-                    simplified,
-                    "",
-                    prTitle,
-                    commitMessages,
-                    policySection,
-                    runId,
-                    trace,
-                    slices,
-                    layerContract));
-          }
-          if (securityEnabled) {
-            futures.add(
-                dispatcher.submitChunk(
-                    crew.securityReviewer(),
-                    chunk,
-                    headFiles,
-                    depthPlan,
-                    simplified,
-                    ReviewPromptSections.securityExtraSection(chunk, headFiles, policy),
-                    prTitle,
-                    commitMessages,
-                    policySection,
-                    runId,
-                    trace,
-                    slices,
-                    layerContract));
-          }
-          if (perfEnabled) {
-            futures.add(
-                dispatcher.submitChunk(
-                    crew.perfReviewer(),
-                    chunk,
-                    headFiles,
-                    depthPlan,
-                    simplified,
-                    "",
-                    prTitle,
-                    commitMessages,
-                    policySection,
-                    runId,
-                    trace,
-                    slices,
-                    layerContract));
-          }
-        }
-        if (futures.isEmpty()) {
-          break;
-        }
-      }
-      DispatchOutcome outcome = await(futures.remove(0), degradations);
-      budget.record(outcome.tokensIn(), outcome.tokensOut());
-      collected.add(outcome);
-      degradations.addAll(outcome.degradations());
-      contextNotes.addAll(outcome.contextNotes());
-      trimDecisions.addAll(outcome.trimDecisions());
+                  loop.ctx.plan().chunks().size() - loop.chunkIndex));
     }
-    // 全 PR 级专角色（Test/Convention）：chunk 扇出后派发——预算阶梯下先保评审主力；
-    // 70% 档砍 light 的 Convention（02§4.4），100% 终止
-    RunBudgetTracker.Phase phase = budget.phase();
-    if (phase != RunBudgetTracker.Phase.STOP) {
-      // 触发比例按过滤前的全量 PR diff 统计（02§4.4：测试文件默认不进评审范围，但仍影响触发判定）
-      if (crew.testReviewer() != null && ReviewRoutingPolicy.testReviewerTriggered(diff)) {
-        futures.add(
-            dispatcher.submitWholePr(
-                crew.testReviewer(),
-                plan,
-                headFiles,
-                ReviewPromptSections.testExtraSection(plan),
-                prTitle,
-                commitMessages,
-                policySection,
-                runId,
-                trace));
-      }
-      if (crew.conventionReviewer() != null
-          && ReviewRoutingPolicy.conventionTriggered(policy)
-          && phase != RunBudgetTracker.Phase.DEGRADE) {
-        futures.add(
-            dispatcher.submitWholePr(
-                crew.conventionReviewer(),
-                plan,
-                headFiles,
-                "",
-                prTitle,
-                commitMessages,
-                policySection,
-                runId,
-                trace));
-      }
-      // M4f-lite/full CrossChecker（03§3.1）：全 PR 单实例；配置开启 + standard/deep 档 + 至少一个模式有数据
-      boolean crossCheck =
-          ReviewRoutingPolicy.crossCheckTriggered(
-              depthPlan, policy, crew, crossCheckerOptions, crossHistory, crossEvents);
-      if (crossCheck) {
-        boolean assumptionMode =
-            crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION)
-                && (!policy.productContext().isEmpty()
-                    || !policy.knownIncidents().isEmpty()
-                    || crossHistory.hasData()
-                    || crossEvents.hasData());
-        boolean sniffMode =
-            crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.SNIFF)
-                && !policy.sniffTests().isEmpty();
-        CrossCheckMaterials.Materials materials =
-            CrossCheckMaterials.build(
-                ReviewAgentDispatcher.wholePrFiles(plan),
-                assumptionMode ? crossHistory.entries() : List.of(),
-                crossCheckerOptions.historyWeeks(),
-                policy,
-                assumptionMode,
-                sniffMode,
-                assumptionMode ? crossEvents.entries() : List.of());
-        contextNotes.addAll(crossHistory.notes());
-        contextNotes.addAll(crossEvents.notes());
-        contextNotes.addAll(materials.notes());
-        Map<String, Object> event = new LinkedHashMap<>();
-        event.put("triggered", true);
-        event.put("modes", ReviewRoutingPolicy.activeModes(assumptionMode, sniffMode));
-        event.put("history_available", crossHistory.available());
-        event.put("history_commits", crossHistory.entries().size());
-        event.put("events_available", crossEvents.available());
-        event.put("events_count", crossEvents.entries().size());
-        event.put("diff_tokens", TokenMath.estimateTokens(materials.diffDigest()));
-        event.put("history_tokens", TokenMath.estimateTokens(materials.historyText()));
-        event.put(
-            "event_tokens",
-            TokenMath.estimateTokens(
-                CrossCheckMaterials.eventsText(
-                    assumptionMode ? crossEvents.entries() : List.of(),
-                    crossCheckerOptions.historyWeeks())));
-        event.put("context_tokens", TokenMath.estimateTokens(materials.trustedSections()));
-        trace.emit("crosscheck", event);
-        futures.add(
-            dispatcher.submitCrossCheck(
-                crew.crossChecker(),
-                plan,
-                headFiles,
-                materials,
-                prTitle,
-                commitMessages,
-                runId,
-                trace));
-      } else if (crossCheckerOptions.enabled()) {
-        // 覆盖声明（07 T1.4：段落缺失时相关检查优雅跳过——跳过原因必须可见，不静默）
-        String reason =
-            ReviewRoutingPolicy.crossCheckSkipReason(
-                depthPlan, policy, crew, crossHistory, crossEvents);
-        contextNotes.add("CrossChecker 未触发：" + reason);
-        trace.emit("crosscheck", Map.of("triggered", false, "reason", reason));
-      }
-      while (!futures.isEmpty()) {
-        DispatchOutcome outcome = await(futures.remove(0), degradations);
-        budget.record(outcome.tokensIn(), outcome.tokensOut());
-        collected.add(outcome);
-        degradations.addAll(outcome.degradations());
-        contextNotes.addAll(outcome.contextNotes());
-        trimDecisions.addAll(outcome.trimDecisions());
-      }
-    } else {
-      contextNotes.add("run 预算耗尽：Test/Convention 全 PR 级专角色未派发（02§4.4）");
-      if (crossCheckerOptions.enabled() && crew.crossChecker() != null) {
-        contextNotes.add("run 预算耗尽：CrossChecker 未派发（02§4.4）");
-        trace.emit("crosscheck", Map.of("triggered", false, "reason", "budget-exhausted"));
-      }
+    return loop.stopped;
+  }
+
+  /**
+   * 预算降档阶梯（原 else 分支的两个 if 原样搬移）：DEGRADE 首次 add BUDGET_DEGRADE_70 + emit phase=degrade； TRUNCATE
+   * 置位截断标志 + 首次 add BUDGET_TRUNCATE_85 + emit phase=truncate。emit 顺序 degrade → truncate 不变。
+   *
+   * @param phase 当前相位
+   * @param loop 主循环运行时（降级声明去重读其 degradations）
+   * @return 本相位是否触发截断（TRUNCATE 档 true）
+   */
+  private boolean applyLadder(RunBudgetTracker.Phase phase, ChunkLoop loop) {
+    boolean truncationReached = false;
+    if (phase == RunBudgetTracker.Phase.DEGRADE
+        && !loop.degradations.contains(Degradations.BUDGET_DEGRADE_70)) {
+      loop.degradations.add(Degradations.BUDGET_DEGRADE_70);
+      loop.ctx
+          .trace()
+          .emit("budget_check", Map.of("phase", "degrade", "ratio", loop.ctx.budget().ratio()));
     }
-    // 终态复查（02§4.4）：消耗只增不减，最后一批调用跨越 85%/100% 线时截断同样生效
-    RunBudgetTracker.Phase finalPhase = budget.phase();
-    if (finalPhase.ordinal() >= RunBudgetTracker.Phase.TRUNCATE.ordinal()) {
+    if (phase == RunBudgetTracker.Phase.TRUNCATE) {
       truncationReached = true;
+      if (!loop.degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
+        loop.degradations.add(Degradations.BUDGET_TRUNCATE_85);
+        loop.ctx
+            .trace()
+            .emit("budget_check", Map.of("phase", "truncate", "ratio", loop.ctx.budget().ratio()));
+      }
+    }
+    return truncationReached;
+  }
+
+  /**
+   * 70% 档的有效视角：DEGRADE 剩余 chunk 砍 1 视角（下限 1），其余相位原样（02§4.4）。
+   *
+   * @param phase 当前相位
+   * @param base 基准视角
+   * @return 本轮派发的有效视角
+   */
+  private static List<BugHunterDefinition.Perspective> effectiveFor(
+      RunBudgetTracker.Phase phase, List<BugHunterDefinition.Perspective> base) {
+    return phase == RunBudgetTracker.Phase.DEGRADE
+        ? ReviewRoutingPolicy.degradePerspectives(base)
+        : base;
+  }
+
+  /**
+   * 一轮派发的 wave 宽度（视角数 + Security + Perf 装配与否）。
+   *
+   * @param effective 有效视角
+   * @param securityEnabled Security 专角色是否装配
+   * @param perfEnabled Perf 专角色是否装配
+   * @return 单 chunk 的代理数
+   */
+  private static int waveSizeOf(
+      List<BugHunterDefinition.Perspective> effective,
+      boolean securityEnabled,
+      boolean perfEnabled) {
+    return effective.size() + (securityEnabled ? 1 : 0) + (perfEnabled ? 1 : 0);
+  }
+
+  /**
+   * chunk 原子派发（原内层 while 原样搬移）：整个 chunk 的全部代理都能入队才取下一个 chunk——在飞派发严格 ≤
+   * MAX_PARALLEL（网关侧信号量仍为硬限，02§4.5），降档相位对未开始的 chunk 语义确定；per-perspective + Security/Perf 的
+   * submitChunk 参数原样（切片/分层契约/sliceNotes 逻辑在内）。
+   *
+   * @param phase 当前相位（简化上下文与有效视角判定）
+   * @param loop 主循环运行时（读写 chunkIndex/futures/sliceNotes）
+   * @return 派发后的新 chunkIndex
+   */
+  private int dispatchReadyChunks(RunBudgetTracker.Phase phase, ChunkLoop loop) {
+    boolean simplified = phase != RunBudgetTracker.Phase.NORMAL;
+    // 70% 档：剩余 chunk 砍 1 视角（下限 1）+ 简化上下文（02§4.4）
+    List<BugHunterDefinition.Perspective> effective = effectiveFor(phase, loop.basePerspectives);
+    int waveSize = waveSizeOf(effective, loop.securityEnabled, loop.perfEnabled);
+    int chunkIndex = loop.chunkIndex;
+    while (chunkIndex < loop.ctx.plan().chunks().size()
+        && loop.futures.size() + waveSize <= MAX_PARALLEL) {
+      ChunkPlanner.Chunk chunk = loop.ctx.plan().chunks().get(chunkIndex++);
+      // M4e（ADR-0014）：本 chunk 的 L2 跨文件切片（关闭/不可得时为空，不产生声明）
+      CrossFileSlices slices = loop.ctx.semanticContext().slicesFor(chunk.files());
+      // 分层核对契约（04§2.6）：仅跨层索引可用时注入（dataflow 模板引用该段，其余模板无占位符）
+      String layerContract = loop.ctx.semanticContext().available() ? LayerContract.SECTION : "";
+      loop.sliceNotes.addAll(slices.notes());
+      for (BugHunterDefinition.Perspective perspective : effective) {
+        SubAgent<ReviewAgentInput> agent = agentOf(perspective);
+        loop.futures.add(
+            dispatcher.submitChunk(
+                agent,
+                chunk,
+                loop.ctx.headFiles(),
+                loop.ctx.depthPlan(),
+                simplified,
+                "",
+                loop.ctx.prTitle(),
+                loop.ctx.commitMessages(),
+                loop.ctx.policySection(),
+                loop.ctx.runId(),
+                loop.ctx.trace(),
+                slices,
+                layerContract));
+      }
+      if (loop.securityEnabled) {
+        loop.futures.add(
+            dispatcher.submitChunk(
+                crew.securityReviewer(),
+                chunk,
+                loop.ctx.headFiles(),
+                loop.ctx.depthPlan(),
+                simplified,
+                ReviewPromptSections.securityExtraSection(
+                    chunk, loop.ctx.headFiles(), loop.ctx.policy()),
+                loop.ctx.prTitle(),
+                loop.ctx.commitMessages(),
+                loop.ctx.policySection(),
+                loop.ctx.runId(),
+                loop.ctx.trace(),
+                slices,
+                layerContract));
+      }
+      if (loop.perfEnabled) {
+        loop.futures.add(
+            dispatcher.submitChunk(
+                crew.perfReviewer(),
+                chunk,
+                loop.ctx.headFiles(),
+                loop.ctx.depthPlan(),
+                simplified,
+                "",
+                loop.ctx.prTitle(),
+                loop.ctx.commitMessages(),
+                loop.ctx.policySection(),
+                loop.ctx.runId(),
+                loop.ctx.trace(),
+                slices,
+                layerContract));
+      }
+    }
+    loop.chunkIndex = chunkIndex;
+    return chunkIndex;
+  }
+
+  /**
+   * 单个代理产出的收集（主循环逐 iteration await 与专角色 drain 共用；原收集语句块原样搬移）： budget.record → collected.add →
+   * degradations/contextNotes/trimDecisions 合并（顺序不变）。
+   *
+   * @param outcome 待收集的代理产出
+   * @param ctx 阶段上下文（budget 来源）
+   * @param collected 产出累积列表
+   * @param degradations 降级事件
+   * @param contextNotes 覆盖声明
+   * @param trimDecisions 裁剪决策
+   */
+  private static void collectOne(
+      DispatchOutcome outcome,
+      StageCtx ctx,
+      List<DispatchOutcome> collected,
+      List<String> degradations,
+      List<String> contextNotes,
+      List<String> trimDecisions) {
+    ctx.budget().record(outcome.tokensIn(), outcome.tokensOut());
+    collected.add(outcome);
+    degradations.addAll(outcome.degradations());
+    contextNotes.addAll(outcome.contextNotes());
+    trimDecisions.addAll(outcome.trimDecisions());
+  }
+
+  /**
+   * 全 PR 级专角色与 CrossChecker 派发（原 `phase != STOP` 分支原样搬移）：Test/Convention 触发判定 → CrossChecker
+   * 触发判定与材料构建 + crosscheck emit（事件字段全保留）→ 否则启用时的覆盖声明。触发比例按过滤前的全量 PR diff 统计
+   * （02§4.4：测试文件默认不进评审范围，但仍影响触发判定）。
+   *
+   * @param ctx 阶段上下文
+   * @param diff 全量 PR diff（test 触发判定）
+   * @param crossHistory 上下游变更史（归一后）
+   * @param crossEvents 产品事件史（归一后）
+   * @param futures 专角色任务队列（新空列表，drain 由调用方负责）
+   * @param contextNotes 覆盖声明（CrossChecker notes 追加）
+   */
+  private void dispatchSpecialists(
+      StageCtx ctx,
+      DiffResult diff,
+      CrossCheckHistory crossHistory,
+      CrossCheckEvents crossEvents,
+      List<TaskHandle<DispatchOutcome>> futures,
+      List<String> contextNotes) {
+    RunBudgetTracker.Phase phase = ctx.budget().phase();
+    if (crew.testReviewer() != null && ReviewRoutingPolicy.testReviewerTriggered(diff)) {
+      futures.add(
+          dispatcher.submitWholePr(
+              crew.testReviewer(),
+              ctx.plan(),
+              ctx.headFiles(),
+              ReviewPromptSections.testExtraSection(ctx.plan()),
+              ctx.prTitle(),
+              ctx.commitMessages(),
+              ctx.policySection(),
+              ctx.runId(),
+              ctx.trace()));
+    }
+    if (crew.conventionReviewer() != null
+        && ReviewRoutingPolicy.conventionTriggered(ctx.policy())
+        && phase != RunBudgetTracker.Phase.DEGRADE) {
+      futures.add(
+          dispatcher.submitWholePr(
+              crew.conventionReviewer(),
+              ctx.plan(),
+              ctx.headFiles(),
+              "",
+              ctx.prTitle(),
+              ctx.commitMessages(),
+              ctx.policySection(),
+              ctx.runId(),
+              ctx.trace()));
+    }
+    // M4f-lite/full CrossChecker（03§3.1）：全 PR 单实例；配置开启 + standard/deep 档 + 至少一个模式有数据
+    boolean crossCheck =
+        ReviewRoutingPolicy.crossCheckTriggered(
+            ctx.depthPlan(), ctx.policy(), crew, crossCheckerOptions, crossHistory, crossEvents);
+    if (crossCheck) {
+      dispatchCrossCheck(ctx, crossHistory, crossEvents, futures, contextNotes);
+    } else if (crossCheckerOptions.enabled()) {
+      // 覆盖声明（07 T1.4：段落缺失时相关检查优雅跳过——跳过原因必须可见，不静默）
+      String reason =
+          ReviewRoutingPolicy.crossCheckSkipReason(
+              ctx.depthPlan(), ctx.policy(), crew, crossHistory, crossEvents);
+      contextNotes.add("CrossChecker 未触发：" + reason);
+      ctx.trace().emit("crosscheck", Map.of("triggered", false, "reason", reason));
+    }
+  }
+
+  /**
+   * CrossChecker 派发细节（原 crossCheck 分支原样搬移，从 dispatchSpecialists 拆出以控复杂度）：assumption/sniff 模式判定 →
+   * 材料构建 → notes 合并 → crosscheck 事件（字段与求值顺序不变）→ submitCrossCheck。
+   *
+   * @param ctx 阶段上下文
+   * @param crossHistory 上下游变更史
+   * @param crossEvents 产品事件史
+   * @param futures 任务队列（追加 CrossChecker 任务）
+   * @param contextNotes 覆盖声明（history/events/materials notes 追加）
+   */
+  private void dispatchCrossCheck(
+      StageCtx ctx,
+      CrossCheckHistory crossHistory,
+      CrossCheckEvents crossEvents,
+      List<TaskHandle<DispatchOutcome>> futures,
+      List<String> contextNotes) {
+    boolean assumptionMode =
+        crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.ASSUMPTION)
+            && (!ctx.policy().productContext().isEmpty()
+                || !ctx.policy().knownIncidents().isEmpty()
+                || crossHistory.hasData()
+                || crossEvents.hasData());
+    boolean sniffMode =
+        crossCheckerOptions.modeEnabled(CrossCheckerOptions.Mode.SNIFF)
+            && !ctx.policy().sniffTests().isEmpty();
+    CrossCheckMaterials.Materials materials =
+        CrossCheckMaterials.build(
+            ReviewAgentDispatcher.wholePrFiles(ctx.plan()),
+            assumptionMode ? crossHistory.entries() : List.of(),
+            crossCheckerOptions.historyWeeks(),
+            ctx.policy(),
+            assumptionMode,
+            sniffMode,
+            assumptionMode ? crossEvents.entries() : List.of());
+    contextNotes.addAll(crossHistory.notes());
+    contextNotes.addAll(crossEvents.notes());
+    contextNotes.addAll(materials.notes());
+    Map<String, Object> event = new LinkedHashMap<>();
+    event.put("triggered", true);
+    event.put("modes", ReviewRoutingPolicy.activeModes(assumptionMode, sniffMode));
+    event.put("history_available", crossHistory.available());
+    event.put("history_commits", crossHistory.entries().size());
+    event.put("events_available", crossEvents.available());
+    event.put("events_count", crossEvents.entries().size());
+    event.put("diff_tokens", TokenMath.estimateTokens(materials.diffDigest()));
+    event.put("history_tokens", TokenMath.estimateTokens(materials.historyText()));
+    event.put(
+        "event_tokens",
+        TokenMath.estimateTokens(
+            CrossCheckMaterials.eventsText(
+                assumptionMode ? crossEvents.entries() : List.of(),
+                crossCheckerOptions.historyWeeks())));
+    event.put("context_tokens", TokenMath.estimateTokens(materials.trustedSections()));
+    ctx.trace().emit("crosscheck", event);
+    futures.add(
+        dispatcher.submitCrossCheck(
+            crew.crossChecker(),
+            ctx.plan(),
+            ctx.headFiles(),
+            materials,
+            ctx.prTitle(),
+            ctx.commitMessages(),
+            ctx.runId(),
+            ctx.trace()));
+  }
+
+  /**
+   * STOP 相位的专角色未派发声明（原 else 分支原样搬移）：Test/Convention 未派发声明 + CrossChecker 装配时的未派发声明与
+   * budget-exhausted crosscheck emit。
+   *
+   * @param ctx 阶段上下文（trace 来源）
+   * @param contextNotes 覆盖声明（两条声明追加）
+   */
+  private void noteBudgetSkipped(StageCtx ctx, List<String> contextNotes) {
+    contextNotes.add("run 预算耗尽：Test/Convention 全 PR 级专角色未派发（02§4.4）");
+    if (crossCheckerOptions.enabled() && crew.crossChecker() != null) {
+      contextNotes.add("run 预算耗尽：CrossChecker 未派发（02§4.4）");
+      ctx.trace().emit("crosscheck", Map.of("triggered", false, "reason", "budget-exhausted"));
+    }
+  }
+
+  /**
+   * 终态截断复查（原 `finalPhase.ordinal() >= TRUNCATE` 块原样搬移）：消耗只增不减，最后一批调用跨越 85%/100% 线时截断同样生效； 首次 add
+   * BUDGET_TRUNCATE_85 + emit phase=truncate-final。
+   *
+   * @param ctx 阶段上下文（budget/trace 来源）
+   * @param degradations 降级事件（声明去重）
+   * @return 终态相位是否已达 TRUNCATE
+   */
+  private boolean finalTruncation(StageCtx ctx, List<String> degradations) {
+    if (ctx.budget().phase().ordinal() >= RunBudgetTracker.Phase.TRUNCATE.ordinal()) {
       if (!degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
         degradations.add(Degradations.BUDGET_TRUNCATE_85);
-        trace.emit("budget_check", Map.of("phase", "truncate-final", "ratio", budget.ratio()));
+        ctx.trace()
+            .emit("budget_check", Map.of("phase", "truncate-final", "ratio", ctx.budget().ratio()));
       }
+      return true;
     }
+    return false;
+  }
 
+  /**
+   * 汇聚产出（原主循环后的聚合段原样搬移）：tokens/templateVersions/llmError 汇总 → 失败隔离语义判定（全部代理 LLM 不可得 = run
+   * FAILED；全部执行失败 = ALL_REVIEW_AGENTS_FAILED；部分缺失 = 声明）→ 覆盖声明 → 跨代理精确去重合并（03§4.5；T2.8 汇聚侧）→
+   * StageOutcome。所有字符串原样。
+   *
+   * @param loop 主循环汇聚结果（collected/contextNotes/trimDecisions/sliceNotes/stopped 为活累积容器）
+   * @param ctx 阶段上下文（semanticContext/trace 来源）
+   * @param degradations 降级事件（终态声明追加）
+   * @param truncationReached 截断标志（主循环或终态复查置位）
+   * @return 汇聚产出
+   */
+  private StageOutcome aggregate(
+      LoopResult loop, StageCtx ctx, List<String> degradations, boolean truncationReached) {
+    List<DispatchOutcome> collected = loop.collected();
     List<CandidateFinding> all = new ArrayList<>();
     long tokensIn = 0;
     long tokensOut = 0;
@@ -596,19 +851,22 @@ public final class ReviewStage {
     if (!collected.isEmpty() && failedCount == collected.size() && !llmUnavailable) {
       // 全部代理执行失败（异常/brief 落盘等，非 LLM 不可得）= 无可信评审产出——不得静默 SUCCESS
       degradations.add(Degradations.ALL_REVIEW_AGENTS_FAILED);
-      contextNotes.add("全部 " + collected.size() + " 个评审代理执行失败（失败隔离已吸收，02§4.2），本次无可信评审产出");
+      loop.contextNotes().add("全部 " + collected.size() + " 个评审代理执行失败（失败隔离已吸收，02§4.2），本次无可信评审产出");
     }
     if (unavailableCount > 0 && !llmUnavailable) {
       degradations.add(Degradations.llmUnavailableAgents(unavailableCount));
-      contextNotes.add(unavailableCount + " 个评审代理因 LLM 不可得缺失（失败隔离，02§4.2），其余代理产出照常汇聚");
+      loop.contextNotes().add(unavailableCount + " 个评审代理因 LLM 不可得缺失（失败隔离，02§4.2），其余代理产出照常汇聚");
     }
-    contextNotes.addAll(semanticContext.coverageNotes());
-    contextNotes.addAll(sliceNotes);
+    loop.contextNotes().addAll(ctx.semanticContext().coverageNotes());
+    loop.contextNotes().addAll(loop.sliceNotes());
     // 汇聚：跨代理精确去重合并（03§4.5；T2.8 汇聚侧）
-    List<CandidateFinding> merged = FindingMerger.mergePrecise(all, trace);
+    List<CandidateFinding> merged = FindingMerger.mergePrecise(all, ctx.trace());
     if (merged.size() < all.size()) {
-      contextNotes.add(
-          "跨代理精确去重合并 " + (all.size() - merged.size()) + " 条（同 file/category/±3 行，保留 severity 高者）");
+      loop.contextNotes()
+          .add(
+              "跨代理精确去重合并 "
+                  + (all.size() - merged.size())
+                  + " 条（同 file/category/±3 行，保留 severity 高者）");
     }
     return new StageOutcome(
         merged,
@@ -618,11 +876,131 @@ public final class ReviewStage {
         llmError,
         schemaErrors,
         degradations,
-        contextNotes,
-        trimDecisions,
-        stopped,
+        loop.contextNotes(),
+        loop.trimDecisions(),
+        loop.stopped(),
         truncationReached,
         templateVersions);
+  }
+
+  /**
+   * 阶段级静态上下文（execute 顶部构建一次，phase helper 间传递；组件均为执行期不变量）。
+   *
+   * @param runId run 标识
+   * @param trace trace 写入器
+   * @param plan 分 chunk 规划
+   * @param headFiles head 侧预取全文
+   * @param policy 评审策略（conventions/priority_paths + CrossChecker 产品段）
+   * @param depthPlan 深度计划
+   * @param budget run 级预算账目（调用方持有）
+   * @param prTitle PR 标题
+   * @param commitMessages commit message 拼接
+   * @param policySection 策略渲染段
+   * @param semanticContext 语义上下文（M4e：L2 跨文件切片）
+   */
+  private record StageCtx(
+      String runId,
+      TraceWriter trace,
+      ChunkPlanner.Plan plan,
+      Map<String, FileContent> headFiles,
+      ReviewPolicy policy,
+      DepthPlan depthPlan,
+      RunBudgetTracker budget,
+      String prTitle,
+      String commitMessages,
+      String policySection,
+      SemanticContext semanticContext) {}
+
+  /**
+   * 交叉检查输入的 null 归一结果。
+   *
+   * @param history 上下游变更史（未启用时 {@link CrossCheckHistory#none()}）
+   * @param events 产品事件史（未启用/未命中时 {@link CrossCheckEvents#none()}）
+   */
+  private record CrossInputs(CrossCheckHistory history, CrossCheckEvents events) {}
+
+  /**
+   * chunk 主循环的汇聚结果（列表组件为主循环的活累积容器，聚合段在此基础上继续追加，不走防御拷贝）。
+   *
+   * @param collected 主循环收集的代理产出
+   * @param contextNotes 覆盖声明（含主循环各代理的声明）
+   * @param trimDecisions 裁剪决策
+   * @param sliceNotes chunk 级切片声明去重集（同一句在每 chunk 重复没有信息量）
+   * @param stopped 是否因 100% 预算击穿终止剩余派发
+   * @param truncationReached 主循环内是否触发过 85% 截断档
+   */
+  private record LoopResult(
+      List<DispatchOutcome> collected,
+      List<String> contextNotes,
+      List<String> trimDecisions,
+      LinkedHashSet<String> sliceNotes,
+      boolean stopped,
+      boolean truncationReached) {}
+
+  /**
+   * chunk 主循环的可变运行时（execute 重构引入，替代原裸局部变量组在 phase helper 间的超长参数表；所有组件仅在本类 runChunkLoop 及其 helper
+   * 间读写）。
+   */
+  private static final class ChunkLoop {
+
+    /** 阶段上下文（plan/budget/trace/semanticContext 的读取入口）。 */
+    private final StageCtx ctx;
+
+    /** 降档前的基准视角。 */
+    private final List<BugHunterDefinition.Perspective> basePerspectives;
+
+    /** Security 专角色是否装配。 */
+    private final boolean securityEnabled;
+
+    /** Perf 专角色是否装配（含触发判定）。 */
+    private final boolean perfEnabled;
+
+    /** 降级事件（与调用方共享同一列表，降档声明与代理产出合并写入）。 */
+    private final List<String> degradations;
+
+    /** 在飞任务队列（主循环逐 iteration await 一个）。 */
+    private final List<TaskHandle<DispatchOutcome>> futures = new ArrayList<>();
+
+    /** 已收集的代理产出。 */
+    private final List<DispatchOutcome> collected = new ArrayList<>();
+
+    /** 覆盖声明。 */
+    private final List<String> contextNotes = new ArrayList<>();
+
+    /** 裁剪决策。 */
+    private final List<String> trimDecisions = new ArrayList<>();
+
+    /** chunk 级切片声明去重（同一句在每 chunk 重复没有信息量）。 */
+    private final LinkedHashSet<String> sliceNotes = new LinkedHashSet<>();
+
+    /** 下一个待派发 chunk 下标。 */
+    private int chunkIndex = 0;
+
+    /** 是否已发出 100% stop 声明（仅一次）。 */
+    private boolean stopped = false;
+
+    /** 主循环内是否触发过 85% 截断档。 */
+    private boolean truncationReached = false;
+
+    /**
+     * @param ctx 阶段上下文
+     * @param basePerspectives 降档前的基准视角
+     * @param securityEnabled Security 专角色是否装配
+     * @param perfEnabled Perf 专角色是否装配
+     * @param degradations 降级事件（共享列表）
+     */
+    private ChunkLoop(
+        StageCtx ctx,
+        List<BugHunterDefinition.Perspective> basePerspectives,
+        boolean securityEnabled,
+        boolean perfEnabled,
+        List<String> degradations) {
+      this.ctx = ctx;
+      this.basePerspectives = basePerspectives;
+      this.securityEnabled = securityEnabled;
+      this.perfEnabled = perfEnabled;
+      this.degradations = degradations;
+    }
   }
 
   /**
