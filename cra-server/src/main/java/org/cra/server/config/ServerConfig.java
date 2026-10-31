@@ -62,7 +62,7 @@ import org.springframework.scheduling.support.CronExpression;
  * @param eventHistoryRetryBackoffMillis 重试退避基数（毫秒）
  * @param eventHistoryMaxBytes 事件源单次读取字节上限
  * @param eventHistoryMaxEvents 单次入库事件上限
- * @param runTotalTokens run 级 token 预算（02§4.4，默认 800k）
+ * @param runTotalTokens run 级 token 预算（02§4.4，默认 1.6M）
  * @param reviewLargeDiffLines 大 diff 降档线（review.large-diff-lines / CRA_REVIEW_LARGE_DIFF_LINES，默认
  *     PipelineOptions 基准值 4000）
  * @param reviewHardCapLines 硬上限（review.hard-cap-lines / CRA_REVIEW_HARD_CAP_LINES，默认 16000；须 &gt;

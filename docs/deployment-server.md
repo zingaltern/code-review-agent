@@ -101,7 +101,7 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 | `CRA_SERVER_DRY_RUN` | 否 | `false` | 全程零写（调试） |
 | `CRA_SERVER_RUN_ROOT` | 否 | `.cra/server-runs` | trace/brief 落盘根 |
 | `CRA_SERVER_WORKSPACE` | 否 | `.` | 本地仓库根；无 checkout 时 pre-existing 检测降级声明（05§2.1） |
-| `CRA_SERVER_RUN_TOTAL_TOKENS` | 否 | `800000` | run 级预算（02§4.4） |
+| `CRA_SERVER_RUN_TOTAL_TOKENS` | 否 | `1600000` | run 级预算（02§4.4；2026-10-31 预算翻倍） |
 | `CRA_REVIEW_LARGE_DIFF_LINES` | 否 | `4000` | 大 diff 降档线（05§5 review.*；与 CLI/sweep 共用同一组键） |
 | `CRA_REVIEW_HARD_CAP_LINES` | 否 | `16000` | 硬上限（须大于 `CRA_REVIEW_LARGE_DIFF_LINES`） |
 | `CRA_REVIEW_NIT_BUDGET` | 否 | `3` | nit 预算默认（0 = 禁止 nit） |

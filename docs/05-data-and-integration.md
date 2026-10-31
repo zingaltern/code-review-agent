@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.11（2026-10-31，默认预算翻倍：run 1.6M、单代理 03§6 全部 ×2（降档阈值不变））
 > 文档版本：v1.10（2026-10-31，§5 配置面补全：`CRA_LLM_MAX_CONCURRENCY`（1..64，有效并发 = min(值, 线程池宽度)）与 `CRA_REVIEW_*` 七项（review/sweep/server 共用）；`review.large-diff-lines` / `hard-cap-lines` 示例值同步 4000/16000）
 > 文档版本：v1.9（2026-10-30，02§4.4 评审范围：§3/§5 新增 `--review-tests` / `CRA_REVIEW_TESTS` / `review.include-test-files`（默认 false——测试文件默认不评审））
 > 文档版本：v1.8（2026-10-28，M4e 池内项"语义索引/跨文件上下文"第一版：§5 新增 `semantic_context.*` 配置项与环境变量（ADR-0014；默认关闭））
@@ -524,10 +525,10 @@ cra:
         v1: { model: strong,  template: balanced-review }
         v2: { model: "<异构>", template: refute-oriented }
       important-refuted-spotcheck: 0.20       # 拒真保险丝（03§4.3）
-    budget: { run-total-tokens: 800000, degrade-at: [0.70, 0.85] }   # 2026-10-30：800k（原 500k）；阈值不变（02§4.4）
+    budget: { run-total-tokens: 1600000, degrade-at: [0.70, 0.85] }   # 2026-10-31 预算翻倍（原 800k）；阈值不变（02§4.4）
       # .<role>.input-tokens / .<role>.output-tokens 可覆盖单代理预算（03§6 默认值）：
-      #   bug-hunter 24k/4k、security-reviewer 24k/2k、test-reviewer 16k/4k、convention-reviewer 8k/1k、
-      #   perf-reviewer 16k/1k、cross-checker 16k/4k、verifier 16k/2k、judge 20k/1.5k
+      #   bug-hunter 48k/8k、security-reviewer 48k/4k、test-reviewer 32k/8k、convention-reviewer 16k/2k、
+      #   perf-reviewer 32k/2k、cross-checker 32k/8k、verifier 32k/4k、judge 40k/3k（2026-10-31 预算翻倍）
     semantic-context:              # M4e（ADR-0014）：L2 跨文件切片；默认关闭
       enabled: false               # CRA_SEMANTIC_CONTEXT_ENABLED / --semantic-context
       max-files: 2000              # 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES）
@@ -574,7 +575,7 @@ cra:
 | `CRA_LLM_MAX_CONCURRENCY` | LLM 并发信号量上限（1..64；有效并发 = min(值, cra-core 线程池宽度)，09§6） | `8` |
 | `CRA_AGENTS_BUDGET_<ROLE>_INPUT_TOKENS` / `--<role>-input-tokens` | 单代理输入预算覆盖（03§6 默认值；`<role>` ∈ `bug-hunter`/`security-reviewer`/`test-reviewer`/`convention-reviewer`/`perf-reviewer`/`cross-checker`/`verifier`/`judge`） | 见 03§6 |
 | `CRA_AGENTS_BUDGET_<ROLE>_OUTPUT_TOKENS` / `--<role>-output-tokens` | 单代理输出预算覆盖（未覆盖的维度沿用定义默认；input 必须大于 output） | 见 03§6 |
-| `CRA_SERVER_RUN_TOTAL_TOKENS` / `--run-total-tokens` | run 级 token 预算（02§4.4） | `800000` |
+| `CRA_SERVER_RUN_TOTAL_TOKENS` / `--run-total-tokens` | run 级 token 预算（02§4.4） | `1600000` |
 
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 

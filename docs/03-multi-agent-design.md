@@ -1,5 +1,6 @@
 # 03 · 核心设计：子代理隔离审查与评判
 
+> 文档版本：v1.3.2（2026-10-31，§6 单代理预算翻倍：输入/输出全部 ×2，降档阈值不变）
 > 文档版本：v1.3.1（2026-10-25，响应第四轮评审缺陷 ②③④）
 > **v1.1**：放弃"盲评"改为独立复核；验证者多样性为硬性前提；溯源表诚实化。
 > **v1.2**：反锚定校验降级为 trace 质控信号；抽查确定性抽样。
@@ -245,14 +246,14 @@ for (var e : byFile.entrySet()) {
 
 | 子代理 | 数量/运行 | 模型档位 | 工具 | 输入预算 | 输出预算 | 轮次 |
 |---|---|---|---|---|---|---|
-| BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤24k/chunk | ≤4k（v1.3.2：2k→4k） | 3 |
-| SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤24k/chunk | ≤2k | 3 |
-| TestReviewer | 条件触发 | 标准 | read_file | ≤16k（2026-10-30：12k→16k） | ≤4k（v1.3.2：1k→2k→4k） | 2 |  
-| ConventionReviewer | 条件触发 | 轻 | 无 | ≤8k | ≤1k | 1 |
-| PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤16k/chunk | ≤1k | 2 |
-| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | **≤16k/文件批次**（代码类；context 类与索引在同一预算内裁剪，2026-10-30：12k→16k）；**bug 类调用点索引从 codeContext 预算内预留 ≤1000 token（v1.4.2，ADR-0015 修订）** | **≤2k**（含 refutation 对象；2026-10-30：1.5k→2k） | 2 |
-| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | **≤20k/案件**（分型组装同 verifier；**bug 类 + 调用点索引 ≤500 token**；2026-10-30：16k→20k） | **≤1.5k**（2026-10-30：1k→1.5k） | 2 |
-| **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k；v1.4 事件史） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤16k（diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k） | ≤4k（v1.3.2：1.5k→4k） | 2 |
+| BugHunter | 每视角 1，按 chunk 并行 | 标准 | read_file(scoped) | ≤48k/chunk（2026-10-31 预算翻倍：24k→48k） | ≤8k（2026-10-31 翻倍 4k→8k） | 3 |
+| SecurityReviewer | **按 chunk 并行**（每 chunk 1 实例，聚合合并） | 强 | read_file+grep(scoped) | ≤48k/chunk（2026-10-31 翻倍） | ≤4k（2026-10-31 翻倍） | 3 |
+| TestReviewer | 条件触发 | 标准 | read_file | ≤32k（2026-10-30：12k→16k；2026-10-31 翻倍） | ≤8k（2026-10-31 翻倍 4k→8k） | 2 |  
+| ConventionReviewer | 条件触发 | 轻 | 无 | ≤16k（2026-10-31 翻倍） | ≤2k（2026-10-31 翻倍） | 1 |
+| PerfReviewer | 条件触发，按 chunk | 标准 | read_file | ≤32k/chunk（2026-10-31 翻倍） | ≤2k（2026-10-31 翻倍） | 2 |
+| VerifierAgent | M2:1 / M3:2异构 | 强(M2)；V1强+V2异构(M3) | read_file(scoped+) | **≤32k/文件批次**（代码类；context 类与索引在同一预算内裁剪，2026-10-30：12k→16k；2026-10-31 翻倍 16k→32k）；**bug 类调用点索引从 codeContext 预算内预留 ≤1000 token（v1.4.2，ADR-0015 修订）** | **≤4k**（含 refutation 对象；2026-10-31 翻倍 2k→4k） | 2 |
+| JudgeAgent | 仅仲裁/抽查 | 强 | read_file | **≤40k/案件**（分型组装同 verifier；**bug 类 + 调用点索引 ≤500 token**；2026-10-31 翻倍 20k→40k） | **≤3k**（2026-10-31 翻倍 1.5k→3k） | 2 |
+| **CrossChecker**（v1.3.1 补行；v1.3.2 输出 1.5k→4k；v1.4 事件史） | M4f 触发，1 实例 | 标准 | read_file(scoped) | ≤32k（材料分项不变：diff 精简视图 ~8k + **变更史/事件史合计 ≤4k**（事件优先 ≤2k）+ 产品段 ≤2k；2026-10-31 翻倍 16k→32k） | ≤8k（2026-10-31 翻倍 4k→8k） | 2 |
 
 **v1.2 修正说明**：v1.1 的算术示例只测了 BH/Verifier——按 04§2.2 假设（10 文件 × 250 行），Security 若独享"全 diff + 全部变更文件全文" brief ≈ 55k，超自身预算 2 倍以上，要么静默裁剪（安全角色看不全）要么 DEGRADED。v1.2 起 **Security/Perf 与 BH 同构：chunk 化扇出 + 窗口上下文**，仅对 REVIEW.md `priority_paths` 与安全敏感路径（auth/crypto/secret/依赖清单变更）注入该 chunk 的文件全文（该 chunk 预算内）；**Judge 上下文按案件界定**（finding + 判定证据 + 涉事文件，非全 PR），完整算术见 04§2.2。
 

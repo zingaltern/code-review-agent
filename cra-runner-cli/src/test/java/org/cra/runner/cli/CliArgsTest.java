@@ -24,12 +24,12 @@ class CliArgsTest {
 
   @Test
   void m1ReviewAndBudgetOptionsWithDefaults() {
-    // 05§5 review.* 与 agents.budget：缺省即文档基准值（AI Coding 放宽档：4000/16000/800k）
+    // 05§5 review.* 与 agents.budget：缺省即文档基准值（4000/16000/1.6M；2026-10-31 预算翻倍）
     CraConfig config = CliArgs.parse(baseArgs(), ENV);
     assertThat(config.largeDiffLines()).isEqualTo(4_000);
     assertThat(config.hardCapLines()).isEqualTo(16_000);
     assertThat(config.nitBudget()).isEqualTo(3);
-    assertThat(config.runTotalTokens()).isEqualTo(800_000L);
+    assertThat(config.runTotalTokens()).isEqualTo(1_600_000L);
     assertThat(config.degradeAtFirst()).isEqualTo(0.70);
     assertThat(config.degradeAtSecond()).isEqualTo(0.85);
     assertThat(config.publishUnverified()).isEqualTo("never");
