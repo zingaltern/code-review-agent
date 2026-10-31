@@ -8,7 +8,7 @@ import org.cra.common.git.CommitHistoryEntry;
 
 /**
  * 本地仓库上下文（05§2.1 v1.1）：blame 走本地 jgit——GitHub REST/GraphQL 均无行级 blame 端点； CI workflow 本就 checkout
- * 仓库，本地模式天然有仓库。M0 仅有接口（jgit blame 随 T1.7 落地）。
+ * 仓库，本地模式天然有仓库。{@code .git} 为目录（普通 clone）或文件（git worktree / submodule）均视为可得。
  */
 public interface LocalRepoContext {
 
