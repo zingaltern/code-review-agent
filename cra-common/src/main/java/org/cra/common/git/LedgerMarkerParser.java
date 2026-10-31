@@ -130,11 +130,11 @@ public final class LedgerMarkerParser {
     String trimmed = body.stripTrailing();
     int endIndex = endMarkerIndex(trimmed, starts);
     // 末位之外的 cra: 标记全部计可疑（规则 1：正文中间一律忽略）
-    for (int start : starts) {
-      if (start != endIndex) {
-        suspects.add(SuspectReason.MID_BODY);
-      }
-    }
+    suspects.addAll(
+        starts.stream()
+            .filter(start -> start != endIndex)
+            .map(start -> SuspectReason.MID_BODY)
+            .toList());
     if (endIndex < 0) {
       return new ParseOutcome(Optional.empty(), suspects);
     }

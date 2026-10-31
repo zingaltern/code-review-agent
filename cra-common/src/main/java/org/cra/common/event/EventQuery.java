@@ -6,6 +6,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 事件史检索条件（ADR-0012；{@link EventHistoryQuery} 的入参）。
@@ -78,25 +79,23 @@ public record EventQuery(
     if (refs == null || refs.isEmpty()) {
       return List.of();
     }
-    Set<String> out = new LinkedHashSet<>();
-    for (String ref : refs) {
-      if (ref != null && !ref.isBlank()) {
-        out.add(ref.strip().toLowerCase(Locale.ROOT));
-      }
-    }
-    return List.copyOf(out);
+    return refs.stream()
+        .filter(ref -> ref != null && !ref.isBlank())
+        .map(ref -> ref.strip().toLowerCase(Locale.ROOT))
+        .collect(
+            Collectors.collectingAndThen(
+                Collectors.toCollection(LinkedHashSet::new), List::copyOf));
   }
 
   private static List<String> normalizeKeywords(List<String> keywords) {
     if (keywords == null || keywords.isEmpty()) {
       return List.of();
     }
-    Set<String> out = new LinkedHashSet<>();
-    for (String keyword : keywords) {
-      if (keyword != null && !keyword.isBlank()) {
-        out.add(keyword.strip());
-      }
-    }
-    return List.copyOf(out);
+    return keywords.stream()
+        .filter(keyword -> keyword != null && !keyword.isBlank())
+        .map(String::strip)
+        .collect(
+            Collectors.collectingAndThen(
+                Collectors.toCollection(LinkedHashSet::new), List::copyOf));
   }
 }
