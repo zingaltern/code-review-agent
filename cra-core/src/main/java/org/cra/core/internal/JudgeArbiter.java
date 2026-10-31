@@ -43,9 +43,7 @@ final class JudgeArbiter {
    */
   Judgement arbitrate(JudgeCaseInput input, String runId, String findingId) {
     AgentBrief brief = judge.buildBrief(input);
-    // 位掩码取正（& 0x7fffffff）：Math.abs(Integer.MIN_VALUE) 仍为负，会生成 "case--…" 文件名
-    var persisted =
-        trace.persistBrief(brief, "case-" + (findingId.hashCode() & 0x7fffffff) % 100000);
+    var persisted = trace.persistBrief(brief, briefSlug(findingId));
     trace.emit(
         "judge_start",
         Map.of(
@@ -96,6 +94,11 @@ final class JudgeArbiter {
         run.tokensIn(),
         run.tokensOut(),
         run.model());
+  }
+
+  /** brief 文件名 slug（08§5 直接单测）：位掩码取正——Math.abs 对 Integer.MIN_VALUE 仍为负，会生成 "case--…"。 */
+  static String briefSlug(String findingId) {
+    return "case-" + (findingId.hashCode() & 0x7fffffff) % 100000;
   }
 
   /** 情形说明文案（可信内容，进 judge brief）。 */
