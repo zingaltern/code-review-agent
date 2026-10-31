@@ -650,7 +650,7 @@ class GitHubHttpAdapterWireMockTest {
   void postReviewWithoutReviewIdReturnsEmptyReviewId() {
     wm.stubFor(
         post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
-            .willReturn(okJson("{\"comments\":[{\"id\":8001}]}")));
+            .willReturn(okJson("{\"id\":null,\"comments\":[{\"id\":8001}]}")));
     wm.stubFor(
         post(urlEqualTo("/repos/o/r/issues/7/comments")).willReturn(okJson("{\"id\":9500}")));
 
@@ -681,6 +681,53 @@ class GitHubHttpAdapterWireMockTest {
     adapter.fetchDiff(REPO, "base1", "head2");
 
     assertThat(sleeps).containsExactly(60_000L);
+  }
+
+  @Test
+  void listPullRequestsFallsBackToEpochForMissingUpdatedAt() {
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},\"merge_commit_sha\":null}]")));
+
+    assertThat(adapter.listPullRequests(REPO, null))
+        .singleElement()
+        .satisfies(pr -> assertThat(pr.updatedAt()).isEqualTo(Instant.EPOCH));
+  }
+
+  @Test
+  void listPullRequestsAllowsExactlyTenThousandAndProbesNextPage() {
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page="
+                      + page))
+              .willReturn(okJson(pullPage(page))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=101"))
+            .willReturn(okJson("[]")));
+
+    assertThat(adapter.listPullRequests(REPO, null)).hasSize(10_000);
+  }
+
+  private static String pullPage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"number\":")
+          .append(page * 1_000 + i)
+          .append(",\"state\":\"closed\",\"head\":{\"sha\":\"h\"},")
+          .append("\"base\":{\"sha\":\"b\"},\"merge_commit_sha\":null,")
+          .append("\"updated_at\":\"2026-10-24T00:00:00Z\"}");
+    }
+    return sb.append(']').toString();
   }
 
   private static String commentPage(int page) {

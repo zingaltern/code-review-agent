@@ -776,6 +776,29 @@ class GitLabHttpAdapterWireMockTest {
     assertThat(sleeps).containsExactly(60_000L);
   }
 
+  @Test
+  void listPullRequestsAllowsExactlyTenThousandAndProbesNextPage() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"username\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  PROJECT
+                      + "/merge_requests?state=all&order_by=updated_at&sort=desc"
+                      + "&per_page=100&page="
+                      + page))
+              .willReturn(
+                  okJson(mrPage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(
+                PROJECT
+                    + "/merge_requests?state=all&order_by=updated_at&sort=desc"
+                    + "&per_page=100&page=101"))
+            .willReturn(okJson("[]")));
+
+    assertThat(adapter.listPullRequests(REPO, null)).hasSize(10_000);
+  }
+
   private static String mrPage(int page) {
     StringBuilder sb = new StringBuilder("[");
     for (int i = 0; i < 100; i++) {

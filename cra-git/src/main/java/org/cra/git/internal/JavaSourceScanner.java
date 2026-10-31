@@ -508,13 +508,17 @@ final class JavaSourceScanner {
       out.add(field(path, first, owner, sourceLines));
       return i;
     }
-    if (next < tokens.size()
-        && "{".equals(tokens.get(next).text())
-        && owner != null
-        && owner.equals(first.text())) {
-      // record 紧凑构造器：TypeName { ... }
-      out.add(method(path, first, owner, sourceLines));
-      return i;
+    if (next < tokens.size() && "{".equals(tokens.get(next).text())) {
+      if (owner != null && owner.equals(first.text())) {
+        // record 紧凑构造器：TypeName { ... }
+        out.add(method(path, first, owner, sourceLines));
+        return i;
+      }
+      if (ownerIsEnum) {
+        // 带类体、无实参的 enum 常量（A { ... }）
+        out.add(field(path, first, owner, sourceLines));
+        return i;
+      }
     }
     int afterType = parseTypeRef(tokens, i);
     if (afterType <= i

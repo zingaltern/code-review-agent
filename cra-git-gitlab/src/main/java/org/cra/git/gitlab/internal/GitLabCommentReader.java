@@ -137,7 +137,10 @@ final class GitLabCommentReader implements CommentSource {
       boolean reachedOlder = false;
       for (JsonNode issue : root) {
         Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && (updated == null || updated.isBefore(since))) {
+        if (since != null && updated == null) {
+          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        }
+        if (since != null && updated.isBefore(since)) {
           reachedOlder = true;
           continue;
         }
@@ -190,7 +193,10 @@ final class GitLabCommentReader implements CommentSource {
       boolean reachedOlder = false;
       for (JsonNode mr : root) {
         Instant updated = DispositionSupport.instantOrNull(mr.path("updated_at"));
-        if (since != null && (updated == null || updated.isBefore(since))) {
+        if (since != null && updated == null) {
+          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        }
+        if (since != null && updated.isBefore(since)) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
           continue;

@@ -175,6 +175,30 @@ class JavaSourceScannerTest {
   }
 
   @Test
+  void enumConstantsWithClassBodyAreExtracted() {
+    String source =
+        """
+        package demo;
+
+        enum Flag {
+          ON {
+            void apply() {}
+          },
+          OFF;
+        }
+        """;
+
+    JavaSourceScanner.FileScan scan = JavaSourceScanner.scan("Flag.java", source);
+    List<String> fields =
+        scan.definitions().stream()
+            .filter(d -> d.kind() == SymbolKind.FIELD)
+            .map(SymbolDefinition::name)
+            .toList();
+
+    assertThat(fields).contains("ON", "OFF");
+  }
+
+  @Test
   void contextualKeywordsRemainUsableAsMethodNames() {
     // module-info 的上下文关键字（open/to/with/uses…）不是普通源码的保留字
     String source =

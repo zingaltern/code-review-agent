@@ -210,7 +210,10 @@ final class GitHubCommentReader implements CommentSource {
           continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
         }
         Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && (updated == null || updated.isBefore(since))) {
+        if (since != null && updated == null) {
+          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        }
+        if (since != null && updated.isBefore(since)) {
           reachedOlder = true;
           continue;
         }
@@ -271,7 +274,10 @@ final class GitHubCommentReader implements CommentSource {
       boolean reachedOlder = false;
       for (JsonNode pr : root) {
         Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
-        if (since != null && (updated == null || updated.isBefore(since))) {
+        if (since != null && updated == null) {
+          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        }
+        if (since != null && updated.isBefore(since)) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
           continue;
@@ -282,7 +288,7 @@ final class GitHubCommentReader implements CommentSource {
                 pr.path("head").path("sha").asText(""),
                 pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
                 pr.path("state").asText(PullRequestRef.STATE_CLOSED),
-                updated,
+                updated == null ? Instant.EPOCH : updated,
                 DispositionSupport.instantOrNull(pr.path("merged_at")),
                 pr.path("base").path("sha").asText(null)));
       }

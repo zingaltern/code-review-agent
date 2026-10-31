@@ -200,7 +200,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     for (JsonNode c : response.path("comments")) {
       ids.add(c.path("id").asLong(0));
     }
-    return new PostedReview(response.path("id").asText(), ids);
+    JsonNode id = response.path("id");
+    String reviewId = id.isMissingNode() || id.isNull() ? "" : id.asText("");
+    return new PostedReview(reviewId, ids);
   }
 
   private void perItemFallback(PostReviewCommand cmd, List<ReviewItemResult> items) {
