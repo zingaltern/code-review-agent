@@ -6,8 +6,8 @@ import java.util.Objects;
 
 /**
  * BugHunter 视角化评审子代理定义（T2.2，03§2.2 视角隔离：同角色多实例用不同视角系统提示词； 04§4.1 模板骨架）。纯定义：模板装载 + brief 组装；LLM 循环在
- * cra-core （{@code AgentRunner} 隔离运行时）。预算与工具对齐 03§6 速查表 BugHunter 行（≤24k 输入 / ≤2k 输出 / 3 轮 /
- * read_file(scoped)）。
+ * cra-core （{@code AgentRunner} 隔离运行时）。预算与工具对齐 03§6 速查表 BugHunter 行（≤24k 输入 / v1.3.2 起 ≤4k 输出 / 3 轮
+ * / read_file(scoped)）。
  */
 public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
 
