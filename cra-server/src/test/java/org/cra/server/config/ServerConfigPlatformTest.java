@@ -93,17 +93,16 @@ class ServerConfigPlatformTest {
     MockEnvironment env = baseEnv();
     env.setProperty("CRA_LLM_RPM", "standard=60,mega=10");
     ServerConfig config = ServerConfig.from(env);
-    assertThatThrownBy(() -> config.parsedRpm(org.cra.llm.api.LlmGatewayConfig.defaultRpm()))
+    var defaultRpm = org.cra.llm.api.LlmGatewayConfig.defaultRpm();
+    assertThatThrownBy(() -> config.parsedRpm(defaultRpm))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_RPM 条目非法")
         .hasMessageContaining("mega=10");
 
     MockEnvironment malformed = baseEnv();
     malformed.setProperty("CRA_LLM_RPM", "standard");
-    assertThatThrownBy(
-            () ->
-                ServerConfig.from(malformed)
-                    .parsedRpm(org.cra.llm.api.LlmGatewayConfig.defaultRpm()))
+    ServerConfig malformedConfig = ServerConfig.from(malformed);
+    assertThatThrownBy(() -> malformedConfig.parsedRpm(defaultRpm))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_RPM 条目形如 standard=60: standard");
   }
@@ -113,14 +112,16 @@ class ServerConfigPlatformTest {
     // R4：温度/降级链解析收敛到 LlmParsing，server 侧 key 名前缀保留
     MockEnvironment outOfRange = baseEnv();
     outOfRange.setProperty("CRA_LLM_TEMPERATURE", "2.5");
-    assertThatThrownBy(() -> ServerConfig.from(outOfRange).parsedTemperature())
+    ServerConfig outOfRangeConfig = ServerConfig.from(outOfRange);
+    assertThatThrownBy(() -> outOfRangeConfig.parsedTemperature())
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_TEMPERATURE 非法（0.0–2.0）: 2.5");
     assertThat(ServerConfig.from(baseEnv()).parsedTemperature()).isNull();
 
     MockEnvironment badChain = baseEnv();
     badChain.setProperty("CRA_LLM_FALLBACK_CHAIN", "standard,ultra");
-    assertThatThrownBy(() -> ServerConfig.from(badChain).parsedFallbackChain())
+    ServerConfig badChainConfig = ServerConfig.from(badChain);
+    assertThatThrownBy(() -> badChainConfig.parsedFallbackChain())
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_FALLBACK_CHAIN 档位非法: ultra");
   }

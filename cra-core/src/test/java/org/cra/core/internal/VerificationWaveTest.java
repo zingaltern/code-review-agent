@@ -120,7 +120,9 @@ class VerificationWaveTest {
       public AgentBrief buildBrief(VerificationBatchInput input) {
         if (input.file().contains("Slow")) {
           try {
-            Thread.sleep(60_000);
+            // 阻塞至被超时机制中断（上限 60s，语义与 sleep 相同但不空转固定时长）
+            new java.util.concurrent.CountDownLatch(1)
+                .await(60, java.util.concurrent.TimeUnit.SECONDS);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);

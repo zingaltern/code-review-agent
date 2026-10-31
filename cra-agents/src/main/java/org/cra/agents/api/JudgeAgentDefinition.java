@@ -13,7 +13,7 @@ import java.util.Objects;
 public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 
   /** 仲裁者角色（kebab-case，05§1.1）。 */
-  public static final AgentRole ROLE = new AgentRole("judge", "终裁仲裁员");
+  public static final AgentRole AGENT_ROLE = new AgentRole("judge", "终裁仲裁员");
 
   private static final String TEMPLATE = "prompts/judge/arbitrate.md";
 
@@ -38,7 +38,7 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 
   @Override
   public AgentRole role() {
-    return ROLE;
+    return AGENT_ROLE;
   }
 
   @Override
@@ -60,7 +60,7 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
                 "followup_section",
                 ""));
     return TemplateSupport.briefOf(
-        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
+        templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget(), modelTier());
   }
 
   @Override

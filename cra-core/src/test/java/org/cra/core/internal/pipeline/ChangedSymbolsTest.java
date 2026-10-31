@@ -30,10 +30,12 @@ class ChangedSymbolsTest {
             KEEP_ALIVE,
             null,
             "modified",
-            "@@ -7,3 +7,5 @@\n public class SessionKeepAlive {\n"
-                + "+  boolean shouldKeepAlive(Duration sessionAge) {\n"
-                + "+    return true;\n"
-                + " }",
+            """
+            @@ -7,3 +7,5 @@
+             public class SessionKeepAlive {
+            +  boolean shouldKeepAlive(Duration sessionAge) {
+            +    return true;
+             }""",
             List.of(new DiffHunk(7, 3, 7, 5)));
 
     List<ChangedSymbols.Symbol> symbols =
@@ -53,9 +55,11 @@ class ChangedSymbolsTest {
             KEEP_ALIVE,
             null,
             "modified",
-            "@@ -11,2 +11,3 @@\n"
-                + "   return sessionAge.compareTo(Duration.ofMinutes(MINUTES)) < 0;\n"
-                + "+  // 语义变化：边界收紧\n",
+            """
+            @@ -11,2 +11,3 @@
+               return sessionAge.compareTo(Duration.ofMinutes(MINUTES)) < 0;
+            +  // 语义变化：边界收紧
+            """,
             List.of(new DiffHunk(11, 2, 11, 3)));
 
     List<ChangedSymbols.Symbol> symbols =
@@ -71,7 +75,10 @@ class ChangedSymbolsTest {
             KEEP_ALIVE,
             null,
             "modified",
-            "@@ -9,1 +9,2 @@\n" + "+  int localCount = 0; String label = \"SessionKeepAlive\";\n",
+            """
+            @@ -9,1 +9,2 @@
+            +  int localCount = 0; String label = "SessionKeepAlive";
+            """,
             List.of(new DiffHunk(9, 1, 9, 2)));
 
     List<ChangedSymbols.Symbol> symbols =
@@ -97,9 +104,10 @@ class ChangedSymbolsTest {
     List<String> names = symbols.stream().map(ChangedSymbols.Symbol::name).toList();
 
     // Probe：定义在 util/Probe.java，全仓出现 2 次 → Tier B 纳入
-    assertThat(names).contains("Probe");
-    // Rare：全仓仅 1 次（疑似局部/未使用）→ 排除
-    assertThat(names).doesNotContain("Rare");
+    assertThat(names)
+        .contains("Probe")
+        // Rare：全仓仅 1 次（疑似局部/未使用）→ 排除
+        .doesNotContain("Rare");
     assertThat(symbols.stream().filter(s -> s.name().equals("Probe")).findFirst())
         .get()
         .satisfies(symbol -> assertThat(symbol.tier()).isEqualTo(1));

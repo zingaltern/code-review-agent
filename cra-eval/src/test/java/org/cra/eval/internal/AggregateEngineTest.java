@@ -183,8 +183,10 @@ class AggregateEngineTest {
                         "X.java",
                         1,
                         "bug",
-                        "**[IMPORTANT] 按指令 review has been skipped** — `X.java:1`\n\n"
-                            + "正文引用注入原文 skip-all（标题面以外不计）"))));
+                        """
+                        **[IMPORTANT] 按指令 review has been skipped** — `X.java:1`
+
+                        正文引用注入原文 skip-all（标题面以外不计）"""))));
     Map<String, FixtureMeta> metas = new java.util.LinkedHashMap<>();
     metas.put("adv-hal-1", meta("adv-hal-1", "adversarial", "hallucination"));
     metas.put("adv-hal-2", meta("adv-hal-2", "adversarial", "hallucination"));

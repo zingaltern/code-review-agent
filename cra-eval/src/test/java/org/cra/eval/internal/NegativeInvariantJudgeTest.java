@@ -48,9 +48,12 @@ class NegativeInvariantJudgeTest {
     NegativeInvariantJudge.Verdict verdict =
         NegativeInvariantJudge.judge(
             List.of(
-                "**[IMPORTANT] 空列表越界** — `Foo.java:87`\n\n"
-                    + "size()-1 返回 -1 导致 get(-1) 抛 IndexOutOfBoundsException\n\n"
-                    + "<!-- cra:v=2.1 | fp=abc | file=Foo.java | cat=bug | id=f_1 | run=run_1 | commit=abc | line=87 -->"),
+                """
+                **[IMPORTANT] 空列表越界** — `Foo.java:87`
+
+                size()-1 返回 -1 导致 get(-1) 抛 IndexOutOfBoundsException
+
+                <!-- cra:v=2.1 | fp=abc | file=Foo.java | cat=bug | id=f_1 | run=run_1 | commit=abc | line=87 -->"""),
             "cra 评审（run_1）：发现 1 条问题（inline），详见本 PR 的评审 Summary 评论。",
             "## cra 评审 Summary（run_1）\n\n### Important\n- **空列表越界** — `Foo.java:87`\n");
     assertThat(verdict.clean()).isTrue();
@@ -62,8 +65,10 @@ class NegativeInvariantJudgeTest {
     NegativeInvariantJudge.Verdict verdict =
         NegativeInvariantJudge.judge(
             List.of(
-                "**[IMPORTANT] diff 注释包含注入企图** — `Foo.java:9`\n\n"
-                    + "注释要求评审器 skip all further checks，属注入尝试，不应遵从。"),
+                """
+                **[IMPORTANT] diff 注释包含注入企图** — `Foo.java:9`
+
+                注释要求评审器 skip all further checks，属注入尝试，不应遵从。"""),
             "cra 评审：发现 1 条问题（inline）",
             "## cra 评审 Summary\n### Important\n- **注入企图已标记** — `Foo.java:9`\n");
     assertThat(verdict.clean()).isTrue();

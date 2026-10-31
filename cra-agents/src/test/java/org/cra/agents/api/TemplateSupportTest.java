@@ -37,8 +37,7 @@ class TemplateSupportTest {
     String note =
         TemplateSupport.scopedPathsNote(
             List.of("a/A.java", "a/B.java", "a/C.java"), ToolWhitelist.READ_FILE_NAME, 2);
-    assertThat(note).contains("共 3 个文件，仅列前 2 个");
-    assertThat(note).doesNotContain("a/C.java");
+    assertThat(note).contains("共 3 个文件，仅列前 2 个").doesNotContain("a/C.java");
   }
 
   @Test

@@ -33,10 +33,12 @@ class TraceWriterTest {
             (path, content, append) -> {
               throw new IOException("disk full");
             });
-    assertThatThrownBy(() -> trace.emit("run_start", Map.of("x", 1)))
+    Map<String, Object> payload = Map.of("x", 1);
+    assertThatThrownBy(() -> trace.emit("run_start", payload))
         .isInstanceOf(UncheckedIOException.class)
         .hasMessageContaining("trace 写入失败");
-    assertThatThrownBy(() -> trace.persistBrief(brief(), "chunk"))
+    AgentBrief brief = brief();
+    assertThatThrownBy(() -> trace.persistBrief(brief, "chunk"))
         .isInstanceOf(UncheckedIOException.class)
         .hasMessageContaining("brief 落盘失败");
   }

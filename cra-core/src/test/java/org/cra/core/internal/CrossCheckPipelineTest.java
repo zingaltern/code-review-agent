@@ -2,8 +2,15 @@ package org.cra.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,7 +53,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 
 /**
  * M4f-lite 验收（07§5）：fixture = diff 本身无缺陷 + REVIEW.md Known incidents 含六周前定制条目 + 上下游路径含相关 commit（真实
@@ -133,22 +139,21 @@ class CrossCheckPipelineTest {
   @BeforeEach
   void setUp() throws Exception {
     initFixtureRepo();
-    adapter = Mockito.mock(GitPlatformAdapter.class);
-    ledger = Mockito.mock(ReviewLedger.class);
+    adapter = mock(GitPlatformAdapter.class);
+    ledger = mock(ReviewLedger.class);
     scripted = new ScriptedGateway();
     eventHistoryQuery = null;
-    Mockito.when(ledger.findCompletion(7, headSha)).thenReturn(Optional.empty());
-    Mockito.when(ledger.findCompletion(Mockito.anyInt(), Mockito.anyString()))
-        .thenReturn(Optional.empty());
-    Mockito.when(ledger.publishedFindings(Mockito.anyInt())).thenReturn(List.of());
-    Mockito.when(ledger.completedRuns(Mockito.anyInt())).thenReturn(List.of());
+    when(ledger.findCompletion(7, headSha)).thenReturn(Optional.empty());
+    when(ledger.findCompletion(anyInt(), anyString())).thenReturn(Optional.empty());
+    when(ledger.publishedFindings(anyInt())).thenReturn(List.of());
+    when(ledger.completedRuns(anyInt())).thenReturn(List.of());
     bridgeKeyedLedgerToIntStubs();
-    Mockito.when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
-    Mockito.when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
+    when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
+    when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenReturn(FileContent.ofText("REVIEW.md", REVIEW_MD));
-    Mockito.when(adapter.readFile(any(), anyString(), eq(FILE)))
+    when(adapter.readFile(any(), anyString(), eq(FILE)))
         .thenReturn(FileContent.ofText(FILE, FILE_CONTENT));
-    Mockito.when(adapter.postReview(any()))
+    when(adapter.postReview(any()))
         .thenAnswer(
             inv -> {
               PostReviewCommand cmd = inv.getArgument(0);
@@ -185,7 +190,7 @@ class CrossCheckPipelineTest {
     assertThat(result.stats().findingsPublished()).isEqualTo(1);
 
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     String body = captor.getValue().inlineComments().get(0).body();
     assertThat(body)
         .contains("[IMPORTANT]") // 05§1.1：context 默认 important（脚本给 nit，schema 归一）
@@ -201,9 +206,9 @@ class CrossCheckPipelineTest {
         .contains(oldSha.substring(0, 7))
         .contains("INC-42")
         .contains("超时/重试类参数不得超过上游服务超时的 80%")
-        .contains("+  boolean shouldKeepAlive");
-    // 本 PR 自身 commit 被排除（不把变更本身当外部证据）：历史段只命中六周前那 1 条
-    assertThat(crossPrompt).contains("近 8 周内上下游路径集的 commit（共 1 条");
+        .contains("+  boolean shouldKeepAlive")
+        // 本 PR 自身 commit 被排除（不把变更本身当外部证据）：历史段只命中六周前那 1 条
+        .contains("近 8 周内上下游路径集的 commit（共 1 条");
 
     // 验证分型组装：被引 commit patch（旧路径解析）+ REVIEW.md 条目注入 verifier brief
     String verifierBrief = scripted.verifierCalls.get(0).userPrompt();
@@ -331,7 +336,7 @@ class CrossCheckPipelineTest {
     assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
     assertThat(result.stats().confirmed()).isEqualTo(1);
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     String body = captor.getValue().inlineComments().get(0).body();
     assertThat(body).contains("cat=context").contains("event EVT-42");
 
@@ -611,45 +616,34 @@ class CrossCheckPipelineTest {
    * 方法，必须显式桥接）。
    */
   private void bridgeKeyedLedgerToIntStubs() {
-    org.mockito.Mockito.when(
-            ledger.findCompletion(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.findCompletion(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               return ledger.findCompletion(k.prNumber(), k.commitSha());
             });
-    org.mockito.Mockito.when(
-            ledger.publishedFindings(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.publishedFindings(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.publishedFindings(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.completedRuns(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.completedRuns(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.completedRuns(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.suspectMarkerCount(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.suspectMarkerCount(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.suspectMarkerCount(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.comment(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-                org.mockito.ArgumentMatchers.anyLong()))
+    when(ledger.comment(any(org.cra.common.git.ReviewKey.class), anyLong()))
         .thenAnswer(
             inv ->
                 ledger.comment(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber(),
                     inv.getArgument(1)));
-    org.mockito.Mockito.doAnswer(
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordRunCompletion(k.prNumber(), inv.getArgument(1));
@@ -657,9 +651,8 @@ class CrossCheckPipelineTest {
             })
         .when(ledger)
         .recordRunCompletion(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerRunMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class), any(org.cra.common.git.LedgerRunMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordPublishedFinding(k.prNumber(), inv.getArgument(1));
@@ -667,18 +660,15 @@ class CrossCheckPipelineTest {
             })
         .when(ledger)
         .recordPublishedFinding(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerFindingMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class),
+            any(org.cra.common.git.LedgerFindingMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordTemplateVersions(k.prNumber(), inv.getArgument(1), inv.getArgument(2));
               return null;
             })
         .when(ledger)
-        .recordTemplateVersions(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyMap());
+        .recordTemplateVersions(any(org.cra.common.git.ReviewKey.class), anyString(), anyMap());
   }
 }

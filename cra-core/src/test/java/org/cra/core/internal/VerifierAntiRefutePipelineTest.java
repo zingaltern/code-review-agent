@@ -1,6 +1,15 @@
 package org.cra.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,7 +37,6 @@ import org.cra.store.api.ReviewLedger;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mockito;
 
 /**
  * 验证层反证纪律端到端（ADR-0015）：脚本化 LLM fixture 复现 JacksonCore-8 形态—— 复审员把"结论把变更定位在 X 而非 Y"（引述/锚点不符）当作推翻 →
@@ -137,25 +145,22 @@ class VerifierAntiRefutePipelineTest {
 
   @BeforeEach
   void setUp() {
-    adapter = Mockito.mock(GitPlatformAdapter.class);
-    ledger = Mockito.mock(ReviewLedger.class);
+    adapter = mock(GitPlatformAdapter.class);
+    ledger = mock(ReviewLedger.class);
     scripted = new ScriptedGateway();
-    Mockito.when(ledger.findCompletion(Mockito.anyInt(), Mockito.anyString()))
-        .thenReturn(Optional.empty());
-    Mockito.when(ledger.publishedFindings(Mockito.anyInt())).thenReturn(List.of());
-    Mockito.when(ledger.completedRuns(Mockito.anyInt())).thenReturn(List.of());
+    when(ledger.findCompletion(anyInt(), anyString())).thenReturn(Optional.empty());
+    when(ledger.publishedFindings(anyInt())).thenReturn(List.of());
+    when(ledger.completedRuns(anyInt())).thenReturn(List.of());
     bridgeKeyedLedgerToIntStubs();
-    Mockito.when(adapter.fetchDiff(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
-        .thenReturn(diff());
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.eq(FILE)))
+    when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
+    when(adapter.readFile(any(), anyString(), eq(FILE)))
         .thenReturn(FileContent.ofText(FILE, TEXT_BUFFER));
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.eq(PEER)))
+    when(adapter.readFile(any(), anyString(), eq(PEER)))
         .thenReturn(FileContent.ofText(PEER, PEER_CONTENT));
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.eq("REVIEW.md")))
+    when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenReturn(FileContent.ofText("REVIEW.md", "# Review Policy: demo\n"));
-    Mockito.when(adapter.listFiles(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
-        .thenReturn(List.of(FILE, PEER));
-    Mockito.when(adapter.postReview(Mockito.any()))
+    when(adapter.listFiles(any(), anyString(), anyString())).thenReturn(List.of(FILE, PEER));
+    when(adapter.postReview(any()))
         .thenAnswer(
             inv -> {
               PostReviewCommand cmd = inv.getArgument(0);
@@ -205,8 +210,8 @@ class VerifierAntiRefutePipelineTest {
     assertThat(trace)
         .contains("\"event\":\"refute_evidence_check\"")
         .contains("\"reason\":\"CITATION_MISMATCH\"")
-        .contains("\"downgraded\":true");
-    assertThat(trace).contains("\"refute_downgraded\":1");
+        .contains("\"downgraded\":true")
+        .contains("\"refute_downgraded\":1");
 
     // Judge 收到的是降级后的判定文本 + 系统校验说明（不是原始 REFUTED 的理由孤证）
     String judgeBrief = scripted.judgeCalls.get(0).userPrompt();
@@ -240,8 +245,10 @@ class VerifierAntiRefutePipelineTest {
     assertThat(result.stats().rejected()).isEqualTo(1);
     assertThat(result.stats().findingsPublished()).isZero();
     String trace = traceOf(result);
-    assertThat(trace).contains("\"event\":\"refute_evidence_check\"").contains("\"status\":\"OK\"");
-    assertThat(trace).doesNotContain("\"downgraded\":true");
+    assertThat(trace)
+        .contains("\"event\":\"refute_evidence_check\"")
+        .contains("\"status\":\"OK\"")
+        .doesNotContain("\"downgraded\":true");
   }
 
   @Test
@@ -273,8 +280,8 @@ class VerifierAntiRefutePipelineTest {
         .contains("\"status\":\"DOWNGRADE\"")
         .contains("\"reason\":\"CITATION_MISMATCH\"")
         .contains("\"downgraded\":true")
-        .contains("\"verdict\":\"INSUFFICIENT_EVIDENCE\"");
-    assertThat(trace).contains("\"refute_downgraded\":1");
+        .contains("\"verdict\":\"INSUFFICIENT_EVIDENCE\"")
+        .contains("\"refute_downgraded\":1");
 
     // Judge 看到的是降级后的判定 + 系统校验说明（test 类主张进入仲裁，而非被静默丢弃）
     String judgeBrief = scripted.judgeCalls.get(0).userPrompt();
@@ -304,8 +311,10 @@ class VerifierAntiRefutePipelineTest {
     assertThat(result.stats().rejected()).isEqualTo(1);
     assertThat(result.stats().findingsPublished()).isZero();
     String trace = traceOf(result);
-    assertThat(trace).contains("\"event\":\"refute_evidence_check\"").contains("\"status\":\"OK\"");
-    assertThat(trace).doesNotContain("\"downgraded\":true");
+    assertThat(trace)
+        .contains("\"event\":\"refute_evidence_check\"")
+        .contains("\"status\":\"OK\"")
+        .doesNotContain("\"downgraded\":true");
   }
 
   @Test
@@ -398,45 +407,34 @@ class VerifierAntiRefutePipelineTest {
 
   /** 键控扩展（05§1.3）兼容桩（与 VerificationPromotionTest 同构）。 */
   private void bridgeKeyedLedgerToIntStubs() {
-    org.mockito.Mockito.when(
-            ledger.findCompletion(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.findCompletion(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               return ledger.findCompletion(k.prNumber(), k.commitSha());
             });
-    org.mockito.Mockito.when(
-            ledger.publishedFindings(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.publishedFindings(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.publishedFindings(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.completedRuns(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.completedRuns(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.completedRuns(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.suspectMarkerCount(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.suspectMarkerCount(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.suspectMarkerCount(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.comment(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-                org.mockito.ArgumentMatchers.anyLong()))
+    when(ledger.comment(any(org.cra.common.git.ReviewKey.class), anyLong()))
         .thenAnswer(
             inv ->
                 ledger.comment(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber(),
                     inv.getArgument(1)));
-    org.mockito.Mockito.doAnswer(
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordRunCompletion(k.prNumber(), inv.getArgument(1));
@@ -444,9 +442,8 @@ class VerifierAntiRefutePipelineTest {
             })
         .when(ledger)
         .recordRunCompletion(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerRunMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class), any(org.cra.common.git.LedgerRunMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordPublishedFinding(k.prNumber(), inv.getArgument(1));
@@ -454,18 +451,15 @@ class VerifierAntiRefutePipelineTest {
             })
         .when(ledger)
         .recordPublishedFinding(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerFindingMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class),
+            any(org.cra.common.git.LedgerFindingMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordTemplateVersions(k.prNumber(), inv.getArgument(1), inv.getArgument(2));
               return null;
             })
         .when(ledger)
-        .recordTemplateVersions(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyMap());
+        .recordTemplateVersions(any(org.cra.common.git.ReviewKey.class), anyString(), anyMap());
   }
 }

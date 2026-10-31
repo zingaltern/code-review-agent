@@ -38,8 +38,9 @@ class BadcaseServiceTest {
         null);
   }
 
+  /** S5961 拆分：结果字段与落盘产物（原 31 断言按场景拆为 3 个用例，断言总量不变）。 */
   @Test
-  void missedBadcaseIsCreatedDraftedAndVisibleToRegression() {
+  void missedBadcaseResultAndCaseFilesAreCreated() {
     Path dataset = tmp.resolve("dataset");
     BadcaseService.Result result =
         BadcaseService.add(inputs(dataset, "missed", "f_missed01", null), null, null);
@@ -56,6 +57,13 @@ class BadcaseServiceTest {
     assertThat(caseDir.resolve("diff.patch")).exists();
     assertThat(caseDir.resolve("repo_snapshot.tgz")).exists();
     assertThat(caseDir.resolve("badcase.json")).exists();
+  }
+
+  @Test
+  void missedBadcaseMetaAndDraftExpectedArePersisted() {
+    Path dataset = tmp.resolve("dataset");
+    Path caseDir =
+        BadcaseService.add(inputs(dataset, "missed", "f_missed01", null), null, null).caseDir();
 
     FixtureMeta meta = Json.readMeta(caseDir.resolve("meta.json"));
     assertThat(meta.set()).isEqualTo("bad");
@@ -71,6 +79,13 @@ class BadcaseServiceTest {
     assertThat(draft.expected().get(0).line()).isEqualTo(42);
     assertThat(draft.expected().get(0).category()).isEqualTo("bug");
     assertThat(draft.expected().get(0).keywords()).isNotEmpty();
+  }
+
+  @Test
+  void missedBadcaseIsListedAndLoadsAfterConfirm() {
+    Path dataset = tmp.resolve("dataset");
+    Path caseDir =
+        BadcaseService.add(inputs(dataset, "missed", "f_missed01", null), null, null).caseDir();
 
     // 数据集枚举（下次回归的入口）已包含该用例
     assertThat(DatasetLoader.listCases(dataset, "bad")).contains(caseDir);
@@ -101,10 +116,9 @@ class BadcaseServiceTest {
     BadcaseService.Result result =
         BadcaseService.add(inputs(dataset, "relabeled", "f_missed01", "clean"), null, null);
     assertThat(result.set()).isEqualTo("clean");
-    assertThatThrownBy(
-            () ->
-                BadcaseService.add(
-                    inputs(tmp.resolve("d2"), "relabeled", "f_missed01", "weird"), null, null))
+    BadcaseService.Inputs invalidTarget =
+        inputs(tmp.resolve("d2"), "relabeled", "f_missed01", "weird");
+    assertThatThrownBy(() -> BadcaseService.add(invalidTarget, null, null))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--to-set");
   }
@@ -112,8 +126,8 @@ class BadcaseServiceTest {
   @Test
   void missingFindingFailsWithoutInventingContent() {
     Path dataset = tmp.resolve("dataset");
-    assertThatThrownBy(
-            () -> BadcaseService.add(inputs(dataset, "missed", "f_nope", null), null, null))
+    BadcaseService.Inputs unknownFinding = inputs(dataset, "missed", "f_nope", null);
+    assertThatThrownBy(() -> BadcaseService.add(unknownFinding, null, null))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("未定位到 finding_id");
     assertThat(dataset.resolve("bad")).doesNotExist();
@@ -154,8 +168,8 @@ class BadcaseServiceTest {
     BadcaseService.Result first =
         BadcaseService.add(inputs(dataset, "missed", "f_missed01", null), null, null);
     Files.writeString(first.caseDir().resolve("manual-note.txt"), "keep me");
-    assertThatThrownBy(
-            () -> BadcaseService.add(inputs(dataset, "missed", "f_missed01", null), null, null))
+    BadcaseService.Inputs duplicate = inputs(dataset, "missed", "f_missed01", null);
+    assertThatThrownBy(() -> BadcaseService.add(duplicate, null, null))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("已存在");
     assertThat(first.caseDir().resolve("manual-note.txt")).hasContent("keep me");

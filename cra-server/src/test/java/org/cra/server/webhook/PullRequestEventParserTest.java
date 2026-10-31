@@ -70,15 +70,11 @@ class PullRequestEventParserTest {
 
   @Test
   void rejectsMalformedPayload() {
-    assertThatThrownBy(
-            () -> parser.parse("pull_request", "d9", "not-json".getBytes(StandardCharsets.UTF_8)))
+    byte[] notJson = "not-json".getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> parser.parse("pull_request", "d9", notJson))
         .isInstanceOf(IllegalArgumentException.class);
-    assertThatThrownBy(
-            () ->
-                parser.parse(
-                    "pull_request",
-                    "d10",
-                    "{\"action\":\"opened\"}".getBytes(StandardCharsets.UTF_8)))
+    byte[] missingRefs = "{\"action\":\"opened\"}".getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> parser.parse("pull_request", "d10", missingRefs))
         .isInstanceOf(IllegalArgumentException.class);
   }
 }

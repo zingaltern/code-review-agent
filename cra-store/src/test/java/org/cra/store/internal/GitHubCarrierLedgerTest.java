@@ -133,7 +133,8 @@ class GitHubCarrierLedgerTest {
           }
         };
     GitHubCommentLedger ledger = new GitHubCommentLedger(source, REPO);
-    assertThatThrownBy(() -> ledger.findCompletion(ReviewKey.commit("o", "r", "abc1234")))
+    ReviewKey key = ReviewKey.commit("o", "r", "abc1234");
+    assertThatThrownBy(() -> ledger.findCompletion(key))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("PULL_REQUEST");
   }
@@ -155,7 +156,8 @@ class GitHubCarrierLedgerTest {
     assertThatThrownBy(() -> new GitHubCarrierLedger(source, REPO, ReviewMode.PULL_REQUEST))
         .isInstanceOf(IllegalArgumentException.class);
     GitHubCarrierLedger ledger = new GitHubCarrierLedger(source, REPO, ReviewMode.COMMIT);
-    assertThatThrownBy(() -> ledger.findCompletion(ReviewKey.commit("x", "r", "abc1234")))
+    ReviewKey mismatched = ReviewKey.commit("x", "r", "abc1234");
+    assertThatThrownBy(() -> ledger.findCompletion(mismatched))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("仓库不匹配");
   }

@@ -146,37 +146,28 @@ class GitLabMergeRequestEventParserTest {
 
   @Test
   void illegalJsonAndMissingFieldsAreBadPayload() {
-    assertThatThrownBy(
-            () ->
-                parser.parse(
-                    GitLabMergeRequestEventParser.EVENT_NAME,
-                    "u",
-                    "not-json".getBytes(StandardCharsets.UTF_8)))
+    byte[] notJson = "not-json".getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> parser.parse(GitLabMergeRequestEventParser.EVENT_NAME, "u", notJson))
         .isInstanceOf(IllegalArgumentException.class);
+    byte[] missingDiffRefs =
+        """
+        {"object_kind":"merge_request","object_attributes":{"action":"open","iid":7},
+         "project":{"path_with_namespace":"g/p"}}
+        """
+            .getBytes(StandardCharsets.UTF_8);
     assertThatThrownBy(
-            () ->
-                parser.parse(
-                    GitLabMergeRequestEventParser.EVENT_NAME,
-                    "u",
-                    """
-                    {"object_kind":"merge_request","object_attributes":{"action":"open","iid":7},
-                     "project":{"path_with_namespace":"g/p"}}
-                    """
-                        .getBytes(StandardCharsets.UTF_8)))
+            () -> parser.parse(GitLabMergeRequestEventParser.EVENT_NAME, "u", missingDiffRefs))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("diff_refs");
-    assertThatThrownBy(
-            () ->
-                parser.parse(
-                    GitLabMergeRequestEventParser.EVENT_NAME,
-                    "u",
-                    """
-                    {"object_kind":"merge_request",
-                     "object_attributes":{"action":"open","iid":0,
-                       "diff_refs":{"base_sha":"b","head_sha":"h"}},
-                     "project":{"path_with_namespace":"g/p"}}
-                    """
-                        .getBytes(StandardCharsets.UTF_8)))
+    byte[] zeroIid =
+        """
+        {"object_kind":"merge_request",
+         "object_attributes":{"action":"open","iid":0,
+           "diff_refs":{"base_sha":"b","head_sha":"h"}},
+         "project":{"path_with_namespace":"g/p"}}
+        """
+            .getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> parser.parse(GitLabMergeRequestEventParser.EVENT_NAME, "u", zeroIid))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("iid");
   }

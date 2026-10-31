@@ -15,8 +15,7 @@ class FingerprintCalculatorTest {
     List<String> context = List.of("a", "b", anchor, "d", "e");
     String fp1 = FingerprintCalculator.fingerprint("src/Foo.java", "bug", anchor, context);
     String fp2 = FingerprintCalculator.fingerprint("src/Foo.java", "bug", anchor, context);
-    assertThat(fp1).isEqualTo(fp2);
-    assertThat(fp1).hasSize(16).matches("[0-9a-f]+");
+    assertThat(fp1).isEqualTo(fp2).hasSize(16).matches("[0-9a-f]+");
   }
 
   @Test
@@ -43,8 +42,7 @@ class FingerprintCalculatorTest {
     String fpSec = FingerprintCalculator.fingerprint("f.java", "security", anchor, List.of(anchor));
     String fpOtherFile =
         FingerprintCalculator.fingerprint("g.java", "bug", anchor, List.of(anchor));
-    assertThat(fpBug).isNotEqualTo(fpSec);
-    assertThat(fpBug).isNotEqualTo(fpOtherFile);
+    assertThat(fpBug).isNotEqualTo(fpSec).isNotEqualTo(fpOtherFile);
   }
 
   @Test

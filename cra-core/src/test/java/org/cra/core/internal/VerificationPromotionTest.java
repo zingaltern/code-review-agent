@@ -1,6 +1,17 @@
 package org.cra.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -27,7 +38,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 
 /**
  * M2 验证与晋升线行为测试（07§3 验收 3/5 的 mock 侧）：VerifierAgent 三值判定与晋升规则、重要级 REFUTED 确定性抽查保险丝、INSUFFICIENT
@@ -60,19 +70,17 @@ class VerificationPromotionTest {
 
   @BeforeEach
   void setUp() {
-    adapter = Mockito.mock(GitPlatformAdapter.class);
-    ledger = Mockito.mock(ReviewLedger.class);
+    adapter = mock(GitPlatformAdapter.class);
+    ledger = mock(ReviewLedger.class);
     scripted = new ScriptedGateway();
-    Mockito.when(ledger.findCompletion(Mockito.anyInt(), Mockito.anyString()))
-        .thenReturn(Optional.empty());
-    Mockito.when(ledger.publishedFindings(Mockito.anyInt())).thenReturn(List.of());
-    Mockito.when(ledger.completedRuns(Mockito.anyInt())).thenReturn(List.of());
+    when(ledger.findCompletion(anyInt(), anyString())).thenReturn(Optional.empty());
+    when(ledger.publishedFindings(anyInt())).thenReturn(List.of());
+    when(ledger.completedRuns(anyInt())).thenReturn(List.of());
     bridgeKeyedLedgerToIntStubs();
-    Mockito.when(adapter.fetchDiff(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
-        .thenReturn(diff(BASE));
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
+    when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff(BASE));
+    when(adapter.readFile(any(), anyString(), anyString()))
         .thenReturn(FileContent.ofText(FILE, FILE_CONTENT));
-    Mockito.when(adapter.postReview(Mockito.any()))
+    when(adapter.postReview(any()))
         .thenAnswer(
             inv -> {
               PostReviewCommand cmd = inv.getArgument(0);
@@ -154,9 +162,10 @@ class VerificationPromotionTest {
     String brief = scripted.verifierCalls.get(0).userPrompt();
     assertThat(brief).contains("src/Foo.java").contains("待复核结论").contains("空列表越界");
     String trace = traceOf(result);
-    assertThat(trace).contains("\"event\":\"verify\"");
-    assertThat(trace).contains("\"event\":\"anti_anchor_check\"");
-    assertThat(trace).contains("\"event\":\"promotion\"");
+    assertThat(trace)
+        .contains("\"event\":\"verify\"")
+        .contains("\"event\":\"anti_anchor_check\"")
+        .contains("\"event\":\"promotion\"");
   }
 
   @Test
@@ -168,16 +177,16 @@ class VerificationPromotionTest {
     assertThat(result.stats().findingsPublished()).isZero();
     assertThat(scripted.judgeCalls).isEmpty();
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().inlineComments()).isEmpty();
     String trace = traceOf(result);
     assertThat(trace).contains("\"reason\":\"refuted-nit\"");
   }
 
   @Test
-  void testCategoryFindingBriefCarriesTestFileIndex() throws Exception {
+  void testCategoryFindingBriefCarriesTestFileIndex() {
     // v1.3.2 test 类分型：test 类候选的验证 brief 注入仓库测试文件清单（供核对是否已有覆盖）
-    Mockito.when(adapter.listFiles(Mockito.any(), Mockito.anyString(), Mockito.anyString()))
+    when(adapter.listFiles(any(), anyString(), anyString()))
         .thenReturn(List.of("src/test/java/FooTest.java", "src/test/java/BarTest.java"));
     scripted.review(
         "{\"findings\":[{\"category\":\"test\",\"title\":\"缺测试\",\"description\":\"d\","
@@ -192,7 +201,7 @@ class VerificationPromotionTest {
   }
 
   @Test
-  void verifierUnavailableRetriesOnceThenUnverifiedNotPublished() throws Exception {
+  void verifierUnavailableRetriesOnceThenUnverifiedNotPublished() {
     // 02§4.2 验证不可得：缩上下文重试 1 次 → 仍失败 → UNVERIFIED 默认不发布，Summary 计数声明
     scripted.review(oneFinding("bug", "important")).verifierUnavailable();
     ReviewResult result = pipeline.run(request());
@@ -200,7 +209,7 @@ class VerificationPromotionTest {
     assertThat(result.stats().unverified()).isEqualTo(1);
     assertThat(result.stats().findingsPublished()).isZero();
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("UNVERIFIED");
     assertThat(result.stats().degradations()).contains("verifier-unavailable");
   }
@@ -217,7 +226,7 @@ class VerificationPromotionTest {
     assertThat(result.stats().unverified()).isZero(); // labeled 发布的不计"未发布"
     assertThat(result.stats().findingsPublished()).isEqualTo(1);
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().inlineComments().get(0).body())
         .contains("[UNVERIFIED]")
         .contains("未经独立复核");
@@ -248,8 +257,7 @@ class VerificationPromotionTest {
     assertThat(result.stats().confirmed()).isEqualTo(1); // Judge 翻案成立
     assertThat(result.stats().findingsPublished()).isEqualTo(1);
     // 门禁与验证波共享 contentCache：HEAD/FILE 只应在预取与门禁各读一次，补查轮复用缓存
-    Mockito.verify(adapter, Mockito.times(2))
-        .readFile(Mockito.any(), Mockito.eq(HEAD), Mockito.eq(FILE));
+    verify(adapter, times(2)).readFile(any(), eq(HEAD), eq(FILE));
   }
 
   @Test
@@ -365,8 +373,7 @@ class VerificationPromotionTest {
     assertThat(result.stats().confirmed()).isEqualTo(1);
     assertThat(result.stats().findingsPublished()).isEqualTo(1); // FAIL 不阻断
     String trace = traceOf(result);
-    assertThat(trace).contains("\"event\":\"anti_anchor_check\"");
-    assertThat(trace).contains("\"status\":\"FAIL\"");
+    assertThat(trace).contains("\"event\":\"anti_anchor_check\"").contains("\"status\":\"FAIL\"");
   }
 
   @Test
@@ -388,7 +395,7 @@ class VerificationPromotionTest {
   @Test
   void roundLimitBreachedStopsReviewWithRedesignAdvice() {
     // 03§5 v1.3 语义强化：第 4 轮（>3）→ 停止一切新 finding，Summary 建议打回重新设计
-    Mockito.when(ledger.completedRuns(7))
+    when(ledger.completedRuns(7))
         .thenReturn(
             List.of(
                 new LedgerRunMarker(
@@ -402,7 +409,7 @@ class VerificationPromotionTest {
     assertThat(scripted.verifierCalls).isEmpty();
     assertThat(scripted.judgeCalls).isEmpty();
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("打回重新设计").contains("收敛控制");
     assertThat(result.stats().degradations()).contains("convergence-round-limit");
   }
@@ -410,16 +417,15 @@ class VerificationPromotionTest {
   @Test
   void diffOnlyRereviewUsesIncrementSinceLastCompletedHead() {
     // 03§5.2：非首轮只评审自上一轮完成 head 以来的增量 diff
-    Mockito.when(ledger.completedRuns(7))
+    when(ledger.completedRuns(7))
         .thenReturn(List.of(new LedgerRunMarker("run_1", LAST_HEAD, "DONE", 1, 0, 3L)));
-    Mockito.when(adapter.fetchDiff(Mockito.any(), Mockito.eq(LAST_HEAD), Mockito.eq(HEAD)))
-        .thenReturn(diff(LAST_HEAD));
+    when(adapter.fetchDiff(any(), eq(LAST_HEAD), eq(HEAD))).thenReturn(diff(LAST_HEAD));
     scripted.review(oneFinding("bug", "important"));
     ReviewResult result = pipeline.run(request());
     // 增量 diff 被采用（fetchDiff 以 lastHead 为 base 调用过）
-    Mockito.verify(adapter).fetchDiff(Mockito.any(), Mockito.eq(LAST_HEAD), Mockito.eq(HEAD));
+    verify(adapter).fetchDiff(any(), eq(LAST_HEAD), eq(HEAD));
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("diff-only 复审");
     assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
   }
@@ -427,9 +433,9 @@ class VerificationPromotionTest {
   @Test
   void diffOnlyFallsBackToFullDiffWhenIncrementUnavailable() {
     // 增量 diff 取不到（force-push 等）→ 回退全量并声明（不静默）
-    Mockito.when(ledger.completedRuns(7))
+    when(ledger.completedRuns(7))
         .thenReturn(List.of(new LedgerRunMarker("run_1", LAST_HEAD, "DONE", 1, 0, 3L)));
-    Mockito.when(adapter.fetchDiff(Mockito.any(), Mockito.eq(LAST_HEAD), Mockito.eq(HEAD)))
+    when(adapter.fetchDiff(any(), eq(LAST_HEAD), eq(HEAD)))
         .thenThrow(new org.cra.common.exception.CraIntegrationException("422 no common ancestor"));
     scripted.review(oneFinding("bug", "important"));
     ReviewResult result = pipeline.run(request());
@@ -468,7 +474,7 @@ class VerificationPromotionTest {
 
   @Test
   void verifierBriefCarriesUntrustedDelimitersAndPolicySection() {
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.eq("REVIEW.md")))
+    when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenReturn(
             FileContent.ofText(
                 "REVIEW.md", "# Review Policy: demo\n\n## Evidence requirements\n- 必须给出触发输入\n"));
@@ -478,14 +484,14 @@ class VerificationPromotionTest {
     // 不可信内容定界（04§3.3：finding/代码上下文一律 UNTRUSTED）+ 证据要求段（可信）
     assertThat(brief)
         .contains(ScriptedVerifierDelimiters.OPEN)
-        .contains(ScriptedVerifierDelimiters.CLOSE);
-    assertThat(brief).contains("必须给出触发输入");
+        .contains(ScriptedVerifierDelimiters.CLOSE)
+        .contains("必须给出触发输入");
   }
 
   @Test
   void contextFindingBriefIncludesProductContextAndIncidents() {
     // v1.3.1 分型组装：context 类注入 REVIEW.md Product context/Known incidents 条目
-    Mockito.when(adapter.readFile(Mockito.any(), Mockito.anyString(), Mockito.eq("REVIEW.md")))
+    when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenReturn(
             FileContent.ofText(
                 "REVIEW.md",
@@ -554,45 +560,34 @@ class VerificationPromotionTest {
    * 方法，必须显式桥接）。
    */
   private void bridgeKeyedLedgerToIntStubs() {
-    org.mockito.Mockito.when(
-            ledger.findCompletion(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.findCompletion(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               return ledger.findCompletion(k.prNumber(), k.commitSha());
             });
-    org.mockito.Mockito.when(
-            ledger.publishedFindings(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.publishedFindings(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.publishedFindings(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.completedRuns(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.completedRuns(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.completedRuns(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.suspectMarkerCount(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.suspectMarkerCount(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.suspectMarkerCount(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.comment(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-                org.mockito.ArgumentMatchers.anyLong()))
+    when(ledger.comment(any(org.cra.common.git.ReviewKey.class), anyLong()))
         .thenAnswer(
             inv ->
                 ledger.comment(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber(),
                     inv.getArgument(1)));
-    org.mockito.Mockito.doAnswer(
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordRunCompletion(k.prNumber(), inv.getArgument(1));
@@ -600,9 +595,8 @@ class VerificationPromotionTest {
             })
         .when(ledger)
         .recordRunCompletion(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerRunMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class), any(org.cra.common.git.LedgerRunMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordPublishedFinding(k.prNumber(), inv.getArgument(1));
@@ -610,18 +604,15 @@ class VerificationPromotionTest {
             })
         .when(ledger)
         .recordPublishedFinding(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerFindingMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class),
+            any(org.cra.common.git.LedgerFindingMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordTemplateVersions(k.prNumber(), inv.getArgument(1), inv.getArgument(2));
               return null;
             })
         .when(ledger)
-        .recordTemplateVersions(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyMap());
+        .recordTemplateVersions(any(org.cra.common.git.ReviewKey.class), anyString(), anyMap());
   }
 }

@@ -135,7 +135,8 @@ class CraConfigBuilderTest {
   void platformIsNormalizedAndValidated() {
     assertThat(CraConfig.builder().platform("  GITLAB ").build().platform()).isEqualTo("gitlab");
     assertThat(CraConfig.builder().platform("  GITLAB ").build().isGitlab()).isTrue();
-    assertThatThrownBy(() -> CraConfig.builder().platform("bitbucket").build())
+    CraConfig.Builder builder = CraConfig.builder().platform("bitbucket");
+    assertThatThrownBy(() -> builder.build())
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("platform 非法");
   }

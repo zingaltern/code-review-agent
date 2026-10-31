@@ -27,7 +27,7 @@ public final class SpecialistReviewers {
         new AgentBudget(DEFAULT_INPUT_TOKENS, 8_000, 2, 120_000);
 
     /** 角色。 */
-    public static final AgentRole ROLE = new AgentRole("test-reviewer", "测试缺口评审");
+    public static final AgentRole AGENT_ROLE = new AgentRole("test-reviewer", "测试缺口评审");
 
     private static final String TEMPLATE = "prompts/reviewer/test.md";
 
@@ -42,7 +42,7 @@ public final class SpecialistReviewers {
 
     @Override
     public AgentRole role() {
-      return ROLE;
+      return AGENT_ROLE;
     }
 
     @Override
@@ -64,7 +64,7 @@ public final class SpecialistReviewers {
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
       return TemplateSupport.briefOf(
-          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
+          templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget(), modelTier());
     }
 
     @Override
@@ -85,7 +85,7 @@ public final class SpecialistReviewers {
     private static final AgentBudget BUDGET = new AgentBudget(16_000, 2_000, 1, 60_000);
 
     /** 角色。 */
-    public static final AgentRole ROLE = new AgentRole("convention-reviewer", "约定评审");
+    public static final AgentRole AGENT_ROLE = new AgentRole("convention-reviewer", "约定评审");
 
     private static final String TEMPLATE = "prompts/reviewer/convention.md";
 
@@ -100,7 +100,7 @@ public final class SpecialistReviewers {
 
     @Override
     public AgentRole role() {
-      return ROLE;
+      return AGENT_ROLE;
     }
 
     @Override
@@ -119,7 +119,7 @@ public final class SpecialistReviewers {
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
       return TemplateSupport.briefOf(
-          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
+          templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget(), modelTier());
     }
 
     @Override
@@ -145,7 +145,7 @@ public final class SpecialistReviewers {
     private static final AgentBudget BUDGET = new AgentBudget(32_000, 2_000, 2, 120_000);
 
     /** 角色。 */
-    public static final AgentRole ROLE = new AgentRole("perf-reviewer", "性能评审");
+    public static final AgentRole AGENT_ROLE = new AgentRole("perf-reviewer", "性能评审");
 
     private static final String TEMPLATE = "prompts/reviewer/perf.md";
 
@@ -160,7 +160,7 @@ public final class SpecialistReviewers {
 
     @Override
     public AgentRole role() {
-      return ROLE;
+      return AGENT_ROLE;
     }
 
     @Override
@@ -188,7 +188,7 @@ public final class SpecialistReviewers {
                   "scoped_paths_note",
                   TemplateSupport.scopedPathsNote(input.scopedPaths())));
       return TemplateSupport.briefOf(
-          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
+          templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget(), modelTier());
     }
 
     @Override

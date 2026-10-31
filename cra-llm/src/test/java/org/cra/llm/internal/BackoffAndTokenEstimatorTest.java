@@ -28,7 +28,7 @@ class BackoffAndTokenEstimatorTest {
   void tokenEstimateIsCharsOverThreePointFive() {
     // 04§2.1：字符数 / 3.5 近似，向上取整（按 UTF-8 字节计）
     assertThat(TokenEstimator.estimate("1234567")).isEqualTo(2);
-    assertThat(TokenEstimator.estimate("")).isEqualTo(0);
-    assertThat(TokenEstimator.estimate(null)).isEqualTo(0);
+    assertThat(TokenEstimator.estimate("")).isZero();
+    assertThat(TokenEstimator.estimate(null)).isZero();
   }
 }

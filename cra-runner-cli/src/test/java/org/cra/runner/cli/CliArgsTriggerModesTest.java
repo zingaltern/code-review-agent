@@ -117,8 +117,9 @@ class CliArgsTriggerModesTest {
   @Test
   void pushBaseResolverRequiresLocalRepoWhenBaseMissing() {
     CraConfig config = pushConfig(null);
-    assertThatThrownBy(
-            () -> PushBaseResolver.resolve(config, sourceWithCompletions(List.of()), localChain()))
+    CommentSource source = sourceWithCompletions(List.of());
+    LocalRepoContext chain = localChain();
+    assertThatThrownBy(() -> PushBaseResolver.resolve(config, source, chain))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("无法解析基线");
   }

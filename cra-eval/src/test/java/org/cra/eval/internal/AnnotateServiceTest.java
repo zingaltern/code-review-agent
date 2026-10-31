@@ -43,7 +43,7 @@ class AnnotateServiceTest {
     Files.createDirectories(caseDir);
     Files.writeString(caseDir.resolve("diff.patch"), DIFF);
     Path draft = AnnotateService.prefill(caseDir, null, "tester");
-    assertThat(draft.getFileName().toString()).isEqualTo("expected_findings.draft.json");
+    assertThat(draft.getFileName()).hasToString("expected_findings.draft.json");
     ExpectedFindings parsed = Json.readExpected(draft);
     // 仅 main 侧 1 个 hunk 预填；test hunk 被跳过
     assertThat(parsed.expected()).hasSize(1);

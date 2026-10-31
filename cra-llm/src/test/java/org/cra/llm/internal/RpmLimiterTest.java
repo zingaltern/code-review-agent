@@ -24,7 +24,7 @@ class RpmLimiterTest {
       assertThat(limiter.awaitSlot(identity("std-model"), 3, 60_000)).isTrue();
     }
     // 3 次全部立即放行（无等待语义可断言：等待会消费注入时钟，此处时钟未动）
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 
   @Test
@@ -61,7 +61,7 @@ class RpmLimiterTest {
     RpmLimiter limiter = new RpmLimiter(clock::get, ms -> clock.addAndGet(ms));
     assertThat(limiter.awaitSlot(identity("std-model"), 1, 60_000)).isTrue();
     assertThat(limiter.awaitSlot(identity("light-model"), 1, 60_000)).isTrue(); // 不同端点不受占用影响
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 
   @Test
@@ -114,6 +114,6 @@ class RpmLimiterTest {
     for (int i = 0; i < 100; i++) {
       assertThat(limiter.awaitSlot(identity("strong-model"), 0, 0)).isTrue();
     }
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 }

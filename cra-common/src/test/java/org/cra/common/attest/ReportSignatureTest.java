@@ -79,11 +79,10 @@ class ReportSignatureTest {
 
   @Test
   void repoFormatIsRejected() {
+    String sha = ReportSignature.sha256(REPORT);
     for (String repo : List.of("owner", "/name", "owner/", "a/b/c", "owner//name")) {
       assertThatThrownBy(
-              () ->
-                  ReportSignature.sign(
-                      SECRET, "k", ReportSignature.sha256(REPORT), repo, "abc1234", "l2", "t", "r"))
+              () -> ReportSignature.sign(SECRET, "k", sha, repo, "abc1234", "l2", "t", "r"))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("owner/name");
     }
@@ -92,11 +91,10 @@ class ReportSignatureTest {
   @Test
   void blankRepoIsRejected() {
     // 空串/null 在 requireRepo 的非空校验即被拒（早于 owner/name 形式校验），异常信息为"不能为空"
+    String sha = ReportSignature.sha256(REPORT);
     for (String repo : Arrays.asList("", "   ", null)) {
       assertThatThrownBy(
-              () ->
-                  ReportSignature.sign(
-                      SECRET, "k", ReportSignature.sha256(REPORT), repo, "abc1234", "l2", "t", "r"))
+              () -> ReportSignature.sign(SECRET, "k", sha, repo, "abc1234", "l2", "t", "r"))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessageContaining("不能为空");
     }
@@ -111,17 +109,10 @@ class ReportSignatureTest {
 
   @Test
   void emptySecretRejected() {
+    String sha = ReportSignature.sha256(REPORT);
+    byte[] emptySecret = new byte[0];
     assertThatThrownBy(
-            () ->
-                ReportSignature.sign(
-                    new byte[0],
-                    "k",
-                    ReportSignature.sha256(REPORT),
-                    "owner/repo",
-                    "",
-                    "",
-                    "t",
-                    "r"))
+            () -> ReportSignature.sign(emptySecret, "k", sha, "owner/repo", "", "", "t", "r"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("密钥");
   }
