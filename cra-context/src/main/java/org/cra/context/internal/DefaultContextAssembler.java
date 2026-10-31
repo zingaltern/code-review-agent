@@ -41,15 +41,14 @@ public final class DefaultContextAssembler implements ContextAssembler {
     List<String> trimDecisions = new ArrayList<>();
     List<String> coverageNotes = new ArrayList<>();
     List<String> skippedFiles = new ArrayList<>();
-    String l1 = buildL1(input, coverageNotes, skippedFiles);
+    String l1 = buildL1(input, skippedFiles);
 
     long budget = input.maxContextTokens();
     long l1Tokens = TokenMath.estimateTokens(l1);
     if (l1Tokens > budget && !l1.isEmpty()) {
       int narrowed = Math.max(NARROW_FLOOR, input.windowLines() / 2);
       if (narrowed < input.windowLines()) {
-        String narrowedText =
-            buildL1(withWindow(input, narrowed), new ArrayList<>(), new ArrayList<>());
+        String narrowedText = buildL1(withWindow(input, narrowed), new ArrayList<>());
         trimDecisions.add(
             "L1 窗口收窄 ±%d→±%d（估算 %d token 超预算 %d）"
                 .formatted(input.windowLines(), narrowed, l1Tokens, budget));
@@ -87,8 +86,7 @@ public final class DefaultContextAssembler implements ContextAssembler {
   }
 
   /** L1 组装：条件全文优先，否则 hunk 窗口（重叠区间合并）；无 head 内容的文件降级说明。 */
-  private String buildL1(
-      ContextInput input, List<String> coverageNotes, List<String> skippedFiles) {
+  private String buildL1(ContextInput input, List<String> skippedFiles) {
     if (!input.conditionalFullText() && input.windowLines() <= 0) {
       return "";
     }
@@ -139,11 +137,19 @@ public final class DefaultContextAssembler implements ContextAssembler {
     return List.of(body.split("\n", -1));
   }
 
-  /** hunk 扩窗后合并重叠区间，返回 [start, end]（1 基，闭区间）。 */
+  /**
+   * hunk 扩窗后合并重叠区间，返回 [start, end]（1 基，闭区间）。
+   *
+   * <p>锚点超出 head 文件行数的 hunk（diff 与预取全文错位，如评测 fixture 装配不一致）跳过而非收拢成 [start,start]——后者会让 numbered() 的
+   * subList 越界炸掉整次组装。
+   */
   private static List<int[]> mergeRanges(List<DiffHunk> hunks, int window, int lineCount) {
     List<int[]> ranges = new ArrayList<>();
     for (DiffHunk hunk : hunks) {
       int start = Math.max(1, hunk.newStart() - window);
+      if (start > lineCount) {
+        continue;
+      }
       int end = Math.min(lineCount, hunk.newStart() + Math.max(hunk.newLines(), 1) - 1 + window);
       if (end < start) {
         end = start;
