@@ -97,21 +97,11 @@ final class ScopedToolSet {
     boolean truncated = false;
     for (Map.Entry<String, FileContent> entry : scopedFiles.entrySet()) {
       FileContent file = entry.getValue();
-      if (file.binary() || file.text() == null) {
-        continue;
-      }
-      String[] lines = file.text().split("\n", -1);
-      for (int i = 0; i < lines.length; i++) {
-        if (pattern.matcher(lines[i]).find()) {
-          if (matches.size() >= MAX_GREP_MATCHES) {
-            truncated = true;
-            break;
-          }
-          matches.add(entry.getKey() + ":L" + (i + 1) + ": " + lines[i].strip());
+      if (!file.binary() && file.text() != null) {
+        truncated = scanForMatches(entry.getKey(), file, pattern, matches);
+        if (truncated) {
+          break;
         }
-      }
-      if (truncated) {
-        break;
       }
     }
     if (matches.isEmpty()) {
@@ -119,6 +109,29 @@ final class ScopedToolSet {
     }
     String note = truncated ? "\n（已截断：单次最多返回 " + MAX_GREP_MATCHES + " 行匹配）" : "";
     return new ToolResult(true, truncate(String.join("\n", matches) + note));
+  }
+
+  /**
+   * 扫描单文件的正则命中行（达到单次上限即截断）。
+   *
+   * @param path 文件路径
+   * @param file 文件内容
+   * @param pattern 正则
+   * @param matches 命中输出
+   * @return true 若达到上限
+   */
+  private static boolean scanForMatches(
+      String path, FileContent file, Pattern pattern, List<String> matches) {
+    String[] lines = file.text().split("\n", -1);
+    for (int i = 0; i < lines.length; i++) {
+      if (pattern.matcher(lines[i]).find()) {
+        if (matches.size() >= MAX_GREP_MATCHES) {
+          return true;
+        }
+        matches.add(path + ":L" + (i + 1) + ": " + lines[i].strip());
+      }
+    }
+    return false;
   }
 
   private static int clampLine(JsonNode args, String field, int defaultValue) {

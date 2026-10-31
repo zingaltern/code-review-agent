@@ -88,11 +88,10 @@ final class ReviewPromptSections {
     sb.append("### 本次变更的测试相关文件\n");
     List<String> lines = new ArrayList<>();
     for (ChunkPlanner.Chunk chunk : plan.chunks()) {
-      for (DiffFile file : chunk.files()) {
-        if (ReviewRoutingPolicy.isTestPath(file.path())) {
-          lines.add("- " + file.path() + "（" + file.status() + "）");
-        }
-      }
+      chunk.files().stream()
+          .filter(file -> ReviewRoutingPolicy.isTestPath(file.path()))
+          .map(file -> "- " + file.path() + "（" + file.status() + "）")
+          .forEach(lines::add);
     }
     for (String path : plan.skippedTestPaths()) {
       lines.add("- " + path + "（按策略不评审，仅作测试覆盖判断依据）");

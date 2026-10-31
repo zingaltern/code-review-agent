@@ -144,29 +144,46 @@ public final class SemanticContext {
     if (files == null) {
       return ordered;
     }
-    for (DiffFile file : files) {
-      ordered.add(file.path());
-    }
+    files.forEach(file -> ordered.add(file.path()));
     if (!enabled() || !available() || cap <= 0) {
       return ordered;
     }
     List<ChangedSymbols.Symbol> symbols =
         ChangedSymbols.extract(files, snapshot, ChangedSymbols.MAX_SYMBOLS);
-    Set<String> extra = new LinkedHashSet<>();
-    for (ChangedSymbols.Symbol symbol : symbols) {
-      for (SymbolDefinition definition : snapshot.definitionsOf(symbol.name())) {
-        extra.add(definition.path());
-      }
-      for (SymbolReferenceSite site : snapshot.referencesOf(symbol.name())) {
-        extra.add(site.path());
-      }
-    }
+    Set<String> extra = collectRelated(symbols);
     Set<String> changed = new LinkedHashSet<>(ordered);
-    for (TypeImport entry : snapshot.imports()) {
-      if (entry.resolvedInRepo() && changed.contains(entry.resolvedPath())) {
-        extra.add(entry.path());
-      }
-    }
+    snapshot.imports().stream()
+        .filter(entry -> entry.resolvedInRepo() && changed.contains(entry.resolvedPath()))
+        .map(TypeImport::path)
+        .forEach(extra::add);
+    addUntilCap(ordered, extra, cap);
+    return ordered;
+  }
+
+  /**
+   * 收集变更符号的定义/引用文件（保持符号顺序，定义先于引用）。
+   *
+   * @param symbols 变更符号
+   * @return 关联路径
+   */
+  private Set<String> collectRelated(List<ChangedSymbols.Symbol> symbols) {
+    return symbols.stream()
+        .flatMap(
+            symbol ->
+                java.util.stream.Stream.concat(
+                    snapshot.definitionsOf(symbol.name()).stream().map(SymbolDefinition::path),
+                    snapshot.referencesOf(symbol.name()).stream().map(SymbolReferenceSite::path)))
+        .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
+  }
+
+  /**
+   * 按路径升序补齐到 cap（已含变更文件计入口径）。
+   *
+   * @param ordered 输出集合
+   * @param extra 候选关联路径
+   * @param cap 上限
+   */
+  private static void addUntilCap(Set<String> ordered, Set<String> extra, int cap) {
     List<String> sortedExtra = new ArrayList<>(extra);
     sortedExtra.sort(String::compareTo);
     for (String path : sortedExtra) {
@@ -175,7 +192,6 @@ public final class SemanticContext {
       }
       ordered.add(path);
     }
-    return ordered;
   }
 
   /**

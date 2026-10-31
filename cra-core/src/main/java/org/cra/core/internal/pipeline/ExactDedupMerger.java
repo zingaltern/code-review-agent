@@ -60,39 +60,70 @@ public final class ExactDedupMerger {
     int mergedAway = 0;
     int clusters = 0;
     for (List<CandidateFinding> group : groups.values()) {
-      group.sort(Comparator.comparingInt(CandidateFinding::line));
-      List<List<CandidateFinding>> clustersInGroup = new ArrayList<>();
-      List<CandidateFinding> current = new ArrayList<>();
-      for (CandidateFinding finding : group) {
-        if (current.isEmpty()
-            || finding.line() - current.get(current.size() - 1).line() <= MERGE_RADIUS) {
-          current.add(finding);
-        } else {
-          clustersInGroup.add(current);
-          current = new ArrayList<>();
-          current.add(finding);
-        }
-      }
-      if (!current.isEmpty()) {
-        clustersInGroup.add(current);
-      }
-      for (List<CandidateFinding> cluster : clustersInGroup) {
-        clusters++;
-        CandidateFinding representative = representative(cluster);
-        kept.add(representative);
-        if (cluster.size() > 1) {
-          mergedFrom.put(
-              representative.id(),
-              cluster.stream()
-                  .map(CandidateFinding::id)
-                  .filter(id -> !id.equals(representative.id()))
-                  .toList());
-          mergedAway += cluster.size() - 1;
-        }
-      }
+      GroupMerge merged = mergeGroup(group);
+      kept.addAll(merged.kept());
+      mergedFrom.putAll(merged.mergedFrom());
+      mergedAway += merged.mergedAway();
+      clusters += merged.clusters();
     }
     return new Result(kept, mergedFrom, mergedAway, clusters);
   }
+
+  /**
+   * 合并同文件同类别的一组候选（行距 ≤ 合并半径归簇，每簇取代表元）。
+   *
+   * @param group 同键候选
+   * @return 该组合并结果
+   */
+  private static GroupMerge mergeGroup(List<CandidateFinding> group) {
+    group.sort(Comparator.comparingInt(CandidateFinding::line));
+    List<List<CandidateFinding>> clustersInGroup = new ArrayList<>();
+    List<CandidateFinding> current = new ArrayList<>();
+    for (CandidateFinding finding : group) {
+      if (current.isEmpty()
+          || finding.line() - current.get(current.size() - 1).line() <= MERGE_RADIUS) {
+        current.add(finding);
+      } else {
+        clustersInGroup.add(current);
+        current = new ArrayList<>();
+        current.add(finding);
+      }
+    }
+    if (!current.isEmpty()) {
+      clustersInGroup.add(current);
+    }
+    List<CandidateFinding> kept = new ArrayList<>();
+    Map<String, List<String>> mergedFrom = new LinkedHashMap<>();
+    int mergedAway = 0;
+    for (List<CandidateFinding> cluster : clustersInGroup) {
+      CandidateFinding representative = representative(cluster);
+      kept.add(representative);
+      if (cluster.size() > 1) {
+        mergedFrom.put(
+            representative.id(),
+            cluster.stream()
+                .map(CandidateFinding::id)
+                .filter(id -> !id.equals(representative.id()))
+                .toList());
+        mergedAway += cluster.size() - 1;
+      }
+    }
+    return new GroupMerge(kept, mergedFrom, mergedAway, clustersInGroup.size());
+  }
+
+  /**
+   * 单组合并结果。
+   *
+   * @param kept 保留代表元
+   * @param mergedFrom 代表元 → 被合并来源 id
+   * @param mergedAway 被合并丢弃数
+   * @param clusters 簇数
+   */
+  private record GroupMerge(
+      List<CandidateFinding> kept,
+      Map<String, List<String>> mergedFrom,
+      int mergedAway,
+      int clusters) {}
 
   private static String groupKey(CandidateFinding finding) {
     return finding.file() + "|" + categoryOf(finding);

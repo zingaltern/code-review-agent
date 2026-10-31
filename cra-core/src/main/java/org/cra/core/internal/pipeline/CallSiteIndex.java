@@ -165,26 +165,44 @@ public final class CallSiteIndex {
   private final boolean importsAvailable;
   private final List<String> notes;
 
-  private CallSiteIndex(
+  private CallSiteIndex(IndexState state, IndexCounts counts) {
+    this.available = state.available();
+    this.reason = state.reason();
+    this.symbols = List.copyOf(state.symbols());
+    this.entries = List.copyOf(state.entries());
+    this.importsAvailable = state.importsAvailable();
+    this.notes = List.copyOf(state.notes());
+    this.filesScanned = counts.filesScanned();
+    this.candidateFiles = counts.candidateFiles();
+    this.callerCandidates = counts.callerCandidates();
+  }
+
+  /**
+   * 索引内容与可得性（私有构造参数组）。
+   *
+   * @param available 是否可得
+   * @param reason 不可得原因
+   * @param symbols 符号列表
+   * @param entries 调用点条目
+   * @param importsAvailable import 关系是否可得
+   * @param notes 声明行
+   */
+  private record IndexState(
       boolean available,
       String reason,
       List<String> symbols,
       List<Entry> entries,
-      int filesScanned,
-      int candidateFiles,
-      int callerCandidates,
       boolean importsAvailable,
-      List<String> notes) {
-    this.available = available;
-    this.reason = reason;
-    this.symbols = List.copyOf(symbols);
-    this.entries = List.copyOf(entries);
-    this.filesScanned = filesScanned;
-    this.candidateFiles = candidateFiles;
-    this.callerCandidates = callerCandidates;
-    this.importsAvailable = importsAvailable;
-    this.notes = List.copyOf(notes);
-  }
+      List<String> notes) {}
+
+  /**
+   * 索引统计计数（私有构造参数组）。
+   *
+   * @param filesScanned 实际读取内容的候选数
+   * @param candidateFiles 候选文件数
+   * @param callerCandidates 跨包 caller 候选数
+   */
+  private record IndexCounts(int filesScanned, int candidateFiles, int callerCandidates) {}
 
   /**
    * 单条调用点。
@@ -199,15 +217,9 @@ public final class CallSiteIndex {
   /** 索引不可得（如实声明原因）。 */
   public static CallSiteIndex unavailable(String reason) {
     return new CallSiteIndex(
-        false,
-        reason == null ? "unknown" : reason,
-        List.of(),
-        List.of(),
-        0,
-        0,
-        0,
-        false,
-        List.of());
+        new IndexState(
+            false, reason == null ? "unknown" : reason, List.of(), List.of(), false, List.of()),
+        new IndexCounts(0, 0, 0));
   }
 
   public boolean available() {
@@ -296,6 +308,35 @@ public final class CallSiteIndex {
     if (symbols.isEmpty()) {
       return unavailable("no-symbols");
     }
+    CandidateSet candidateSet = selectCandidates(javaFiles, batchFile, batchFileText, importsIndex);
+    EntryScan entryScan = collectEntries(candidateSet.candidates(), batchFile, symbols, reader);
+    List<String> notes = new ArrayList<>(candidateSet.notes());
+    if (entryScan.truncated()) {
+      notes.add("条目上限 " + MAX_ENTRIES + "：命中已截断（只显示前 " + MAX_ENTRIES + " 条）");
+    }
+    return new CallSiteIndex(
+        new IndexState(
+            true, "", symbols, entryScan.entries(), candidateSet.importsAvailable(), notes),
+        new IndexCounts(
+            entryScan.scanned(),
+            candidateSet.candidates().size(),
+            candidateSet.callerCandidates()));
+  }
+
+  /**
+   * 选择扫描候选集（同目录 → import 关联跨包 caller，上限截断如实记 notes）。
+   *
+   * @param javaFiles head 侧全部 Java 文件
+   * @param batchFile 批次文件
+   * @param batchFileText 批次文件全文
+   * @param importsIndex 语义索引（import 关系）
+   * @return 候选集
+   */
+  private static CandidateSet selectCandidates(
+      List<String> javaFiles,
+      String batchFile,
+      String batchFileText,
+      SymbolIndexSnapshot importsIndex) {
     boolean importsAvailable = importsIndex != null && importsIndex.available();
     String dir = parentDir(batchFile);
     List<String> candidates = new ArrayList<>();
@@ -341,44 +382,86 @@ public final class CallSiteIndex {
     } else {
       notes.add("调用链不完整：语义索引不可得（仅扫描同目录），跨包 caller 未纳入");
     }
+    return new CandidateSet(candidates, notes, callerCandidates, importsAvailable);
+  }
+
+  /**
+   * 逐候选扫描调用点（条目上限截断）。
+   *
+   * @param candidates 候选文件
+   * @param batchFile 批次文件（方向判定）
+   * @param symbols 符号
+   * @param reader 文件读取
+   * @return 条目扫描结果
+   */
+  private static EntryScan collectEntries(
+      List<String> candidates,
+      String batchFile,
+      List<String> symbols,
+      Function<String, Optional<String>> reader) {
     List<Entry> entries = new ArrayList<>();
     int scanned = 0;
-    boolean entryTruncated = false;
+    boolean truncated = false;
     for (String path : candidates) {
       Optional<String> content = reader.apply(path);
       scanned++;
-      if (content.isEmpty()) {
-        continue;
-      }
-      String direction = path.equals(batchFile) ? DIRECTION_SELF : DIRECTION_CALLER;
-      String[] lines = content.get().split("\n", -1);
-      for (int i = 0; i < lines.length; i++) {
-        if (containsSymbol(lines[i], symbols)) {
-          entries.add(new Entry(path, i + 1, snippet(lines[i]), direction));
-          if (entries.size() >= MAX_ENTRIES) {
-            entryTruncated = true;
-            break;
-          }
+      if (content.isPresent()) {
+        truncated = scanEntryFile(path, batchFile, content.get(), symbols, entries);
+        if (truncated) {
+          break;
         }
       }
-      if (entryTruncated) {
-        break;
+    }
+    return new EntryScan(entries, scanned, truncated);
+  }
+
+  /**
+   * 扫描单文件的符号命中行，追加到条目列表（达到 MAX_ENTRIES 即截断）。
+   *
+   * @param path 文件路径
+   * @param batchFile 批次文件
+   * @param content 全文
+   * @param symbols 符号
+   * @param entries 条目输出
+   * @return true 若达到条目上限
+   */
+  private static boolean scanEntryFile(
+      String path, String batchFile, String content, List<String> symbols, List<Entry> entries) {
+    String direction = path.equals(batchFile) ? DIRECTION_SELF : DIRECTION_CALLER;
+    String[] lines = content.split("\n", -1);
+    for (int i = 0; i < lines.length; i++) {
+      if (containsSymbol(lines[i], symbols)) {
+        entries.add(new Entry(path, i + 1, snippet(lines[i]), direction));
+        if (entries.size() >= MAX_ENTRIES) {
+          return true;
+        }
       }
     }
-    if (entryTruncated) {
-      notes.add("条目上限 " + MAX_ENTRIES + "：命中已截断（只显示前 " + MAX_ENTRIES + " 条）");
-    }
-    return new CallSiteIndex(
-        true,
-        "",
-        symbols,
-        entries,
-        scanned,
-        candidates.size(),
-        callerCandidates,
-        importsAvailable,
-        notes);
+    return false;
   }
+
+  /**
+   * 候选集与选择说明。
+   *
+   * @param candidates 扫描候选
+   * @param notes 说明
+   * @param callerCandidates 跨包 caller 候选数
+   * @param importsAvailable import 关系是否可得
+   */
+  private record CandidateSet(
+      List<String> candidates,
+      List<String> notes,
+      int callerCandidates,
+      boolean importsAvailable) {}
+
+  /**
+   * 条目扫描结果。
+   *
+   * @param entries 调用点条目
+   * @param scanned 已扫描候选数
+   * @param truncated 是否达到条目上限
+   */
+  private record EntryScan(List<Entry> entries, int scanned, boolean truncated) {}
 
   /**
    * import 关联 caller（词法启发式，ADR-0014 近似性）：精确解析（{@code resolvedInRepo}）、静态成员导入（包内类型前缀）、 通配导入（{@code
@@ -398,25 +481,36 @@ public final class CallSiteIndex {
       }
       if (entry.resolvedInRepo() && batchFile.equals(entry.resolvedPath())) {
         callers.add(path);
-        continue;
-      }
-      if (entry.staticImport()) {
-        String imported = entry.imported();
-        for (String type : types) {
-          String prefix = packageName.isBlank() ? type + "." : packageName + "." + type + ".";
-          if (imported != null && imported.startsWith(prefix)) {
-            callers.add(path);
-            break;
-          }
+      } else if (entry.staticImport()) {
+        if (importsStaticMember(entry, packageName, types)) {
+          callers.add(path);
         }
-        continue;
-      }
-      if (!packageName.isBlank() && (packageName + ".*").equals(entry.imported())) {
+      } else if (!packageName.isBlank() && (packageName + ".*").equals(entry.imported())) {
         callers.add(path);
       }
     }
     // TreeSet 已按路径升序，拷贝为 ArrayList 即可（调用方按序截断）
     return new ArrayList<>(callers);
+  }
+
+  /**
+   * 静态成员导入是否指向批次文件的类型（{@code pkg.Type.member} 前缀匹配）。
+   *
+   * @param entry import 条目
+   * @param packageName 批次文件包名
+   * @param types 批次文件类型名
+   * @return true 若命中
+   */
+  private static boolean importsStaticMember(
+      TypeImport entry, String packageName, Set<String> types) {
+    String imported = entry.imported();
+    for (String type : types) {
+      String prefix = packageName.isBlank() ? type + "." : packageName + "." + type + ".";
+      if (imported != null && imported.startsWith(prefix)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -449,6 +543,18 @@ public final class CallSiteIndex {
       sb.append("（索引不可得：").append(reason).append("；如需调用方/测试证据，可用 followup_file 请求具体文件）\n");
       return sb.toString();
     }
+    appendSymbolSummary(sb);
+    long used = TokenMath.estimateTokens(sb.toString());
+    appendEntries(sb, tokenCap, used);
+    return sb.toString();
+  }
+
+  /**
+   * 追加符号/扫描规模/近似性声明段。
+   *
+   * @param sb 输出
+   */
+  private void appendSymbolSummary(StringBuilder sb) {
     sb.append("符号：");
     for (int i = 0; i < symbols.size(); i++) {
       if (i > 0) {
@@ -466,7 +572,16 @@ public final class CallSiteIndex {
     if (entries.isEmpty()) {
       sb.append("（可见范围内未发现调用点——不能据此推断调用方行为）\n");
     }
-    long used = TokenMath.estimateTokens(sb.toString());
+  }
+
+  /**
+   * 按预算追加条目行（超预算截断）。
+   *
+   * @param sb 输出
+   * @param tokenCap 预算上限
+   * @param used 已用 token
+   */
+  private void appendEntries(StringBuilder sb, long tokenCap, long used) {
     for (Entry entry : entries) {
       String line =
           "- ["
@@ -486,7 +601,6 @@ public final class CallSiteIndex {
       sb.append(line);
       used += cost;
     }
-    return sb.toString();
   }
 
   /** 渲染下限（低于此值只剩标题，按此值兜底）。 */
@@ -511,18 +625,8 @@ public final class CallSiteIndex {
         continue;
       }
       for (String text : List.of(finding.evidence(), finding.title(), finding.failureMode())) {
-        if (text == null) {
-          continue;
-        }
-        Matcher matcher = IDENTIFIER.matcher(text);
-        while (matcher.find() && symbols.size() < MAX_SYMBOLS) {
-          String token = matcher.group();
-          if (STOP_WORDS.contains(token.toLowerCase(Locale.ROOT)) || token.length() < 4) {
-            continue;
-          }
-          if (inFile.contains(token)) {
-            symbols.add(token);
-          }
+        if (text != null) {
+          addSymbolsFromText(text, inFile, symbols);
         }
       }
       if (symbols.size() >= MAX_SYMBOLS) {
@@ -530,6 +634,26 @@ public final class CallSiteIndex {
       }
     }
     return new ArrayList<>(symbols);
+  }
+
+  /**
+   * 从单段文本抽取文件内标识符加入符号集（≤MAX_SYMBOLS；停用词与短词排除）。
+   *
+   * @param text 文本
+   * @param inFile 文件内标识符
+   * @param symbols 符号输出
+   */
+  private static void addSymbolsFromText(String text, Set<String> inFile, Set<String> symbols) {
+    Matcher matcher = IDENTIFIER.matcher(text);
+    while (matcher.find() && symbols.size() < MAX_SYMBOLS) {
+      String token = matcher.group();
+      if (STOP_WORDS.contains(token.toLowerCase(Locale.ROOT)) || token.length() < 4) {
+        continue;
+      }
+      if (inFile.contains(token)) {
+        symbols.add(token);
+      }
+    }
   }
 
   /** 批次文件的 package 声明（无 package 返回空串）。 */

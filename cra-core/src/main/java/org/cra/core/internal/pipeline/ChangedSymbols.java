@@ -244,28 +244,59 @@ final class ChangedSymbols {
     if (files == null || files.isEmpty() || index == null || !index.available()) {
       return List.of();
     }
-    Set<String> changedPaths = new LinkedHashSet<>();
-    for (DiffFile file : files) {
-      changedPaths.add(file.path());
-    }
+    Set<String> changedPaths =
+        files.stream()
+            .map(DiffFile::path)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
     Map<String, Integer> bestTier = new LinkedHashMap<>();
     Map<String, Integer> occurrences = new LinkedHashMap<>();
     for (DiffFile file : files) {
-      Map<Integer, String> addedLines = addedLines(file);
-      if (addedLines.isEmpty()) {
-        continue;
-      }
-      Map<Integer, SymbolDefinition> enclosing =
-          enclosingDefinitions(addedLines.keySet(), index.definitionsOfPath(file.path()));
-      for (Map.Entry<Integer, String> entry : addedLines.entrySet()) {
-        for (String identifier : identifiersOf(entry.getValue())) {
-          if (!isStructurallyCandidate(identifier)) {
-            continue;
-          }
-          List<SymbolDefinition> definitions = index.definitionsOf(identifier);
-          if (definitions.isEmpty()) {
-            continue;
-          }
+      recordFileCandidates(file, index, changedPaths, bestTier, occurrences);
+    }
+    List<Symbol> symbols =
+        bestTier.entrySet().stream()
+            .map(
+                entry ->
+                    new Symbol(
+                        entry.getKey(),
+                        entry.getValue(),
+                        occurrences.getOrDefault(entry.getKey(), 0)))
+            .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+    symbols.sort(
+        Comparator.comparingInt(Symbol::tier)
+            .thenComparing(Comparator.comparingInt(Symbol::occurrences).reversed())
+            .thenComparing(Symbol::name));
+    return List.copyOf(symbols.subList(0, Math.min(maxSymbols, symbols.size())));
+  }
+
+  /**
+   * 抽取单个文件新增行中的符号候选（Tier A 定义变更 / Tier B 引用变更 + 最内层定义归属）。
+   *
+   * @param file 变更文件
+   * @param index 符号索引
+   * @param changedPaths 本 PR 变更文件路径
+   * @param bestTier 符号 → 最优 tier（可变）
+   * @param occurrences 符号 → 全仓出现次数（可变）
+   */
+  private static void recordFileCandidates(
+      DiffFile file,
+      SymbolIndexSnapshot index,
+      Set<String> changedPaths,
+      Map<String, Integer> bestTier,
+      Map<String, Integer> occurrences) {
+    Map<Integer, String> addedLines = addedLines(file);
+    if (addedLines.isEmpty()) {
+      return;
+    }
+    Map<Integer, SymbolDefinition> enclosing =
+        enclosingDefinitions(addedLines.keySet(), index.definitionsOfPath(file.path()));
+    for (Map.Entry<Integer, String> entry : addedLines.entrySet()) {
+      for (String identifier : identifiersOf(entry.getValue())) {
+        if (!isStructurallyCandidate(identifier)) {
+          continue;
+        }
+        List<SymbolDefinition> definitions = index.definitionsOf(identifier);
+        if (!definitions.isEmpty()) {
           boolean definedHere =
               definitions.stream().anyMatch(definition -> changedPaths.contains(definition.path()));
           int occurrencesOfName = index.occurrencesOf(identifier);
@@ -275,28 +306,17 @@ final class ChangedSymbols {
             recordCandidate(bestTier, occurrences, identifier, 1, occurrencesOfName);
           }
         }
-        SymbolDefinition enclosingDefinition = enclosing.get(entry.getKey());
-        if (enclosingDefinition != null && isStructurallyCandidate(enclosingDefinition.name())) {
-          recordCandidate(
-              bestTier,
-              occurrences,
-              enclosingDefinition.name(),
-              0,
-              Math.max(1, index.occurrencesOf(enclosingDefinition.name())));
-        }
+      }
+      SymbolDefinition enclosingDefinition = enclosing.get(entry.getKey());
+      if (enclosingDefinition != null && isStructurallyCandidate(enclosingDefinition.name())) {
+        recordCandidate(
+            bestTier,
+            occurrences,
+            enclosingDefinition.name(),
+            0,
+            Math.max(1, index.occurrencesOf(enclosingDefinition.name())));
       }
     }
-    List<Symbol> symbols = new ArrayList<>();
-    for (Map.Entry<String, Integer> entry : bestTier.entrySet()) {
-      symbols.add(
-          new Symbol(
-              entry.getKey(), entry.getValue(), occurrences.getOrDefault(entry.getKey(), 0)));
-    }
-    symbols.sort(
-        Comparator.comparingInt(Symbol::tier)
-            .thenComparing(Comparator.comparingInt(Symbol::occurrences).reversed())
-            .thenComparing(Symbol::name));
-    return List.copyOf(symbols.subList(0, Math.min(maxSymbols, symbols.size())));
   }
 
   private static void recordCandidate(
@@ -355,15 +375,11 @@ final class ChangedSymbols {
       if (raw.startsWith("@@")) {
         inHunk = true;
         newLine = parseNewStart(raw);
-        continue;
-      }
-      if (!inHunk && (raw.startsWith("+++") || raw.startsWith("---"))) {
-        continue;
-      }
-      if (raw.startsWith("\\")) {
-        continue;
-      }
-      if (raw.startsWith("+")) {
+      } else if (!inHunk && (raw.startsWith("+++") || raw.startsWith("---"))) {
+        // 文件头：首个 hunk 之前的元数据行
+      } else if (raw.startsWith("\\")) {
+        // "\ No newline at end of file"
+      } else if (raw.startsWith("+")) {
         if (newLine > 0 && added.size() < MAX_ADDED_LINES_PER_FILE) {
           added.put(newLine, raw.substring(1));
         }
@@ -419,26 +435,40 @@ final class ChangedSymbols {
         break;
       }
       if (c == '"' || c == '\'') {
-        char quote = c;
+        i = appendQuotedPlaceholder(line, i, c, out);
+      } else {
+        out.append(c);
         i++;
-        while (i < n) {
-          char ch = line.charAt(i);
-          if (ch == '\\') {
-            i += 2;
-            continue;
-          }
-          if (ch == quote) {
-            i++;
-            break;
-          }
-          i++;
-        }
-        out.append(' ');
-        continue;
       }
-      out.append(c);
-      i++;
     }
     return out.toString();
+  }
+
+  /**
+   * 跳过一个字符串/字符字面量并以空格占位（未闭合到行尾容错）。
+   *
+   * @param line 原始行
+   * @param start 引号下标
+   * @param quote 引号字符
+   * @param out 输出
+   * @return 字面量之后的下标
+   */
+  private static int appendQuotedPlaceholder(
+      String line, int start, char quote, StringBuilder out) {
+    int i = start + 1;
+    int n = line.length();
+    while (i < n) {
+      char ch = line.charAt(i);
+      if (ch == '\\') {
+        i += 2;
+      } else if (ch == quote) {
+        i++;
+        break;
+      } else {
+        i++;
+      }
+    }
+    out.append(' ');
+    return i;
   }
 }

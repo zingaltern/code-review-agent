@@ -82,42 +82,24 @@ final class CrossFileSliceAssembler {
       notes.add("L2 跨文件切片未注入：新增行未命中索引内符号定义（ADR-0014 变更符号抽取口径）");
       return new CrossFileSlices("", List.copyOf(notes), 0, 0, 0, false);
     }
-    Set<String> changedPaths = new LinkedHashSet<>();
-    for (DiffFile file : files) {
-      changedPaths.add(file.path());
-    }
+    Set<String> changedPaths =
+        files.stream()
+            .map(DiffFile::path)
+            .collect(java.util.stream.Collectors.toCollection(LinkedHashSet::new));
 
     String header = renderHeader(index, symbols.size());
-    StringBuilder body = new StringBuilder();
-    long used = TokenMath.estimateTokens(header);
-    int renderedSymbols = 0;
-    int renderedSites = 0;
-    int renderedFiles = 0;
-    int skippedSymbols = 0;
-    int skippedSites = 0;
-    Set<String> renderedPaths = new LinkedHashSet<>();
-    for (ChangedSymbols.Symbol symbol : symbols) {
-      Section section = renderSymbol(symbol.name(), index, changedPaths);
-      if (section == null) {
-        skippedSymbols++;
-        continue;
-      }
-      long sectionTokens = TokenMath.estimateTokens(section.text());
-      if (used + sectionTokens + FOOTER_RESERVE > budgetTokens) {
-        skippedSymbols++;
-        skippedSites += section.sites();
-        continue;
-      }
-      body.append(section.text());
-      used += sectionTokens;
-      renderedSymbols++;
-      renderedSites += section.sites();
-      renderedPaths.addAll(section.paths());
-    }
+    Rendering rendering = renderSections(symbols, index, changedPaths, budgetTokens);
+    StringBuilder body = rendering.body();
+    int renderedSymbols = rendering.renderedSymbols();
+    int renderedSites = rendering.renderedSites();
+    int renderedFiles;
+    int skippedSymbols = rendering.skippedSymbols();
+    int skippedSites = rendering.skippedSites();
+    Set<String> renderedPaths = rendering.renderedPaths();
     Section importSection = renderImports(index, changedPaths, renderedPaths);
     if (importSection != null) {
       long importTokens = TokenMath.estimateTokens(importSection.text());
-      if (used + importTokens + FOOTER_RESERVE <= budgetTokens) {
+      if (rendering.used() + importTokens + FOOTER_RESERVE <= budgetTokens) {
         body.append(importSection.text());
         renderedPaths.addAll(importSection.paths());
       }
@@ -195,6 +177,69 @@ final class CrossFileSliceAssembler {
         + " 个（按 ADR-0014 抽取口径）。\n";
   }
 
+  /**
+   * 逐符号渲染切片段（预算裁剪，未注入符号如实计数）。
+   *
+   * @param symbols 变更符号
+   * @param index 符号索引
+   * @param changedPaths 本 PR 变更文件
+   * @param budgetTokens 切片预算
+   * @return 渲染结果
+   */
+  private static Rendering renderSections(
+      List<ChangedSymbols.Symbol> symbols,
+      SymbolIndexSnapshot index,
+      Set<String> changedPaths,
+      long budgetTokens) {
+    StringBuilder body = new StringBuilder();
+    long used = TokenMath.estimateTokens(renderHeader(index, symbols.size()));
+    int renderedSymbols = 0;
+    int renderedSites = 0;
+    int skippedSymbols = 0;
+    int skippedSites = 0;
+    Set<String> renderedPaths = new LinkedHashSet<>();
+    for (ChangedSymbols.Symbol symbol : symbols) {
+      Section section = renderSymbol(symbol.name(), index, changedPaths);
+      if (section == null) {
+        skippedSymbols++;
+      } else {
+        long sectionTokens = TokenMath.estimateTokens(section.text());
+        if (used + sectionTokens + FOOTER_RESERVE > budgetTokens) {
+          skippedSymbols++;
+          skippedSites += section.sites();
+        } else {
+          body.append(section.text());
+          used += sectionTokens;
+          renderedSymbols++;
+          renderedSites += section.sites();
+          renderedPaths.addAll(section.paths());
+        }
+      }
+    }
+    return new Rendering(
+        body, used, renderedSymbols, renderedSites, renderedPaths, skippedSymbols, skippedSites);
+  }
+
+  /**
+   * 切片渲染中间结果。
+   *
+   * @param body 正文
+   * @param used 已用 token
+   * @param renderedSymbols 已注入符号数
+   * @param renderedSites 已注入引用处数
+   * @param renderedPaths 已注入文件
+   * @param skippedSymbols 未注入符号数
+   * @param skippedSites 未注入引用处数
+   */
+  private record Rendering(
+      StringBuilder body,
+      long used,
+      int renderedSymbols,
+      int renderedSites,
+      Set<String> renderedPaths,
+      int skippedSymbols,
+      int skippedSites) {}
+
   /** 渲染单个符号段（定义行 + 跨文件引用）；无证据返回 null。 */
   private static Section renderSymbol(
       String name, SymbolIndexSnapshot index, Set<String> changedPaths) {
@@ -208,24 +253,41 @@ final class CrossFileSliceAssembler {
     if (definitions.isEmpty()) {
       return null;
     }
+    List<SymbolReferenceSite> references =
+        index.referencesOf(name).stream()
+            .filter(site -> !changedPaths.contains(site.path()))
+            .toList();
     List<SymbolReferenceSite> sites = new ArrayList<>();
     Set<String> siteFiles = new LinkedHashSet<>();
-    for (SymbolReferenceSite site : index.referencesOf(name)) {
-      if (changedPaths.contains(site.path())) {
-        continue;
-      }
+    for (SymbolReferenceSite site : references) {
       if (sites.size() >= MAX_SITES_PER_SYMBOL) {
         break;
       }
       boolean newFile = !siteFiles.contains(site.path());
-      if (newFile && siteFiles.size() >= MAX_FILES_PER_SYMBOL) {
-        continue;
+      if (!newFile || siteFiles.size() < MAX_FILES_PER_SYMBOL) {
+        if (newFile) {
+          siteFiles.add(site.path());
+        }
+        sites.add(site);
       }
-      if (newFile) {
-        siteFiles.add(site.path());
-      }
-      sites.add(site);
     }
+    return renderSection(name, definitions, sites, siteFiles);
+  }
+
+  /**
+   * 生成符号段文本（定义行 + 跨文件引用行）。
+   *
+   * @param name 符号名
+   * @param definitions 定义
+   * @param sites 引用位置
+   * @param siteFiles 引用文件
+   * @return 段落
+   */
+  private static Section renderSection(
+      String name,
+      List<SymbolDefinition> definitions,
+      List<SymbolReferenceSite> sites,
+      Set<String> siteFiles) {
     SymbolDefinition primary = definitions.get(0);
     StringBuilder out = new StringBuilder();
     out.append("\n### 符号 `")
@@ -277,17 +339,16 @@ final class CrossFileSliceAssembler {
     Map<String, List<TypeImport>> byFile = new LinkedHashMap<>();
     Set<String> files = new LinkedHashSet<>();
     for (TypeImport entry : index.imports()) {
-      if (!entry.resolvedInRepo()
-          || !changedPaths.contains(entry.resolvedPath())
-          || changedPaths.contains(entry.path())
-          || alreadyRendered.contains(entry.path())) {
-        continue;
+      boolean accepted =
+          entry.resolvedInRepo()
+              && changedPaths.contains(entry.resolvedPath())
+              && !changedPaths.contains(entry.path())
+              && !alreadyRendered.contains(entry.path())
+              && (files.contains(entry.path()) || files.size() < MAX_IMPORT_FILES);
+      if (accepted) {
+        files.add(entry.path());
+        byFile.computeIfAbsent(entry.path(), key -> new ArrayList<>()).add(entry);
       }
-      if (!files.contains(entry.path()) && files.size() >= MAX_IMPORT_FILES) {
-        continue;
-      }
-      files.add(entry.path());
-      byFile.computeIfAbsent(entry.path(), key -> new ArrayList<>()).add(entry);
     }
     if (byFile.isEmpty()) {
       return null;
