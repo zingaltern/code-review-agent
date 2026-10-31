@@ -7,7 +7,8 @@ import java.util.Objects;
  * JudgeAgent 定义（07 T2.6；03§4.4 一次性终裁：INSUFFICIENT 仲裁 + important 级 REFUTED 抽查复核）。
  * 一次性——不做多轮辩论（Debate or Vote：仲裁不做辩论循环）；强模型档位由路由层决定（T2.9）。
  *
- * <p>预算对齐 03§6 速查表 JudgeAgent 行（≤16k 输入 / ≤1k 输出 / 2 轮）；上下文按案件界定（≤3 文件， 截取在编排器组装侧完成）。
+ * <p>预算对齐 03§6 速查表 JudgeAgent 行（AI Coding 放宽档：≤20k 输入 / ≤1.5k 输出 / 2 轮）；上下文按案件界定（≤3 文件，
+ * 截取在编排器组装侧完成）。
  */
 public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 

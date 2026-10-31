@@ -24,10 +24,10 @@ import org.cra.common.run.ReviewMode;
  * @param llmModel 模型名（CRA_LLM_MODEL = standard 档，05§5）
  * @param runRoot trace/brief 落盘根（默认 .cra/runs，05§4 artifact 路径）
  * @param workspace 本地工作区根（jgit blame 用；CI = checkout 目录，默认当前目录；05§2.1）
- * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 4000）
- * @param hardCapLines 硬上限（review.hard-cap-lines，默认 16000）
+ * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 4000；原 2000，#64 放宽）
+ * @param hardCapLines 硬上限（review.hard-cap-lines，默认 16000；原 8000，#64 放宽）
  * @param nitBudget nit 预算默认（review.nit-budget-default，默认 3；REVIEW.md 显式配置优先）
- * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 800k）
+ * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 800k；原 500k，#64 放宽）
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
  * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
