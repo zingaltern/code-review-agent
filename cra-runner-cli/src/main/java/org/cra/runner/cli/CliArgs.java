@@ -81,7 +81,7 @@ final class CliArgs {
     boolean gitlab = PlatformArgs.GITLAB.equals(platform);
     Target target = resolveTarget(scan, env, gitlab);
     PlatformArgs.LlmEnvTriple llm = PlatformArgs.llmEnvTriple(env, !scan.local());
-    Limits limits = parseLimits(scan.named());
+    Limits limits = parseLimits(scan.named(), env);
     Advanced advanced = parseAdvanced(scan, env);
     SignoffConfig signoff = parseSignoff(scan, env);
     LlmTuning tuning = parseLlmTuning(scan.named(), env);
@@ -296,28 +296,52 @@ final class CliArgs {
     return new Target(ownerRepo, pr, base, head, depth, token);
   }
 
-  /** 预算/阈值解析（顺序保持不变：degrade → 行数上限 → 抽查 → 发布策略）。 */
-  private static Limits parseLimits(Map<String, String> named) {
-    DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", DEFAULT_DEGRADE_AT));
+  /** 预算/阈值解析（05§5 review.*；flag &gt; CRA_REVIEW_* env &gt; 基准值，解析器与 sweep 共享于 PlatformArgs）。 */
+  private static Limits parseLimits(Map<String, String> named, Map<String, String> env) {
+    PipelineOptions defaults = PipelineOptions.defaults();
+    PlatformArgs.Sourced degradeAtValue =
+        PlatformArgs.policyValue(named, env, "--degrade-at", "CRA_REVIEW_DEGRADE_AT");
+    PlatformArgs.DegradeAt degradeAt =
+        PlatformArgs.degradeAt(
+            degradeAtValue.key(),
+            degradeAtValue.value(),
+            new PlatformArgs.DegradeAt(defaults.degradeAtFirst(), defaults.degradeAtSecond()));
+    PlatformArgs.Sourced largeValue =
+        PlatformArgs.policyValue(named, env, "--large-diff-lines", "CRA_REVIEW_LARGE_DIFF_LINES");
     int largeDiffLines =
-        parseIntOption(named, "--large-diff-lines", PipelineOptions.DEFAULT_LARGE_DIFF_LINES);
+        PlatformArgs.positiveInt(largeValue.key(), largeValue.value(), defaults.largeDiffLines());
+    PlatformArgs.Sourced hardValue =
+        PlatformArgs.policyValue(named, env, "--hard-cap-lines", "CRA_REVIEW_HARD_CAP_LINES");
     int hardCapLines =
-        parseIntOption(named, "--hard-cap-lines", PipelineOptions.DEFAULT_HARD_CAP_LINES);
+        PlatformArgs.positiveInt(hardValue.key(), hardValue.value(), defaults.hardCapLines());
     if (hardCapLines <= largeDiffLines) {
       throw new CraConfigException(
-          "--hard-cap-lines 必须大于 --large-diff-lines: " + hardCapLines + " <= " + largeDiffLines);
+          hardValue.key()
+              + " 必须大于 "
+              + largeValue.key()
+              + ": "
+              + hardCapLines
+              + " <= "
+              + largeDiffLines);
     }
+    PlatformArgs.Sourced spotValue =
+        PlatformArgs.policyValue(
+            named, env, "--spot-check-percent", "CRA_REVIEW_SPOT_CHECK_PERCENT");
     int spotCheckPercent =
-        parsePercent(named, "--spot-check-percent", PipelineOptions.DEFAULT_SPOTCHECK_PERCENT);
-    String publishUnverified = named.getOrDefault("--publish-unverified", "never");
-    if (!"never".equals(publishUnverified) && !"labeled".equals(publishUnverified)) {
-      throw new CraConfigException(
-          "--publish-unverified 非法: " + publishUnverified + "（never|labeled）");
-    }
+        PlatformArgs.percent(
+            spotValue.key(), spotValue.value(), defaults.importantRefutedSpotCheckPercent());
+    PlatformArgs.Sourced publishValue =
+        PlatformArgs.policyValue(
+            named, env, "--publish-unverified", "CRA_REVIEW_PUBLISH_UNVERIFIED");
+    String publishUnverified =
+        PlatformArgs.publishUnverified(
+            publishValue.key(), publishValue.value(), defaults.publishUnverified());
+    PlatformArgs.Sourced nitValue =
+        PlatformArgs.policyValue(named, env, "--nit-budget", "CRA_REVIEW_NIT_BUDGET");
     return new Limits(
         largeDiffLines,
         hardCapLines,
-        parseNitBudget(named),
+        PlatformArgs.nitBudget(nitValue.key(), nitValue.value(), defaults.nitBudgetDefault()),
         parseLongOption(named, "--run-total-tokens", PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS),
         degradeAt.first(),
         degradeAt.second(),
@@ -509,75 +533,6 @@ final class CliArgs {
     } catch (NumberFormatException e) {
       throw new CraConfigException("--pr 必须为非负整数（本地模式 0 = 无 PR）: " + value);
     }
-  }
-
-  private record DegradeAt(double first, double second) {}
-
-  /** 降级阈值默认串由 PipelineOptions 基准值生成，避免与运行时默认值漂移。 */
-  private static final String DEFAULT_DEGRADE_AT = defaultDegradeAt();
-
-  private static String defaultDegradeAt() {
-    PipelineOptions defaults = PipelineOptions.defaults();
-    return defaults.degradeAtFirst() + "," + defaults.degradeAtSecond();
-  }
-
-  private static DegradeAt parseDegradeAt(String value) {
-    String[] parts = value.split(",");
-    if (parts.length != 2) {
-      throw new CraConfigException("--degrade-at 形如 0.70,0.85: " + value);
-    }
-    try {
-      double first = Double.parseDouble(parts[0].strip());
-      double second = Double.parseDouble(parts[1].strip());
-      if (!Double.isFinite(first)
-          || !Double.isFinite(second)
-          || first <= 0
-          || second <= first
-          || second > 1.0) {
-        throw new NumberFormatException();
-      }
-      return new DegradeAt(first, second);
-    } catch (NumberFormatException e) {
-      throw new CraConfigException("--degrade-at 阈值非法（0 < first < second <= 1）: " + value);
-    }
-  }
-
-  private static int parseNitBudget(Map<String, String> named) {
-    // 04§3.1：0 = 禁止 nit，是合法配置；缺省值与 PipelineOptions 基准一致
-    String value = named.get("--nit-budget");
-    if (value == null) {
-      return PipelineOptions.defaults().nitBudgetDefault();
-    }
-    try {
-      int parsed = Integer.parseInt(value.strip());
-      if (parsed < 0) {
-        throw new NumberFormatException();
-      }
-      return parsed;
-    } catch (NumberFormatException e) {
-      throw new CraConfigException("--nit-budget 必须为非负整数（0 = 禁止）: " + value);
-    }
-  }
-
-  /** 百分比参数（0–100；0 = 关闭抽查保险丝，与 PipelineOptions/SpotCheckFuse 契约一致）。 */
-  private static int parsePercent(Map<String, String> named, String key, int defaultValue) {
-    String value = named.get(key);
-    if (value == null) {
-      return defaultValue;
-    }
-    try {
-      int parsed = Integer.parseInt(value.strip());
-      if (parsed < 0 || parsed > 100) {
-        throw new NumberFormatException();
-      }
-      return parsed;
-    } catch (NumberFormatException e) {
-      throw new CraConfigException(key + " 必须在 [0,100]: " + value);
-    }
-  }
-
-  private static int parseIntOption(Map<String, String> named, String key, int defaultValue) {
-    return parseIntOption(key, named.get(key), defaultValue);
   }
 
   private static int parseIntOption(String key, String value, int defaultValue) {

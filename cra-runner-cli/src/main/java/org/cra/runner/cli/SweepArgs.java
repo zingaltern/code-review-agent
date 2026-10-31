@@ -70,7 +70,30 @@ final class SweepArgs {
         LlmParsing.parseMaxConcurrency(
             PlatformArgs.blankToNull(env.get("CRA_LLM_MAX_CONCURRENCY")),
             "CRA_LLM_MAX_CONCURRENCY");
+    // 05§5 review.* 策略组（review/sweep/server 共用同一 CRA_REVIEW_* 环境变量；sweep 面向 CI，不新增 flag）
     PipelineOptions defaults = PipelineOptions.defaults();
+    PlatformArgs.DegradeAt degradeAt =
+        PlatformArgs.degradeAt(
+            "CRA_REVIEW_DEGRADE_AT",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_DEGRADE_AT")),
+            new PlatformArgs.DegradeAt(defaults.degradeAtFirst(), defaults.degradeAtSecond()));
+    int largeDiffLines =
+        PlatformArgs.positiveInt(
+            "CRA_REVIEW_LARGE_DIFF_LINES",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_LARGE_DIFF_LINES")),
+            defaults.largeDiffLines());
+    int hardCapLines =
+        PlatformArgs.positiveInt(
+            "CRA_REVIEW_HARD_CAP_LINES",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_HARD_CAP_LINES")),
+            defaults.hardCapLines());
+    if (hardCapLines <= largeDiffLines) {
+      throw new CraConfigException(
+          "CRA_REVIEW_HARD_CAP_LINES 必须大于 CRA_REVIEW_LARGE_DIFF_LINES: "
+              + hardCapLines
+              + " <= "
+              + largeDiffLines);
+    }
     CraConfig config =
         new CraConfig(
             ownerRepo.owner(),
@@ -89,14 +112,23 @@ final class SweepArgs {
             llm.model(),
             scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT),
             scan.named().getOrDefault("--workspace", "."),
-            defaults.largeDiffLines(),
-            defaults.hardCapLines(),
-            defaults.nitBudgetDefault(),
+            largeDiffLines,
+            hardCapLines,
+            PlatformArgs.nitBudget(
+                "CRA_REVIEW_NIT_BUDGET",
+                PlatformArgs.blankToNull(env.get("CRA_REVIEW_NIT_BUDGET")),
+                defaults.nitBudgetDefault()),
             defaults.runTotalTokens(),
-            defaults.degradeAtFirst(),
-            defaults.degradeAtSecond(),
-            defaults.publishUnverified(),
-            defaults.importantRefutedSpotCheckPercent(),
+            degradeAt.first(),
+            degradeAt.second(),
+            PlatformArgs.publishUnverified(
+                "CRA_REVIEW_PUBLISH_UNVERIFIED",
+                PlatformArgs.blankToNull(env.get("CRA_REVIEW_PUBLISH_UNVERIFIED")),
+                defaults.publishUnverified()),
+            PlatformArgs.percent(
+                "CRA_REVIEW_SPOT_CHECK_PERCENT",
+                PlatformArgs.blankToNull(env.get("CRA_REVIEW_SPOT_CHECK_PERCENT")),
+                defaults.importantRefutedSpotCheckPercent()),
             false,
             CliArgs.DEFAULT_EXEC,
             CraConfig.DEFAULT_LEDGER_DB,
@@ -118,7 +150,10 @@ final class SweepArgs {
             gitlab ? PlatformArgs.gitlabSettings(scan.named(), env) : GitLabSettings.none(),
             SemanticContextConfig.defaults(),
             // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
-            Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_REVIEW_TESTS", "false")),
+            PlatformArgs.bool(
+                "CRA_REVIEW_TESTS",
+                PlatformArgs.blankToNull(env.get("CRA_REVIEW_TESTS")),
+                defaults.includeTestFiles()),
             CliArgs.agentBudgets(scan.named(), env));
     return new Parsed(config, since, maxPrs);
   }

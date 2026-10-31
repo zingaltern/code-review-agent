@@ -318,6 +318,48 @@ class CliArgsTest {
   }
 
   @Test
+  void reviewPolicyEnvOverridesAndFlagWins() {
+    // 05§5 review.*：flag > CRA_REVIEW_* env > 基准值（与 sweep/server 共用同一组键）
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_REVIEW_LARGE_DIFF_LINES", "3000");
+    env.put("CRA_REVIEW_HARD_CAP_LINES", "9000");
+    env.put("CRA_REVIEW_NIT_BUDGET", "7");
+    env.put("CRA_REVIEW_DEGRADE_AT", "0.60,0.80");
+    env.put("CRA_REVIEW_SPOT_CHECK_PERCENT", "50");
+    env.put("CRA_REVIEW_PUBLISH_UNVERIFIED", "labeled");
+    CraConfig fromEnv = CliArgs.parse(baseArgs(), env);
+    assertThat(fromEnv.largeDiffLines()).isEqualTo(3_000);
+    assertThat(fromEnv.hardCapLines()).isEqualTo(9_000);
+    assertThat(fromEnv.nitBudget()).isEqualTo(7);
+    assertThat(fromEnv.degradeAtFirst()).isEqualTo(0.60);
+    assertThat(fromEnv.degradeAtSecond()).isEqualTo(0.80);
+    assertThat(fromEnv.spotCheckPercent()).isEqualTo(50);
+    assertThat(fromEnv.publishUnverified()).isEqualTo("labeled");
+
+    CraConfig flagWins =
+        CliArgs.parse(
+            concat(
+                baseArgs(),
+                "--large-diff-lines",
+                "2500",
+                "--nit-budget",
+                "1",
+                "--publish-unverified",
+                "never"),
+            env);
+    assertThat(flagWins.largeDiffLines()).isEqualTo(2_500);
+    assertThat(flagWins.nitBudget()).isEqualTo(1);
+    assertThat(flagWins.publishUnverified()).isEqualTo("never");
+
+    // 非法 env 值按来源 key 报错（GitHub Actions 空 input 仍等同未设置，见 llmMaxConcurrency 用例）
+    Map<String, String> bad = new java.util.HashMap<>(ENV);
+    bad.put("CRA_REVIEW_LARGE_DIFF_LINES", "0");
+    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), bad))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_REVIEW_LARGE_DIFF_LINES");
+  }
+
+  @Test
   void semanticContextDefaultsOffAndParsesConfig() {
     // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；flag/env 优先级 = flag > env > 默认
     CraConfig defaults = CliArgs.parse(baseArgs(), ENV);
