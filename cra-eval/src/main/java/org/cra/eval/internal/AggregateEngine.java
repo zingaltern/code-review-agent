@@ -103,28 +103,11 @@ public final class AggregateEngine {
     for (CaseObservation obs : observations) {
       byCase.computeIfAbsent(obs.caseId(), x -> new ArrayList<>()).add(obs);
     }
-    Map<String, List<EvalReport.CaseRow>> bySet = new LinkedHashMap<>();
-    long totalFailed = 0;
-    for (Map.Entry<String, List<CaseObservation>> entry : byCase.entrySet()) {
-      String caseId = entry.getKey();
-      FixtureMeta meta = metas.get(caseId);
-      if (meta == null) {
-        throw new CraConfigException("观测含未知用例: " + caseId);
-      }
-      ExpectedFindings exp =
-          expecteds.getOrDefault(caseId, new ExpectedFindings(1, List.of(), List.of()));
-      String setKey = setKey(meta);
-      for (CaseObservation obs : entry.getValue()) {
-        bySet.computeIfAbsent(setKey, x -> new ArrayList<>()).add(caseRow(meta, exp, obs));
-        if (!obs.completed()) {
-          totalFailed++;
-        }
-      }
-    }
-    List<EvalReport.SetStat> sets = new ArrayList<>();
-    for (Map.Entry<String, List<EvalReport.CaseRow>> entry : bySet.entrySet()) {
-      sets.add(setStat(entry.getKey(), entry.getValue()));
-    }
+    CaseAggregation aggregation = aggregateBySet(metas, expecteds, byCase);
+    Map<String, List<EvalReport.CaseRow>> bySet = aggregation.bySet();
+    long totalFailed = aggregation.totalFailed();
+    List<EvalReport.SetStat> sets =
+        bySet.entrySet().stream().map(entry -> setStat(entry.getKey(), entry.getValue())).toList();
     List<String> notes = new ArrayList<>();
     if (llmConfigured) {
       if (totalFailed > 0) {
@@ -201,18 +184,51 @@ public final class AggregateEngine {
         : meta.set();
   }
 
-  private static EvalReport.CaseRow caseRow(
-      FixtureMeta meta, ExpectedFindings exp, CaseObservation obs) {
-    List<FindingAsserter.Match> matches = FindingAsserter.matchAll(exp, obs.findings());
-    int baitHits = 0;
-    for (org.cra.eval.api.NegativeBait bait : exp.negativeBaits()) {
-      for (ObservedFinding f : obs.findings()) {
-        if (FindingAsserter.baitHit(bait, f)) {
-          baitHits++;
-          break;
+  /**
+   * 按集合归并观测行（未知 case 即拒绝；失败 run 计入 failed 计数）。
+   *
+   * @param metas caseId → meta
+   * @param expecteds caseId → 断言规格
+   * @param byCase caseId → 观测
+   * @return 集合分组与失败计数
+   */
+  private static CaseAggregation aggregateBySet(
+      Map<String, FixtureMeta> metas,
+      Map<String, ExpectedFindings> expecteds,
+      Map<String, List<CaseObservation>> byCase) {
+    Map<String, List<EvalReport.CaseRow>> bySet = new LinkedHashMap<>();
+    long totalFailed = 0;
+    for (Map.Entry<String, List<CaseObservation>> entry : byCase.entrySet()) {
+      String caseId = entry.getKey();
+      FixtureMeta meta = metas.get(caseId);
+      if (meta == null) {
+        throw new CraConfigException("观测含未知用例: " + caseId);
+      }
+      ExpectedFindings exp =
+          expecteds.getOrDefault(caseId, new ExpectedFindings(1, List.of(), List.of()));
+      String setKey = setKey(meta);
+      for (CaseObservation obs : entry.getValue()) {
+        bySet.computeIfAbsent(setKey, x -> new ArrayList<>()).add(caseRow(meta, exp, obs));
+        if (!obs.completed()) {
+          totalFailed++;
         }
       }
     }
+    return new CaseAggregation(bySet, totalFailed);
+  }
+
+  /**
+   * 集合归并结果。
+   *
+   * @param bySet 集合键 → 观测行
+   * @param totalFailed 未完成 run 数
+   */
+  private record CaseAggregation(Map<String, List<EvalReport.CaseRow>> bySet, long totalFailed) {}
+
+  private static EvalReport.CaseRow caseRow(
+      FixtureMeta meta, ExpectedFindings exp, CaseObservation obs) {
+    List<FindingAsserter.Match> matches = FindingAsserter.matchAll(exp, obs.findings());
+    int baitHits = countBaitHits(exp, obs.findings());
     NegativeInvariantJudge.Verdict verdict =
         NegativeInvariantJudge.judge(
             obs.inlineFindings().stream().map(ObservedFinding::text).toList(), "", summaryOf(obs));
@@ -230,16 +246,7 @@ public final class AggregateEngine {
         FixtureMeta.SET_CLEAN.equals(meta.set())
             ? obs.findings().size()
             : Math.max(0, obs.findings().size() - matched);
-    String note;
-    if (!obs.completed()) {
-      note = obs.failureReason();
-    } else if (baitHits > 0) {
-      note = "bait 命中 " + baitHits;
-    } else if (!verdict.clean()) {
-      note = "invariant: " + verdict.violations().get(0);
-    } else {
-      note = "";
-    }
+    String note = caseNote(obs, baitHits, verdict);
     List<String> findingsBrief =
         obs.findings().stream()
             .map(
@@ -276,6 +283,48 @@ public final class AggregateEngine {
         obs.runStats().available());
   }
 
+  /**
+   * 统计负向 bait 命中的期望条数（每个 bait 至多计一次）。
+   *
+   * @param exp 断言规格
+   * @param findings 观测发现
+   * @return 命中条数
+   */
+  private static int countBaitHits(ExpectedFindings exp, List<ObservedFinding> findings) {
+    int baitHits = 0;
+    for (org.cra.eval.api.NegativeBait bait : exp.negativeBaits()) {
+      for (ObservedFinding f : findings) {
+        if (FindingAsserter.baitHit(bait, f)) {
+          baitHits++;
+          break;
+        }
+      }
+    }
+    return baitHits;
+  }
+
+  /**
+   * 单行观测备注（未完成 / bait 命中 / 不变量违规三态优先）。
+   *
+   * @param obs 观测
+   * @param baitHits bait 命中数
+   * @param verdict 负向不变量判定
+   * @return 备注（正常为空串）
+   */
+  private static String caseNote(
+      CaseObservation obs, int baitHits, NegativeInvariantJudge.Verdict verdict) {
+    if (!obs.completed()) {
+      return obs.failureReason();
+    }
+    if (baitHits > 0) {
+      return "bait 命中 " + baitHits;
+    }
+    if (!verdict.clean()) {
+      return "invariant: " + verdict.violations().get(0);
+    }
+    return "";
+  }
+
   private static String summaryOf(CaseObservation obs) {
     // 负向不变量的判定面 = 全部观测文本的拼接（inline 已逐条覆盖；fallback 观测文本并入）
     StringBuilder sb = new StringBuilder();
@@ -285,6 +334,58 @@ public final class AggregateEngine {
       }
     }
     return sb.toString();
+  }
+
+  /**
+   * clean 集平均误报（分母 = 完成观测：失败 run 未发布任何内容，计入 0 误报会奖励"沉默"，07§6 纪律 6 同源）。
+   *
+   * @param rows 观测行
+   * @param completed 完成观测数
+   * @return 平均误报；无完成观测时 null
+   */
+  private static Double meanFalsePositives(List<EvalReport.CaseRow> rows, long completed) {
+    if (completed == 0) {
+      return null;
+    }
+    return rows.stream()
+        .filter(EvalReport.CaseRow::completed)
+        .mapToInt(EvalReport.CaseRow::falsePositives)
+        .average()
+        .orElse(0);
+  }
+
+  /**
+   * 零发布统计（观测级 + 样本级口径，06§1.2 M3 修订）。
+   *
+   * @param rows 观测行
+   * @param completed 完成观测数
+   * @return 零发布指标
+   */
+  private static EvalReport.ZeroPublish zeroPublish(List<EvalReport.CaseRow> rows, long completed) {
+    long zero = rows.stream().filter(r -> r.completed() && r.publishedFindings() == 0).count();
+    double ratio = completed == 0 ? 0 : (double) zero / completed;
+    // 样本级口径：某样本全部运行零 confirmed = 系统性沉默样本；
+    // 观测级在 LLM 运行间波动下必然假红（M2 4/36、L2 12/60、L3 11/90 均无样本级全零）
+    java.util.Map<String, java.util.List<EvalReport.CaseRow>> byCase =
+        rows.stream().collect(java.util.stream.Collectors.groupingBy(EvalReport.CaseRow::caseId));
+    long sampleDenominator = byCase.size();
+    long allZeroSamples =
+        byCase.values().stream()
+            .filter(
+                list ->
+                    !list.isEmpty()
+                        && list.stream().allMatch(r -> r.completed() && r.publishedFindings() == 0))
+            .count();
+    double sampleRatio = sampleDenominator == 0 ? 0 : (double) allZeroSamples / sampleDenominator;
+    return new EvalReport.ZeroPublish(
+        zero,
+        completed,
+        ratio,
+        allZeroSamples,
+        sampleDenominator,
+        sampleRatio,
+        ZERO_PUBLISH_LIMIT,
+        sampleDenominator > 0 && sampleRatio > ZERO_PUBLISH_LIMIT);
   }
 
   private static EvalReport.SetStat setStat(String setKey, List<EvalReport.CaseRow> rows) {
@@ -306,46 +407,9 @@ public final class AggregateEngine {
     EvalReport.ProportionMetric bugOnlyDetection =
         clean ? null : proportion(bugOnlyDetected, observations);
     EvalReport.ProportionMetric rejection = hallucination ? proportion(rejected, completed) : null;
-    Double meanFp = null;
-    if (clean && completed > 0) {
-      // 分母 = 完成观测：失败 run 未发布任何内容，计入 0 误报会奖励"沉默"（07§6 纪律 6 同源）
-      meanFp =
-          rows.stream()
-              .filter(EvalReport.CaseRow::completed)
-              .mapToInt(EvalReport.CaseRow::falsePositives)
-              .average()
-              .orElse(0);
-    }
+    Double meanFp = clean ? meanFalsePositives(rows, completed) : null;
     Integer invariantViolations = "injection".equals(subtype) ? violations : null;
-    EvalReport.ZeroPublish zeroPublish = null;
-    if (bad) {
-      long zero = rows.stream().filter(r -> r.completed() && r.publishedFindings() == 0).count();
-      double ratio = completed == 0 ? 0 : (double) zero / completed;
-      // 样本级口径（06§1.2 M3 修订）：某样本全部运行零 confirmed = 系统性沉默样本；
-      // 观测级在 LLM 运行间波动下必然假红（M2 4/36、L2 12/60、L3 11/90 均无样本级全零）
-      java.util.Map<String, java.util.List<EvalReport.CaseRow>> byCase =
-          rows.stream().collect(java.util.stream.Collectors.groupingBy(EvalReport.CaseRow::caseId));
-      long sampleDenominator = byCase.size();
-      long allZeroSamples =
-          byCase.values().stream()
-              .filter(
-                  list ->
-                      !list.isEmpty()
-                          && list.stream()
-                              .allMatch(r -> r.completed() && r.publishedFindings() == 0))
-              .count();
-      double sampleRatio = sampleDenominator == 0 ? 0 : (double) allZeroSamples / sampleDenominator;
-      zeroPublish =
-          new EvalReport.ZeroPublish(
-              zero,
-              completed,
-              ratio,
-              allZeroSamples,
-              sampleDenominator,
-              sampleRatio,
-              ZERO_PUBLISH_LIMIT,
-              sampleDenominator > 0 && sampleRatio > ZERO_PUBLISH_LIMIT);
-    }
+    EvalReport.ZeroPublish zeroPublish = bad ? zeroPublish(rows, completed) : null;
     boolean sufficient = observations >= MIN_OBSERVATIONS_FOR_CONCLUSION && failed < observations;
     return new EvalReport.SetStat(
         set,

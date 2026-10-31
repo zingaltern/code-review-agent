@@ -44,6 +44,38 @@ public final class VerifyCommand {
     lines.add("sha256: " + actualHash);
 
     List<String> failures = new ArrayList<>();
+    verifyHashes(args, reportPath, actualHash, lines, failures);
+
+    EvalReport report = Json.read(reportPath, EvalReport.class, "评测报告");
+    EvalReport.Gate stored = report.gate();
+    GateTier tier = resolveTier(args, report, stored);
+    // 按**当前**阈值重算：报告是数据产物、门禁是策略——阈值变更后旧报告不得凭陈旧 gate 通过
+    EvalReport.Gate gate = GateEvaluator.evaluate(report, GatePolicy.of(tier), false);
+    appendGateResult(gate, stored, lines, failures);
+    verifyCommitBinding(args, report, lines, failures);
+    if (args.signature() != null) {
+      verifySignature(args, report, gate, actualHash, lines, failures);
+    } else {
+      lines.add("服务端签名: 未提供（荣誉制校验，04§2.4；服务化形态用 --signature）");
+    }
+    return finishVerification(lines, failures);
+  }
+
+  /**
+   * 哈希校验（--sha256 / --sha256-file，任一不一致即记失败）。
+   *
+   * @param args verify 参数
+   * @param reportPath 报告路径
+   * @param actualHash 实际摘要
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void verifyHashes(
+      EvalCliArgs.VerifyArgs args,
+      Path reportPath,
+      String actualHash,
+      List<String> lines,
+      List<String> failures) {
     if (args.sha256() != null && !args.sha256().isBlank()) {
       if (!ReportHasher.matches(reportPath, args.sha256())) {
         failures.add("报告哈希与 --sha256 不一致（期望 " + normalize(args.sha256()) + "）");
@@ -59,19 +91,37 @@ public final class VerifyCommand {
         lines.add("哈希校验: 一致（" + args.sha256File() + "）");
       }
     }
+  }
 
-    EvalReport report = Json.read(reportPath, EvalReport.class, "评测报告");
-    EvalReport.Gate stored = report.gate();
-    GateTier tier;
+  /**
+   * 门禁档位解析：显式 --tier &gt; 报告存量 gate &gt; 按 k/depth 反推。
+   *
+   * @param args verify 参数
+   * @param report 报告
+   * @param stored 存量 gate
+   * @return 档位
+   */
+  private static GateTier resolveTier(
+      EvalCliArgs.VerifyArgs args, EvalReport report, EvalReport.Gate stored) {
     if (args.tier() != null && !args.tier().isBlank()) {
-      tier = GateTier.parse(args.tier(), report.k(), report.depth());
-    } else if (stored != null && stored.tier() != null) {
-      tier = GateTier.parse(stored.tier(), report.k(), report.depth());
-    } else {
-      tier = GateTier.resolve(report.k(), report.depth());
+      return GateTier.parse(args.tier(), report.k(), report.depth());
     }
-    // 按**当前**阈值重算：报告是数据产物、门禁是策略——阈值变更后旧报告不得凭陈旧 gate 通过
-    EvalReport.Gate gate = GateEvaluator.evaluate(report, GatePolicy.of(tier), false);
+    if (stored != null && stored.tier() != null) {
+      return GateTier.parse(stored.tier(), report.k(), report.depth());
+    }
+    return GateTier.resolve(report.k(), report.depth());
+  }
+
+  /**
+   * 输出重算门禁结论（含红项明细与存量 gate 差异提示）。
+   *
+   * @param gate 重算 gate
+   * @param stored 存量 gate
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void appendGateResult(
+      EvalReport.Gate gate, EvalReport.Gate stored, List<String> lines, List<String> failures) {
     lines.add(
         String.format(
             Locale.ROOT, "门禁: %s（tier=%s；按当前阈值重算）", gate.passed() ? "绿" : "红", gate.tier()));
@@ -86,20 +136,38 @@ public final class VerifyCommand {
       }
       failures.add("报告门禁结论为红");
     }
-    if (args.expectCommit() != null && !args.expectCommit().isBlank()) {
-      String commit = report.commit();
-      lines.add("报告 commit: " + (commit == null ? "(缺失)" : commit));
-      if (commit == null || !commit.equalsIgnoreCase(args.expectCommit())) {
-        failures.add("报告 commit 与 --expect-commit 不一致（期望 " + args.expectCommit() + "）");
-      } else {
-        lines.add("commit 绑定: 一致");
-      }
+  }
+
+  /**
+   * commit 绑定校验（--expect-commit 显式给出才比对）。
+   *
+   * @param args verify 参数
+   * @param report 报告
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void verifyCommitBinding(
+      EvalCliArgs.VerifyArgs args, EvalReport report, List<String> lines, List<String> failures) {
+    if (args.expectCommit() == null || args.expectCommit().isBlank()) {
+      return;
     }
-    if (args.signature() != null) {
-      verifySignature(args, report, gate, actualHash, lines, failures);
+    String commit = report.commit();
+    lines.add("报告 commit: " + (commit == null ? "(缺失)" : commit));
+    if (commit == null || !commit.equalsIgnoreCase(args.expectCommit())) {
+      failures.add("报告 commit 与 --expect-commit 不一致（期望 " + args.expectCommit() + "）");
     } else {
-      lines.add("服务端签名: 未提供（荣誉制校验，04§2.4；服务化形态用 --signature）");
+      lines.add("commit 绑定: 一致");
     }
+  }
+
+  /**
+   * 输出校验结论并返回退出码（有失败即红）。
+   *
+   * @param lines 输出行
+   * @param failures 失败列表
+   * @return 退出码
+   */
+  private static int finishVerification(List<String> lines, List<String> failures) {
     if (failures.isEmpty()) {
       lines.add("结论: 通过");
       ReportWriter.printLines(lines);
@@ -147,6 +215,25 @@ public final class VerifyCommand {
         && !args.signingKeyId().equals(envelope.keyId())) {
       failures.add("签名 key_id 与 --signing-key-id 不一致（期望 " + args.signingKeyId() + "）");
     }
+    verifyEnvelopeCommit(report, envelope, lines, failures);
+    verifyEnvelopeRepo(args, envelope, lines, failures);
+    verifyEnvelopeTier(gate, envelope, lines, failures);
+    lines.add("签名语义: 防伪（密钥仅服务端与 CI 持有）；托管执行能力见 ADR-0008");
+  }
+
+  /**
+   * 签名信封 commit 与报告 commit 的绑定校验。
+   *
+   * @param report 报告
+   * @param envelope 签名信封
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void verifyEnvelopeCommit(
+      EvalReport report,
+      ReportSignature.Envelope envelope,
+      List<String> lines,
+      List<String> failures) {
     String reportCommit = report.commit() == null ? "" : report.commit().strip();
     if (reportCommit.isEmpty()) {
       failures.add("报告缺 commit 绑定：服务端签名无法绑定代码提交（04§2.4）");
@@ -155,16 +242,44 @@ public final class VerifyCommand {
     } else {
       lines.add("签名 commit 绑定: 一致");
     }
+  }
+
+  /**
+   * 签名信封 repo 校验（未提供 --repo 时只展示不比期望值）。
+   *
+   * @param args verify 参数
+   * @param envelope 签名信封
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void verifyEnvelopeRepo(
+      EvalCliArgs.VerifyArgs args,
+      ReportSignature.Envelope envelope,
+      List<String> lines,
+      List<String> failures) {
     String expectedRepo = args.repo() == null ? "" : args.repo().strip();
-    if (!expectedRepo.isEmpty()) {
-      if (!expectedRepo.equalsIgnoreCase(envelope.repo())) {
-        failures.add("签名信封 repo 与 --repo 不一致（信封 " + envelope.repo() + "，期望 " + expectedRepo + "）");
-      } else {
-        lines.add("签名 repo 绑定: 一致（" + envelope.repo() + "）");
-      }
-    } else {
+    if (expectedRepo.isEmpty()) {
       lines.add("签名 repo 绑定: 信封 " + envelope.repo() + "（未提供 --repo，不做期望值比对）");
+    } else if (!expectedRepo.equalsIgnoreCase(envelope.repo())) {
+      failures.add("签名信封 repo 与 --repo 不一致（信封 " + envelope.repo() + "，期望 " + expectedRepo + "）");
+    } else {
+      lines.add("签名 repo 绑定: 一致（" + envelope.repo() + "）");
     }
+  }
+
+  /**
+   * 签名信封 tier 与重算门禁档位的绑定校验。
+   *
+   * @param gate 重算门禁
+   * @param envelope 签名信封
+   * @param lines 输出行
+   * @param failures 失败列表
+   */
+  private static void verifyEnvelopeTier(
+      EvalReport.Gate gate,
+      ReportSignature.Envelope envelope,
+      List<String> lines,
+      List<String> failures) {
     String effectiveTier = gate.tier() == null ? "" : gate.tier();
     if (envelope.tier().isEmpty()) {
       failures.add("签名信封缺 tier 绑定（04§2.4）");
@@ -173,7 +288,6 @@ public final class VerifyCommand {
     } else {
       lines.add("签名 tier 绑定: 一致（" + envelope.tier() + "）");
     }
-    lines.add("签名语义: 防伪（密钥仅服务端与 CI 持有）；托管执行能力见 ADR-0008");
   }
 
   private static byte[] readSigningKey(EvalCliArgs.VerifyArgs args) {

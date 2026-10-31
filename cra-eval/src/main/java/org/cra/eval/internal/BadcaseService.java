@@ -131,11 +131,11 @@ final class BadcaseService {
       SnapshotBuilder.Result snapshot =
           BadcaseFixtureWriter.snapshot(inputs, adapter, repo, run, caseDir);
       ExpectedFindings draft =
-          "false-positive".equals(inputs.label())
-              ? new ExpectedFindings(1, List.of(), List.of())
-              : new ExpectedFindings(
-                  1,
-                  List.of(
+          new ExpectedFindings(
+              1,
+              "false-positive".equals(inputs.label())
+                  ? List.of()
+                  : List.of(
                       FindingLocator.toExpected(
                           new FindingLocator.Located(
                               located.findingId(),
@@ -152,7 +152,7 @@ final class BadcaseService {
                           "badcase 草稿（label="
                               + inputs.label()
                               + "；确认位置/类别/关键词后 annotate confirm）")),
-                  List.of());
+              List.of());
       AnnotateService.writeDraft(caseDir, draft);
       FixtureMeta meta =
           BadcaseFixtureWriter.meta(inputs, repo, run, caseId, set, snapshot, changedFiles);

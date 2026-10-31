@@ -35,22 +35,53 @@ public final class ReportCommand {
     Instant now = args.asOf() != null ? args.asOf() : Instant.now();
     Duration windowLength = DurationSpec.parse(args.since());
     Instant since = now.minus(windowLength);
-    ReportWindowSource source;
-    if (args.ledgerFixture() != null) {
-      source = new ReplayWindowSource(args.ledgerFixture());
-    } else {
-      String token =
-          Texts.firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
-      if (token == null) {
-        throw new CraConfigException(
-            "report 需要 GitHub 只读 token：--token / GITHUB_TOKEN / GH_TOKEN（或用 --ledger-fixture 离线回放）");
-      }
-      GitHubComponents components = GitHubAssembly.createComponents(args.apiBase(), token);
-      source = new GitHubWindowSource(components.commentSource(), components.adapter());
-    }
+    ReportWindowSource source = createSource(args, env);
     WindowData.Window base = source.load(args.repo(), since);
     List<Path> traceDirs = new ArrayList<>(args.traceDirs());
     List<String> extraNotes = new ArrayList<>();
+    applyTraceDefaults(traceDirs, extraNotes);
+    List<WindowData.RunFacts> runs =
+        TraceIngest.scan(traceDirs, args.repo(), since).stream().map(TraceIngest::toFacts).toList();
+    addTraceNotes(traceDirs, runs, extraNotes);
+    List<String> notes = new ArrayList<>(base.notes());
+    notes.addAll(extraNotes);
+    WindowData.Window window =
+        new WindowData.Window(
+            base.repo(), base.source(), base.prs(), runs, BadcaseIndex.scan(args.dataset()), notes);
+    List<WeeklyReport> previous = loadPrevious(args.previous());
+    WeeklyReport report = WeeklyReportBuilder.build(window, now, args.since(), since, previous);
+    ReportWriter.printLines(WeeklyReportWriter.renderText(report));
+    writeJsonIfRequested(args, report);
+  }
+
+  /**
+   * 建立窗口数据源（台账回放优先，否则 GitHub 只读 token 直连）。
+   *
+   * @param args report 参数
+   * @param env 环境变量（token 兜底）
+   * @return 数据源
+   */
+  private static ReportWindowSource createSource(
+      EvalCliArgs.ReportArgs args, Map<String, String> env) {
+    if (args.ledgerFixture() != null) {
+      return new ReplayWindowSource(args.ledgerFixture());
+    }
+    String token = Texts.firstNonBlank(args.token(), env.get("GITHUB_TOKEN"), env.get("GH_TOKEN"));
+    if (token == null) {
+      throw new CraConfigException(
+          "report 需要 GitHub 只读 token：--token / GITHUB_TOKEN / GH_TOKEN（或用 --ledger-fixture 离线回放）");
+    }
+    GitHubComponents components = GitHubAssembly.createComponents(args.apiBase(), token);
+    return new GitHubWindowSource(components.commentSource(), components.adapter());
+  }
+
+  /**
+   * 未指定 trace 目录时回退本地 .cra/runs，并登记不存在目录。
+   *
+   * @param traceDirs trace 目录列表（可变）
+   * @param extraNotes 附加说明（可变）
+   */
+  private static void applyTraceDefaults(List<Path> traceDirs, List<String> extraNotes) {
     if (traceDirs.isEmpty() && Files.isDirectory(Path.of(".cra", "runs"))) {
       traceDirs.add(Path.of(".cra", "runs"));
       extraNotes.add("未指定 --trace-dir，默认读取本地 .cra/runs（本地 pre-PR 模式 trace）");
@@ -60,35 +91,44 @@ public final class ReportCommand {
         extraNotes.add("trace 目录不存在: " + dir);
       }
     }
-    List<WindowData.RunFacts> runs = new ArrayList<>();
-    for (TraceIngest.RunTrace trace : TraceIngest.scan(traceDirs, args.repo(), since)) {
-      runs.add(TraceIngest.toFacts(trace));
-    }
+  }
+
+  /**
+   * trace 数据面为空时如实声明。
+   *
+   * @param traceDirs trace 目录列表
+   * @param runs 窗口内 run
+   * @param extraNotes 附加说明（可变）
+   */
+  private static void addTraceNotes(
+      List<Path> traceDirs, List<WindowData.RunFacts> runs, List<String> extraNotes) {
     if (traceDirs.isEmpty()) {
       extraNotes.add("未提供 --trace-dir：拒真池与漏斗的 trace 数据面为空");
     } else if (runs.isEmpty()) {
       extraNotes.add("trace 目录中无窗口内 run（" + traceDirs + "）");
     }
-    List<String> notes = new ArrayList<>(base.notes());
-    notes.addAll(extraNotes);
-    WindowData.Window window =
-        new WindowData.Window(
-            base.repo(), base.source(), base.prs(), runs, BadcaseIndex.scan(args.dataset()), notes);
-    List<WeeklyReport> previous = loadPrevious(args.previous());
-    WeeklyReport report = WeeklyReportBuilder.build(window, now, args.since(), since, previous);
-    ReportWriter.printLines(WeeklyReportWriter.renderText(report));
-    if (args.jsonOut() != null) {
-      Path out = args.jsonOut().toAbsolutePath();
-      if (out.getParent() != null) {
-        try {
-          Files.createDirectories(out.getParent());
-        } catch (IOException e) {
-          throw new CraIntegrationException("输出目录创建失败: " + out.getParent(), e);
-        }
-      }
-      WeeklyReportWriter.writeJson(report, out);
-      ReportWriter.printLines(List.of("JSON 报告: " + out));
+  }
+
+  /**
+   * 按需写出 JSON 报告。
+   *
+   * @param args report 参数
+   * @param report 周报
+   */
+  private static void writeJsonIfRequested(EvalCliArgs.ReportArgs args, WeeklyReport report) {
+    if (args.jsonOut() == null) {
+      return;
     }
+    Path out = args.jsonOut().toAbsolutePath();
+    if (out.getParent() != null) {
+      try {
+        Files.createDirectories(out.getParent());
+      } catch (IOException e) {
+        throw new CraIntegrationException("输出目录创建失败: " + out.getParent(), e);
+      }
+    }
+    WeeklyReportWriter.writeJson(report, out);
+    ReportWriter.printLines(List.of("JSON 报告: " + out));
   }
 
   private static List<WeeklyReport> loadPrevious(List<Path> files) {

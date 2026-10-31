@@ -89,43 +89,61 @@ final class TraceIngest {
     List<Path> traceFiles = new ArrayList<>();
     Set<Path> seen = new HashSet<>();
     for (Path root : roots) {
-      if (Files.isRegularFile(root) && root.getFileName().toString().equals("trace.ndjson")) {
-        if (seen.add(root.toAbsolutePath())) {
-          traceFiles.add(root);
-        }
-        continue;
-      }
-      if (!Files.isDirectory(root)) {
-        continue;
-      }
-      try (Stream<Path> walk = Files.walk(root, 6)) {
-        walk.filter(p -> p.getFileName().toString().equals("trace.ndjson"))
-            .filter(Files::isRegularFile)
-            .map(Path::toAbsolutePath)
-            .sorted()
-            .forEach(
-                p -> {
-                  if (seen.add(p)) {
-                    traceFiles.add(p);
-                  }
-                });
-      } catch (IOException e) {
-        throw new CraIntegrationException("trace 目录扫描失败: " + root, e);
-      }
+      collectTraceFiles(root, seen, traceFiles);
     }
-    List<RunTrace> out = new ArrayList<>();
     String repoName = repoFilter == null ? null : repoFilter.owner() + "/" + repoFilter.repo();
-    for (Path file : traceFiles) {
-      RunTrace trace = parse(file);
-      if (repoName != null && trace.repo() != null && !repoName.equals(trace.repo())) {
-        continue;
+    return traceFiles.stream()
+        .map(TraceIngest::parse)
+        .filter(trace -> inScope(trace, repoName, since))
+        .toList();
+  }
+
+  /**
+   * 收集单个根下的 trace.ndjson（文件形态直接收录；目录递归至 6 层，去重按绝对路径）。
+   *
+   * @param root 根目录/单个 trace 文件
+   * @param seen 已收录绝对路径
+   * @param traceFiles 输出
+   */
+  private static void collectTraceFiles(Path root, Set<Path> seen, List<Path> traceFiles) {
+    if (Files.isRegularFile(root) && root.getFileName().toString().equals("trace.ndjson")) {
+      if (seen.add(root.toAbsolutePath())) {
+        traceFiles.add(root);
       }
-      if (since != null && trace.startedAt() != null && trace.startedAt().isBefore(since)) {
-        continue;
-      }
-      out.add(trace);
+      return;
     }
-    return out;
+    if (!Files.isDirectory(root)) {
+      return;
+    }
+    try (Stream<Path> walk = Files.walk(root, 6)) {
+      walk.filter(p -> p.getFileName().toString().equals("trace.ndjson"))
+          .filter(Files::isRegularFile)
+          .map(Path::toAbsolutePath)
+          .sorted()
+          .forEach(
+              p -> {
+                if (seen.add(p)) {
+                  traceFiles.add(p);
+                }
+              });
+    } catch (IOException e) {
+      throw new CraIntegrationException("trace 目录扫描失败: " + root, e);
+    }
+  }
+
+  /**
+   * trace 是否在仓库/时间窗口内。
+   *
+   * @param trace 解析结果
+   * @param repoName 仓库名（null = 不限）
+   * @param since 窗口起点（null = 不限）
+   * @return true 若在窗口内
+   */
+  private static boolean inScope(RunTrace trace, String repoName, Instant since) {
+    if (repoName != null && trace.repo() != null && !repoName.equals(trace.repo())) {
+      return false;
+    }
+    return since == null || trace.startedAt() == null || !trace.startedAt().isBefore(since);
   }
 
   /**
@@ -137,84 +155,120 @@ final class TraceIngest {
   static RunTrace parse(Path file) {
     String dirName = file.getParent() == null ? "" : file.getParent().getFileName().toString();
     String runId = "";
-    String repo = null;
-    int pr = 0;
-    String base = "";
-    String head = "";
     Instant startedAt = null;
-    String status = "unknown";
-    boolean dryRun = false;
-    int published = 0;
-    int suppressed = 0;
     List<Promotion> promotions = new ArrayList<>();
     Map<String, String> judges = new HashMap<>();
-    List<String> lines;
-    try {
-      lines = Files.readAllLines(file, StandardCharsets.UTF_8);
-    } catch (IOException e) {
-      throw new CraIntegrationException("trace 读取失败: " + file, e);
-    }
-    for (String line : lines) {
+    TraceState state = new TraceState();
+    for (String line : readLines(file)) {
       if (line.isBlank()) {
         continue;
       }
-      JsonNode event;
-      try {
-        event = Json.MAPPER.readTree(line);
-      } catch (IOException e) {
-        throw new CraIntegrationException("trace 行解析失败: " + file + "（" + e.getMessage() + "）", e);
-      }
+      JsonNode event = readEvent(file, line);
       if (startedAt == null && event.hasNonNull("ts")) {
         startedAt = Instant.parse(event.path("ts").asText());
       }
       if (runId.isEmpty() && event.hasNonNull("run_id")) {
         runId = event.path("run_id").asText("");
       }
-      switch (event.path("event").asText("")) {
-        case "run_start" -> {
-          repo = event.path("repo").asText(repo);
-          pr = event.path("pr").asInt(pr);
-          base = event.path("base").asText(base);
-          head = event.path("head").asText(head);
-          dryRun = event.path("dry_run").asBoolean(false);
-        }
-        case "promotion" ->
-            promotions.add(
-                new Promotion(
-                    event.path("finding_id").asText(""),
-                    event.path("verifier_verdict").asText(""),
-                    event.path("decision").asText(""),
-                    event.path("reason").asText(""),
-                    event.path("spotcheck_fuse").asBoolean(false)));
-        case "judge" -> {
-          if (!event.path("finding_id").asText("").isBlank()) {
-            judges.put(event.path("finding_id").asText(), event.path("verdict").asText(""));
-          }
-        }
-        case "run_end" -> {
-          status = event.path("status").asText(status);
-          published = event.path("findings_published").asInt(published);
-          suppressed = event.path("suppressed_by_truncation").asInt(suppressed);
-        }
-        default -> {
-          // 其余事件与周报无关
-        }
-      }
+      applyEvent(event, state, promotions, judges);
     }
     return new RunTrace(
         runId.isEmpty() ? dirName : runId,
-        repo,
-        pr,
-        base,
-        head,
+        state.repo,
+        state.pr,
+        state.base,
+        state.head,
         startedAt,
-        status,
-        dryRun,
-        published,
-        suppressed,
+        state.status,
+        state.dryRun,
+        state.published,
+        state.suppressed,
         promotions,
         judges,
         file.getParent());
+  }
+
+  /** trace 解析的 run_start/run_end 累计状态（后到事件覆盖先到值）。 */
+  private static final class TraceState {
+    private String repo;
+    private int pr;
+    private String base = "";
+    private String head = "";
+    private String status = "unknown";
+    private boolean dryRun;
+    private int published;
+    private int suppressed;
+  }
+
+  /**
+   * 读取 trace 行（读取失败按边界异常上抛）。
+   *
+   * @param file trace.ndjson
+   * @return 行列表
+   */
+  private static List<String> readLines(Path file) {
+    try {
+      return Files.readAllLines(file, StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new CraIntegrationException("trace 读取失败: " + file, e);
+    }
+  }
+
+  /**
+   * 解析单行 JSON 事件（坏行按边界异常上抛）。
+   *
+   * @param file trace.ndjson（错误信息用）
+   * @param line 行文本
+   * @return 事件节点
+   */
+  private static JsonNode readEvent(Path file, String line) {
+    try {
+      return Json.MAPPER.readTree(line);
+    } catch (IOException e) {
+      throw new CraIntegrationException("trace 行解析失败: " + file + "（" + e.getMessage() + "）", e);
+    }
+  }
+
+  /**
+   * 应用单个 trace 事件到解析状态。
+   *
+   * @param event 事件节点
+   * @param state run_start/run_end 累计状态
+   * @param promotions promotion 事件
+   * @param judges judge 事件
+   */
+  private static void applyEvent(
+      JsonNode event, TraceState state, List<Promotion> promotions, Map<String, String> judges) {
+    switch (event.path("event").asText("")) {
+      case "run_start" -> {
+        state.repo = event.path("repo").asText(state.repo);
+        state.pr = event.path("pr").asInt(state.pr);
+        state.base = event.path("base").asText(state.base);
+        state.head = event.path("head").asText(state.head);
+        state.dryRun = event.path("dry_run").asBoolean(false);
+      }
+      case "promotion" ->
+          promotions.add(
+              new Promotion(
+                  event.path("finding_id").asText(""),
+                  event.path("verifier_verdict").asText(""),
+                  event.path("decision").asText(""),
+                  event.path("reason").asText(""),
+                  event.path("spotcheck_fuse").asBoolean(false)));
+      case "judge" -> {
+        if (!event.path("finding_id").asText("").isBlank()) {
+          judges.put(event.path("finding_id").asText(), event.path("verdict").asText(""));
+        }
+      }
+      case "run_end" -> {
+        state.status = event.path("status").asText(state.status);
+        state.published = event.path("findings_published").asInt(state.published);
+        state.suppressed = event.path("suppressed_by_truncation").asInt(state.suppressed);
+      }
+      default -> {
+        // 其余事件与周报无关
+      }
+    }
   }
 
   /**
@@ -241,25 +295,21 @@ final class TraceIngest {
       }
       if ("publish".equals(promotion.decision())) {
         confirmed++;
-        continue;
-      }
-      if (!"judge".equals(promotion.decision())) {
-        continue;
-      }
-      String verdict = trace.judges().get(promotion.findingId());
-      boolean verdictAvailable =
-          verdict != null && !verdict.isBlank() && !"unavailable".equalsIgnoreCase(verdict);
-      if (!verdictAvailable) {
-        if (isRefuted) {
-          judgeUnavailable++;
+      } else if ("judge".equals(promotion.decision())) {
+        String verdict = trace.judges().get(promotion.findingId());
+        if (!isVerdictAvailable(verdict)) {
+          if (isRefuted) {
+            judgeUnavailable++;
+          }
+        } else {
+          boolean confirmedVerdict = "CONFIRMED".equalsIgnoreCase(verdict);
+          if (confirmedVerdict) {
+            confirmed++;
+          }
+          if (isRefuted) {
+            perFinding.put(promotion.findingId(), confirmedVerdict);
+          }
         }
-        continue;
-      }
-      if ("CONFIRMED".equalsIgnoreCase(verdict)) {
-        confirmed++;
-      }
-      if (isRefuted) {
-        perFinding.put(promotion.findingId(), "CONFIRMED".equalsIgnoreCase(verdict));
       }
     }
     perFinding.forEach(
@@ -279,6 +329,16 @@ final class TraceIngest {
         judgeUnavailable,
         judgedRefusals,
         !trace.promotions().isEmpty());
+  }
+
+  /**
+   * judge 判定是否可用（缺失/空白/unavailable 均不可用）。
+   *
+   * @param verdict judge verdict 原值
+   * @return true 若可用
+   */
+  private static boolean isVerdictAvailable(String verdict) {
+    return verdict != null && !verdict.isBlank() && !"unavailable".equalsIgnoreCase(verdict);
   }
 
   /**

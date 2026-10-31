@@ -2,7 +2,7 @@ package org.cra.eval.internal;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import org.cra.common.exception.CraConfigException;
 
@@ -24,13 +24,10 @@ final class EvalArgsSupport {
     if (value == null || value.isBlank()) {
       return List.of();
     }
-    List<Path> out = new ArrayList<>();
-    for (String part : value.split(",")) {
-      if (!part.isBlank()) {
-        out.add(Path.of(part.strip()));
-      }
-    }
-    return out;
+    return Arrays.stream(value.split(","))
+        .filter(part -> !part.isBlank())
+        .map(part -> Path.of(part.strip()))
+        .toList();
   }
 
   static int parsePositive(String value, String flag, int dflt) {

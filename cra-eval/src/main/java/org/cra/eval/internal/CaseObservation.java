@@ -1,6 +1,5 @@
 package org.cra.eval.internal;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -36,13 +35,7 @@ public record CaseObservation(
 
   /** 便捷：过滤 inline 观测。 */
   public List<ObservedFinding> inlineFindings() {
-    List<ObservedFinding> out = new ArrayList<>();
-    for (ObservedFinding f : findings) {
-      if (ObservedFinding.INLINE.equals(f.source())) {
-        out.add(f);
-      }
-    }
-    return out;
+    return findings.stream().filter(f -> ObservedFinding.INLINE.equals(f.source())).toList();
   }
 
   /**

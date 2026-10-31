@@ -32,35 +32,10 @@ final class BadcaseArgsParser {
     // 位置参数合法：add <run_ref> <finding_id>
     Map<String, String> named = options.named();
     List<String> positional = options.positional();
-    if (positional.isEmpty() || !"add".equals(positional.get(0))) {
-      throw new CraConfigException("badcase 子命令当前只支持 add；" + EvalUsage.USAGE_TEXT);
-    }
-    if (positional.size() < 3) {
-      throw new CraConfigException(
-          "缺参数: badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled --dataset <dir>");
-    }
-    String dataset = named.get("--dataset");
-    if (dataset == null || dataset.isBlank()) {
-      throw new CraConfigException("缺参数: --dataset <dir>");
-    }
-    String label = named.get("--label");
-    if (label == null || label.isBlank()) {
-      throw new CraConfigException("缺参数: --label missed|false-positive|relabeled");
-    }
-    if (!List.of("missed", "false-positive", "relabeled").contains(label)) {
-      throw new CraConfigException("--label 非法: " + label + "（missed|false-positive|relabeled）");
-    }
-    Integer line = null;
-    if (named.containsKey("--line")) {
-      try {
-        line = Integer.parseInt(named.get("--line"));
-      } catch (NumberFormatException e) {
-        throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
-      }
-      if (line <= 0) {
-        throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
-      }
-    }
+    requireAddPositional(positional);
+    String dataset = requireDataset(named);
+    String label = requireLabel(named);
+    Integer line = parseLine(named);
     String apiBase = named.get("--api-base");
     if (apiBase == null || apiBase.isBlank()) {
       apiBase = env.getOrDefault("GITHUB_API_URL", "https://api.github.com");
@@ -81,5 +56,73 @@ final class BadcaseArgsParser {
         apiBase,
         named.get("--file"),
         line);
+  }
+
+  /**
+   * 校验位置参数为 {@code add <run_ref> <finding_id>}。
+   *
+   * @param positional 位置参数
+   */
+  private static void requireAddPositional(List<String> positional) {
+    if (positional.isEmpty() || !"add".equals(positional.get(0))) {
+      throw new CraConfigException("badcase 子命令当前只支持 add；" + EvalUsage.USAGE_TEXT);
+    }
+    if (positional.size() < 3) {
+      throw new CraConfigException(
+          "缺参数: badcase add <run_ref> <finding_id> --label missed|false-positive|relabeled --dataset <dir>");
+    }
+  }
+
+  /**
+   * 必填 dataset 参数。
+   *
+   * @param named 值参数
+   * @return dataset 路径原值
+   */
+  private static String requireDataset(Map<String, String> named) {
+    String dataset = named.get("--dataset");
+    if (dataset == null || dataset.isBlank()) {
+      throw new CraConfigException("缺参数: --dataset <dir>");
+    }
+    return dataset;
+  }
+
+  /**
+   * 校验 label 取值（missed|false-positive|relabeled）。
+   *
+   * @param named 值参数
+   * @return label
+   */
+  private static String requireLabel(Map<String, String> named) {
+    String label = named.get("--label");
+    if (label == null || label.isBlank()) {
+      throw new CraConfigException("缺参数: --label missed|false-positive|relabeled");
+    }
+    if (!List.of("missed", "false-positive", "relabeled").contains(label)) {
+      throw new CraConfigException("--label 非法: " + label + "（missed|false-positive|relabeled）");
+    }
+    return label;
+  }
+
+  /**
+   * 可选 --line（正整数）。
+   *
+   * @param named 值参数
+   * @return 行号；未提供为 null
+   */
+  private static Integer parseLine(Map<String, String> named) {
+    if (!named.containsKey("--line")) {
+      return null;
+    }
+    int line;
+    try {
+      line = Integer.parseInt(named.get("--line"));
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
+    }
+    if (line <= 0) {
+      throw new CraConfigException("--line 必须为正整数: " + named.get("--line"));
+    }
+    return line;
   }
 }

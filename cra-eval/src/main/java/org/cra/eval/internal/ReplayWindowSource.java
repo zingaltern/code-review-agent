@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.git.CommentLedger;
@@ -85,59 +86,61 @@ final class ReplayWindowSource implements ReportWindowSource {
   }
 
   private static CommentLedger ledger(JsonNode root) {
-    List<LedgerComment> comments = new ArrayList<>();
-    for (JsonNode c : root.path("comments")) {
-      comments.add(
-          new LedgerComment(
-              c.path("id").asLong(),
-              c.path("kind").asText(LedgerComment.KIND_INLINE),
-              c.path("author").asText(""),
-              c.path("body").asText(""),
-              c.hasNonNull("created_at")
-                  ? Instant.parse(c.path("created_at").asText())
-                  : Instant.EPOCH,
-              textOrNull(c, "commit_id")));
-    }
-    List<LedgerFindingMarker> findings = new ArrayList<>();
-    for (JsonNode m : root.path("finding_markers")) {
-      findings.add(
-          new LedgerFindingMarker(
-              m.path("fingerprint").asText(),
-              m.path("file").asText(),
-              m.path("line").asInt(),
-              m.path("category").asText(),
-              m.path("finding_id").asText(),
-              m.path("run_id").asText(),
-              m.path("commit_sha").asText(),
-              m.path("comment_id").asLong()));
-    }
-    List<LedgerRunMarker> runs = new ArrayList<>();
-    for (JsonNode m : root.path("run_markers")) {
-      runs.add(
-          new LedgerRunMarker(
-              m.path("run_id").asText(),
-              m.path("commit_sha").asText(),
-              m.path("status").asText(LedgerRunMarker.STATUS_DONE),
-              m.path("findings").asInt(),
-              m.path("suppressed").asInt(),
-              m.path("comment_id").asLong()));
-    }
+    List<LedgerComment> comments =
+        StreamSupport.stream(root.path("comments").spliterator(), false)
+            .map(
+                c ->
+                    new LedgerComment(
+                        c.path("id").asLong(),
+                        c.path("kind").asText(LedgerComment.KIND_INLINE),
+                        c.path("author").asText(""),
+                        c.path("body").asText(""),
+                        c.hasNonNull("created_at")
+                            ? Instant.parse(c.path("created_at").asText())
+                            : Instant.EPOCH,
+                        textOrNull(c, "commit_id")))
+            .toList();
+    List<LedgerFindingMarker> findings =
+        StreamSupport.stream(root.path("finding_markers").spliterator(), false)
+            .map(
+                m ->
+                    new LedgerFindingMarker(
+                        m.path("fingerprint").asText(),
+                        m.path("file").asText(),
+                        m.path("line").asInt(),
+                        m.path("category").asText(),
+                        m.path("finding_id").asText(),
+                        m.path("run_id").asText(),
+                        m.path("commit_sha").asText(),
+                        m.path("comment_id").asLong()))
+            .toList();
+    List<LedgerRunMarker> runs =
+        StreamSupport.stream(root.path("run_markers").spliterator(), false)
+            .map(
+                m ->
+                    new LedgerRunMarker(
+                        m.path("run_id").asText(),
+                        m.path("commit_sha").asText(),
+                        m.path("status").asText(LedgerRunMarker.STATUS_DONE),
+                        m.path("findings").asInt(),
+                        m.path("suppressed").asInt(),
+                        m.path("comment_id").asLong()))
+            .toList();
     return new CommentLedger(comments, findings, runs, root.path("suspect_count").asInt(0));
   }
 
   private static List<DispositionSignal> signals(JsonNode root) {
-    List<DispositionSignal> out = new ArrayList<>();
-    for (JsonNode s : root.path("signals")) {
-      out.add(
-          new DispositionSignal(
-              s.path("kind").asText(),
-              s.path("comment_id").asLong(),
-              Instant.parse(s.path("occurred_at").asText()),
-              s.path("detail").asText(""),
-              s.path("actor").asText(""),
-              s.path("excerpt").asText("")));
-    }
-    return out;
+    return StreamSupport.stream(root.path("signals").spliterator(), false)
+        .map(
+            s ->
+                new DispositionSignal(
+                    s.path("kind").asText(),
+                    s.path("comment_id").asLong(),
+                    Instant.parse(s.path("occurred_at").asText()),
+                    s.path("detail").asText(""),
+                    s.path("actor").asText(""),
+                    s.path("excerpt").asText("")))
+        .toList();
   }
 
   private static Map<String, WindowData.TouchFacts> touches(JsonNode root) {

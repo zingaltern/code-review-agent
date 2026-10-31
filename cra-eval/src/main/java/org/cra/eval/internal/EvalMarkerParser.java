@@ -76,16 +76,12 @@ public final class EvalMarkerParser {
     for (int i = markers.size() - 1; i >= 0; i--) {
       Map<String, String> fields = markers.get(i);
       String status = fields.get("status");
-      if (!"DONE".equals(status) && !"DEGRADED".equals(status)) {
-        continue;
-      }
       String runId = fields.get("run");
-      if (runId == null) {
-        continue;
+      if (("DONE".equals(status) || "DEGRADED".equals(status)) && runId != null) {
+        String findings = fields.getOrDefault("findings", "-1");
+        int findingsCount = findings.matches("\\d{1,9}") ? Integer.parseInt(findings) : -1;
+        return new RunMarker(runId, fields.getOrDefault("commit", ""), status, findingsCount);
       }
-      String findings = fields.getOrDefault("findings", "-1");
-      int findingsCount = findings.matches("\\d{1,9}") ? Integer.parseInt(findings) : -1;
-      return new RunMarker(runId, fields.getOrDefault("commit", ""), status, findingsCount);
     }
     return null;
   }
