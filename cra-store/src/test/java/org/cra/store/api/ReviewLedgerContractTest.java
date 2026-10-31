@@ -107,7 +107,7 @@ public abstract class ReviewLedgerContractTest {
         new LedgerFindingMarker("beef", "src/Foo.java", 500, "bug", "f_3", "run_1", "abc1234", 0L));
     assertThat(ledger.publishedFindings(7))
         .first()
-        .satisfies(m -> assertThat(m.commentId()).isEqualTo(0L));
+        .satisfies(m -> assertThat(m.commentId()).isZero());
   }
 
   @Test

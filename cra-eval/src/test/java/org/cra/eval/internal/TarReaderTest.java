@@ -76,14 +76,16 @@ class TarReaderTest {
     ByteArrayOutputStream tar = new ByteArrayOutputStream();
     writeEntry(tar, header("PaxHeader", oversized.length, 'x'), oversized);
     writeEntry(tar, header("A.java", 0, '0'), new byte[0]);
-    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+    ByteArrayInputStream input = new ByteArrayInputStream(tar.toByteArray());
+    assertThatThrownBy(() -> TarReader.untar(input, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("PAX 覆盖的条目大小非法");
 
     byte[] nonNumeric = paxRecord("size", "abc");
     ByteArrayOutputStream tar2 = new ByteArrayOutputStream();
     writeEntry(tar2, header("PaxHeader", nonNumeric.length, 'x'), nonNumeric);
-    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar2.toByteArray()), out))
+    ByteArrayInputStream input2 = new ByteArrayInputStream(tar2.toByteArray());
+    assertThatThrownBy(() -> TarReader.untar(input2, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("PAX size");
   }
@@ -95,7 +97,8 @@ class TarReaderTest {
     ByteArrayOutputStream tar = new ByteArrayOutputStream();
     writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
     writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
-    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+    ByteArrayInputStream input3 = new ByteArrayInputStream(tar.toByteArray());
+    assertThatThrownBy(() -> TarReader.untar(input3, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("路径非法");
   }
@@ -108,7 +111,8 @@ class TarReaderTest {
       ByteArrayOutputStream tar = new ByteArrayOutputStream();
       writeEntry(tar, header("PaxHeader", pax.length, 'x'), pax);
       writeEntry(tar, header("A.java", 1, '0'), "x".getBytes(StandardCharsets.UTF_8));
-      assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+      ByteArrayInputStream input4 = new ByteArrayInputStream(tar.toByteArray());
+      assertThatThrownBy(() -> TarReader.untar(input4, out))
           .isInstanceOf(CraIntegrationException.class)
           .hasMessageContaining("路径非法");
     }
@@ -134,7 +138,8 @@ class TarReaderTest {
     ByteArrayOutputStream tar = new ByteArrayOutputStream();
     writeEntry(tar, header("dir", 1, '5'), "x".getBytes(StandardCharsets.UTF_8));
     tar.writeBytes(new byte[BLOCK * 2]);
-    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+    ByteArrayInputStream input5 = new ByteArrayInputStream(tar.toByteArray());
+    assertThatThrownBy(() -> TarReader.untar(input5, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("目录条目");
   }
@@ -142,18 +147,14 @@ class TarReaderTest {
   @Test
   void rejectsParentTraversalForFilesAndDirectories() throws Exception {
     Path out = Files.createDirectories(tmp.resolve("out"));
-    assertThatThrownBy(
-            () ->
-                TarReader.untar(
-                    new ByteArrayInputStream(tar(header("../../evil.txt", 1, '0'), "x".getBytes())),
-                    out))
+    ByteArrayInputStream evilFile =
+        new ByteArrayInputStream(tar(header("../../evil.txt", 1, '0'), "x".getBytes()));
+    assertThatThrownBy(() -> TarReader.untar(evilFile, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("非法");
-    assertThatThrownBy(
-            () ->
-                TarReader.untar(
-                    new ByteArrayInputStream(tar(header("../../evil-dir", 0, '5'), new byte[0])),
-                    out))
+    ByteArrayInputStream evilDir =
+        new ByteArrayInputStream(tar(header("../../evil-dir", 0, '5'), new byte[0]));
+    assertThatThrownBy(() -> TarReader.untar(evilDir, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("非法");
   }
@@ -164,7 +165,8 @@ class TarReaderTest {
     ByteArrayOutputStream tar = new ByteArrayOutputStream();
     tar.write(header("a.txt", 100, '0'));
     tar.write("short".getBytes(StandardCharsets.UTF_8));
-    assertThatThrownBy(() -> TarReader.untar(new ByteArrayInputStream(tar.toByteArray()), out))
+    ByteArrayInputStream truncated = new ByteArrayInputStream(tar.toByteArray());
+    assertThatThrownBy(() -> TarReader.untar(truncated, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("截断");
   }
@@ -174,8 +176,8 @@ class TarReaderTest {
     Path out = Files.createDirectories(tmp.resolve("out"));
     byte[] header = header("a.txt", 1, '0');
     header[0] = 'b'; // 改名但不重算校验和
-    assertThatThrownBy(
-            () -> TarReader.untar(new ByteArrayInputStream(tar(header, "x".getBytes())), out))
+    ByteArrayInputStream corrupt = new ByteArrayInputStream(tar(header, "x".getBytes()));
+    assertThatThrownBy(() -> TarReader.untar(corrupt, out))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("校验和");
   }
@@ -197,7 +199,7 @@ class TarReaderTest {
   private static byte[] header(String name, long size, char type) {
     byte[] h = new byte[BLOCK];
     byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
-    assertThat(nameBytes.length).isLessThanOrEqualTo(100);
+    assertThat(nameBytes).hasSizeLessThanOrEqualTo(100);
     System.arraycopy(nameBytes, 0, h, 0, nameBytes.length);
     put(h, 100, "0000644");
     put(h, 108, "0000000");
@@ -229,7 +231,7 @@ class TarReaderTest {
       length = String.valueOf(length).length() + bodyBytes.length;
     }
     byte[] recordBytes = (length + body).getBytes(StandardCharsets.UTF_8);
-    assertThat(recordBytes.length).isEqualTo(length);
+    assertThat(recordBytes).hasSize(length);
     return recordBytes;
   }
 

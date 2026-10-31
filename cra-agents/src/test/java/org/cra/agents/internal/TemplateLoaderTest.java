@@ -23,13 +23,14 @@ class TemplateLoaderTest {
                 "untrusted_diff", "diff 内容",
                 "untrusted_l1_context", "窗口上下文",
                 "scoped_paths_note", ""));
-    assertThat(out).startsWith("# System");
-    assertThat(out).contains("# User");
-    assertThat(out).contains("<<<UNTRUSTED_CONTENT");
-    assertThat(out).contains("标题");
-    assertThat(out).contains("diff 内容");
-    assertThat(out).doesNotContain("{{");
-    assertThat(out).doesNotContain("{>");
+    assertThat(out)
+        .startsWith("# System")
+        .contains("# User")
+        .contains("<<<UNTRUSTED_CONTENT")
+        .contains("标题")
+        .contains("diff 内容")
+        .doesNotContain("{{")
+        .doesNotContain("{>");
   }
 
   @Test
@@ -53,8 +54,7 @@ class TemplateLoaderTest {
   void versionIsStableContentHash() {
     String v1 = loader.versionOf("prompts/reviewer/bug-hunter/boundary.md");
     String v2 = loader.versionOf("prompts/reviewer/bug-hunter/boundary.md");
-    assertThat(v1).isEqualTo(v2);
-    assertThat(v1).startsWith("boundary@").containsPattern("@[0-9a-f]{8}");
+    assertThat(v1).isEqualTo(v2).startsWith("boundary@").containsPattern("@[0-9a-f]{8}");
   }
 
   @Test
@@ -70,7 +70,6 @@ class TemplateLoaderTest {
                 "untrusted_diff", "code {a} {{b}",
                 "untrusted_l1_context", "ctx {c}",
                 "scoped_paths_note", ""));
-    assertThat(out).contains(tricky);
-    assertThat(out).contains("code {a} {{b}");
+    assertThat(out).contains(tricky).contains("code {a} {{b}");
   }
 }

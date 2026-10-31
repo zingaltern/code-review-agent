@@ -22,8 +22,7 @@ class WeeklyReportBuilderTest {
   private static final Path FIXTURE = Path.of("src/test/resources/report-fixture");
   private static final Instant NOW = Instant.parse("2026-10-25T12:00:00Z");
 
-  @Test
-  void aggregatesReplayFixtureWithSampleGatesAndGateClosed() {
+  private static WeeklyReport fixtureReport() {
     WindowData.Window base =
         new ReplayWindowSource(FIXTURE)
             .load(new RepoRef("acme", "demo"), NOW.minusSeconds(30L * 86400));
@@ -47,10 +46,13 @@ class WeeklyReportBuilderTest {
         List.of(
             Json.read(FIXTURE.resolve("previous/2026-10-11.json"), WeeklyReport.class, "previous"),
             Json.read(FIXTURE.resolve("previous/2026-10-18.json"), WeeklyReport.class, "previous"));
-    WeeklyReport report =
-        WeeklyReportBuilder.build(window, NOW, "30d", NOW.minusSeconds(30L * 86400), previous);
+    return WeeklyReportBuilder.build(window, NOW, "30d", NOW.minusSeconds(30L * 86400), previous);
+  }
 
-    WeeklyReport.Disposition d = report.disposition();
+  /** S5961 拆分：原 43 断言按报告段落拆为 5 个用例，断言总量不变。 */
+  @Test
+  void dispositionCountsAndRatesMatchFixture() {
+    WeeklyReport.Disposition d = fixtureReport().disposition();
     assertThat(d.fixed()).isEqualTo(31);
     assertThat(d.wrong()).isEqualTo(2);
     assertThat(d.intentional()).isEqualTo(2);
@@ -69,31 +71,44 @@ class WeeklyReportBuilderTest {
     assertThat(d.samplesSufficient()).isTrue();
     assertThat(d.meetsPrecisionTarget()).isTrue();
     assertThat(d.meetsFalsePositiveLimit()).isTrue();
+  }
 
-    WeeklyReport.Refusal r = report.refusal();
+  @Test
+  void refusalPoolAndSampleGateMatchFixture() {
+    WeeklyReport.Refusal r = fixtureReport().refusal();
     assertThat(r.refutedTotal()).isEqualTo(12);
     assertThat(r.judgeEvaluated()).isEqualTo(8);
     assertThat(r.judgeUnavailable()).isEqualTo(1);
     assertThat(r.pool()).isEqualTo(8);
     assertThat(r.overturnRate()).isCloseTo(0.375, org.assertj.core.data.Offset.offset(1e-9));
     assertThat(r.samplesSufficient()).isFalse(); // <20 → 不下结论
+  }
 
-    WeeklyReport.Funnel f = report.funnel();
+  @Test
+  void funnelCountsMatchFixture() {
+    WeeklyReport.Funnel f = fixtureReport().funnel();
     assertThat(f.candidateDataAvailable()).isTrue();
     assertThat(f.candidates()).isEqualTo(45);
     assertThat(f.confirmed()).isEqualTo(31);
     assertThat(f.published()).isEqualTo(26);
     assertThat(f.suppressedByTruncation()).isEqualTo(3);
     assertThat(f.truncatedRuns()).isEqualTo(2);
+  }
 
-    WeeklyReport.ZeroPublish z = report.zeroPublish();
+  @Test
+  void zeroPublishSeriesMatchesFixture() {
+    WeeklyReport.ZeroPublish z = fixtureReport().zeroPublish();
     assertThat(z.runs()).isEqualTo(5);
     assertThat(z.zeroRuns()).isEqualTo(1);
     assertThat(z.ratio()).isCloseTo(0.2, org.assertj.core.data.Offset.offset(1e-9));
     assertThat(z.series()).containsExactly(0.10, 0.15, 0.20);
     assertThat(z.consecutiveRise()).isTrue();
     assertThat(z.trend()).isEqualTo("rising");
+  }
 
+  @Test
+  void satisfactionAndDualVerifierGateMatchFixture() {
+    WeeklyReport report = fixtureReport();
     assertThat(report.satisfaction().up()).isEqualTo(1);
     assertThat(report.satisfaction().down()).isEqualTo(1);
     assertThat(report.satisfaction().runsWithReaction()).isEqualTo(2);

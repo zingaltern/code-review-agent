@@ -41,16 +41,17 @@ class VerifierJudgeTemplatesTest {
   @Test
   void balancedReviewTemplateRendersWithAntiAnchorContract() {
     String rendered = LOADER.render("prompts/verifier/balanced-review.md", VERIFIER_VARS);
-    assertThat(rendered).contains("独立复核员");
-    assertThat(rendered).contains("CONFIRMED");
-    assertThat(rendered).contains("REFUTED");
-    assertThat(rendered).contains("INSUFFICIENT_EVIDENCE");
-    // 反锚定输出约束（03§4.2）
-    assertThat(rendered).contains("不得照抄结论中的引用");
-    assertThat(rendered).contains("未出现的代码行引用");
-    // 不可信定界与工具协议
-    assertThat(rendered).contains("UNTRUSTED_CONTENT");
-    assertThat(rendered).contains("followup_file");
+    assertThat(rendered)
+        .contains("独立复核员")
+        .contains("CONFIRMED")
+        .contains("REFUTED")
+        .contains("INSUFFICIENT_EVIDENCE")
+        // 反锚定输出约束（03§4.2）
+        .contains("不得照抄结论中的引用")
+        .contains("未出现的代码行引用")
+        // 不可信定界与工具协议
+        .contains("UNTRUSTED_CONTENT")
+        .contains("followup_file");
     assertThat(LOADER.versionOf("prompts/verifier/balanced-review.md"))
         .startsWith("balanced-review@");
   }
@@ -58,19 +59,21 @@ class VerifierJudgeTemplatesTest {
   @Test
   void refuteOrientedTemplateMarksM3Gate() {
     String rendered = LOADER.render("prompts/verifier/refute-oriented.md", REFUTE_VARS);
-    assertThat(rendered).contains("证伪导向");
-    assertThat(rendered).contains("M3 占位");
-    assertThat(rendered).contains("require-distinct-model-family");
-    assertThat(rendered).contains("UNTRUSTED_CONTENT");
+    assertThat(rendered)
+        .contains("证伪导向")
+        .contains("M3 占位")
+        .contains("require-distinct-model-family")
+        .contains("UNTRUSTED_CONTENT");
   }
 
   @Test
   void judgeArbitrateTemplateRendersWithOneShotRule() {
     String rendered = LOADER.render("prompts/judge/arbitrate.md", JUDGE_VARS);
-    assertThat(rendered).contains("终裁仲裁员");
-    assertThat(rendered).contains("不折中、不求共识");
-    // 验证输出同样 UNTRUSTED（04§4.3）
-    assertThat(rendered).contains("同样是被评审数据，独立对待");
+    assertThat(rendered)
+        .contains("终裁仲裁员")
+        .contains("不折中、不求共识")
+        // 验证输出同样 UNTRUSTED（04§4.3）
+        .contains("同样是被评审数据，独立对待");
     assertThat(LOADER.versionOf("prompts/judge/arbitrate.md")).startsWith("arbitrate@");
   }
 

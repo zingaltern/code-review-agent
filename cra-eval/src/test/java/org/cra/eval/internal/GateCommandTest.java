@@ -19,8 +19,7 @@ class GateCommandTest {
         numerator, denominator, (double) numerator / denominator, w[0], w[1]);
   }
 
-  private static EvalReport report(long detected, long observations, boolean storedPassed)
-      throws Exception {
+  private static EvalReport report(long detected, long observations, boolean storedPassed) {
     EvalReport.SetStat bad =
         new EvalReport.SetStat(
             "bad",

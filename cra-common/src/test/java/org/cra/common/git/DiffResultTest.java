@@ -11,8 +11,14 @@ class DiffResultTest {
   @Test
   void countsOnlyAddedAndRemovedContentLines() {
     String patch =
-        "@@ -1,3 +1,4 @@\n context one\n+added\n-removed\n"
-            + "++++ content starting with ++\n---- content starting with --\n";
+        """
+        @@ -1,3 +1,4 @@
+         context one
+        +added
+        -removed
+        ++++ content starting with ++
+        ---- content starting with --
+        """;
     DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
     DiffResult diff = new DiffResult("base", "head", List.of(file), List.of());
     assertThat(diff.totalPatchLines()).isEqualTo(4);
@@ -35,9 +41,17 @@ class DiffResultTest {
   @Test
   void countsAcrossMultipleHunksAndSkipsNoNewlineMarker() {
     String patch =
-        "--- a/A.java\n+++ b/A.java\n"
-            + "@@ -1,2 +1,2 @@\n-old1\n+new1\n\\ No newline at end of file\n"
-            + "@@ -10,2 +10,2 @@\n-old2\n+new2\n";
+        """
+        --- a/A.java
+        +++ b/A.java
+        @@ -1,2 +1,2 @@
+        -old1
+        +new1
+        \\ No newline at end of file
+        @@ -10,2 +10,2 @@
+        -old2
+        +new2
+        """;
     DiffFile file = new DiffFile("A.java", null, "modified", patch, List.of());
     assertThat(new DiffResult("base", "head", List.of(file), List.of()).totalPatchLines())
         .isEqualTo(4);

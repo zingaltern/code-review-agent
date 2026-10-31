@@ -51,15 +51,16 @@ class AttestationServiceTest {
 
   @Test
   void refusesMissingRepoWhenPolicyEnabled() {
-    assertThatThrownBy(() -> service(true, new CapturingStore()).attest(REPORT, "", "api-token"))
+    AttestationService strict = service(true, new CapturingStore());
+    assertThatThrownBy(() -> strict.attest(REPORT, "", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
 
   @Test
   void refusesUnknownCommitWhenPolicyEnabled() {
-    assertThatThrownBy(
-            () -> service(false, new CapturingStore()).attest(REPORT, "owner/repo", "api-token"))
+    AttestationService permissive = service(false, new CapturingStore());
+    assertThatThrownBy(() -> permissive.attest(REPORT, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
@@ -67,8 +68,8 @@ class AttestationServiceTest {
   @Test
   void refusesMissingCommitWhenPolicyEnabled() {
     byte[] noCommit = "{\"tier\":\"l2\"}".getBytes(StandardCharsets.UTF_8);
-    assertThatThrownBy(
-            () -> service(true, new CapturingStore()).attest(noCommit, "owner/repo", "api-token"))
+    AttestationService strict = service(true, new CapturingStore());
+    assertThatThrownBy(() -> strict.attest(noCommit, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(409));
   }
@@ -106,10 +107,9 @@ class AttestationServiceTest {
 
   @Test
   void rejectsInvalidJson() {
-    assertThatThrownBy(
-            () ->
-                service(true, new CapturingStore())
-                    .attest("not-json".getBytes(StandardCharsets.UTF_8), "owner/repo", "api-token"))
+    AttestationService strict = service(true, new CapturingStore());
+    byte[] notJson = "not-json".getBytes(StandardCharsets.UTF_8);
+    assertThatThrownBy(() -> strict.attest(notJson, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(400));
   }

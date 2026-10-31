@@ -49,24 +49,15 @@ class EventModelTest {
 
   @Test
   void rejectsInvalidEventIdCommitRefAndMissingFields() {
+    List<String> notHex = List.of("not-hex");
+    List<String> noItems = List.of();
     assertThatThrownBy(() -> event("bad id", "incident"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("event_id");
     assertThatThrownBy(
             () ->
                 new ProductEvent(
-                    "INC-1",
-                    "o/r",
-                    null,
-                    null,
-                    AT,
-                    "incident",
-                    "s",
-                    null,
-                    List.of("not-hex"),
-                    List.of(),
-                    "",
-                    AT))
+                    "INC-1", "o/r", null, null, AT, "incident", "s", null, notHex, noItems, "", AT))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("commit_refs");
     assertThatThrownBy(
@@ -80,8 +71,8 @@ class EventModelTest {
                     "incident",
                     "s",
                     null,
-                    List.of(),
-                    List.of(),
+                    noItems,
+                    noItems,
                     "",
                     AT))
         .isInstanceOf(IllegalArgumentException.class)
@@ -107,15 +98,16 @@ class EventModelTest {
 
   @Test
   void eventQueryClampsLimitAndRejectsInvertedWindow() {
-    EventQuery query = new EventQuery(" Owner/Repo ", List.of(), List.of(), List.of(), AT, null, 0);
+    List<String> noItems = List.of();
+    EventQuery query = new EventQuery(" Owner/Repo ", noItems, noItems, noItems, AT, null, 0);
     assertThat(query.repo()).isEqualTo("owner/repo");
     assertThat(query.limit()).isEqualTo(EventQuery.DEFAULT_LIMIT);
 
-    EventQuery capped = new EventQuery("o/r", List.of(), List.of(), List.of(), AT, null, 10_000);
+    EventQuery capped = new EventQuery("o/r", noItems, noItems, noItems, AT, null, 10_000);
     assertThat(capped.limit()).isEqualTo(200);
 
-    assertThatThrownBy(
-            () -> new EventQuery("o/r", List.of(), List.of(), List.of(), AT.plusSeconds(1), AT, 10))
+    Instant later = AT.plusSeconds(1);
+    assertThatThrownBy(() -> new EventQuery("o/r", noItems, noItems, noItems, later, AT, 10))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("since");
   }

@@ -51,10 +51,12 @@ class LocalPrePrReportTest {
   @Test
   void failedBuildShowsExitCodeAndExcerptsOnTop() {
     String mvnOutput =
-        "[INFO] BUILD cra\n"
-            + "[ERROR] Failures: \n"
-            + "[ERROR]   DemoTest.badCase:12 expected: <true> but was: <false>\n"
-            + "[ERROR] BUILD FAILURE\n";
+        """
+        [INFO] BUILD cra
+        [ERROR] Failures:\s
+        [ERROR]   DemoTest.badCase:12 expected: <true> but was: <false>
+        [ERROR] BUILD FAILURE
+        """;
     String report =
         LocalPrePrReport.render(
             config(true, true),

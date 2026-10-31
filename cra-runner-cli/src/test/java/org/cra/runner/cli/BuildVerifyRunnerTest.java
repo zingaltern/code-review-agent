@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import org.cra.common.exception.CraIntegrationException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,8 +77,10 @@ class BuildVerifyRunnerTest {
             "[ERROR] BUILD FAILURE",
             "[INFO] Total time:  01.234 s");
     List<String> excerpts = BuildVerifyRunner.failureExcerpts(output);
-    assertThat(excerpts).hasSize(5).allSatisfy(l -> assertThat(l).startsWith("[ERROR]"));
-    assertThat(excerpts).anyMatch(l -> l.contains("BUILD FAILURE"));
+    assertThat(excerpts)
+        .hasSize(5)
+        .allSatisfy(l -> assertThat(l).startsWith("[ERROR]"))
+        .anyMatch(l -> l.contains("BUILD FAILURE"));
     assertThat(BuildVerifyRunner.excerptTruncated(output)).isFalse();
   }
 
@@ -121,21 +124,20 @@ class BuildVerifyRunnerTest {
     Path childPidFile = tempDir.resolve("child.pid");
     System.setProperty("cra.verify.timeoutSec", "1");
     try {
-      assertThatThrownBy(
-              () ->
-                  new BuildVerifyRunner(tempDir.resolve("runs")).run(tempDir, "/bin/sh " + script))
+      BuildVerifyRunner runner = new BuildVerifyRunner(tempDir.resolve("runs"));
+      assertThatThrownBy(() -> runner.run(tempDir, "/bin/sh " + script))
           .isInstanceOf(CraIntegrationException.class)
           .hasMessageContaining("超时");
     } finally {
       System.clearProperty("cra.verify.timeoutSec");
     }
     long childPid = Long.parseLong(Files.readString(childPidFile).strip());
-    boolean alive = true;
-    for (int i = 0; i < 30 && alive; i++) {
-      Thread.sleep(100);
-      alive = ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false);
-    }
-    assertThat(alive).isFalse();
+    // 进程已不存在同样视为已终止；仍在则等待其退出信号（上限 5s，不再轮询 sleep）
+    boolean terminated =
+        ProcessHandle.of(childPid)
+            .map(ph -> ph.onExit().completeOnTimeout(null, 5, TimeUnit.SECONDS).join() != null)
+            .orElse(true);
+    assertThat(terminated).as("超时后子进程应已被终止（含进程树）").isTrue();
   }
 
   private static String numberedLines(int count) {

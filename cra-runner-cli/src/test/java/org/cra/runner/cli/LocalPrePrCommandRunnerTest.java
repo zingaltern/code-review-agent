@@ -120,7 +120,7 @@ class LocalPrePrCommandRunnerTest {
               "--local", "--base", "master", "--workspace", workspace.resolve("nope").toString()
             },
             Map.of());
-    assertThatThrownBy(() -> new LocalPrePrCommandRunner().execute(config))
-        .isInstanceOf(CraIntegrationException.class);
+    LocalPrePrCommandRunner runner = new LocalPrePrCommandRunner();
+    assertThatThrownBy(() -> runner.execute(config)).isInstanceOf(CraIntegrationException.class);
   }
 }

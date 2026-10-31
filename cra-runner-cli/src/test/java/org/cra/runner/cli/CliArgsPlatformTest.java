@@ -215,29 +215,20 @@ class CliArgsPlatformTest {
 
   @Test
   void gitlabModeRequiresToken() {
-    assertThatThrownBy(
-            () ->
-                CliArgs.parse(
-                    new String[] {
-                      "--platform",
-                      "gitlab",
-                      "--gitlab-project",
-                      "g/p",
-                      "--pr",
-                      "1",
-                      "--base",
-                      "b",
-                      "--head",
-                      "h"
-                    },
-                    baseEnv()))
+    String[] gitlabArgs = {
+      "--platform", "gitlab", "--gitlab-project", "g/p", "--pr", "1", "--base", "b", "--head", "h"
+    };
+    Map<String, String> env = baseEnv();
+    assertThatThrownBy(() -> CliArgs.parse(gitlabArgs, env))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_GITLAB_TOKEN");
   }
 
   @Test
   void invalidPlatformFailsFast() {
-    assertThatThrownBy(() -> CliArgs.parse(new String[] {"--platform", "gerrit"}, baseEnv()))
+    String[] gerritArgs = {"--platform", "gerrit"};
+    Map<String, String> env = baseEnv();
+    assertThatThrownBy(() -> CliArgs.parse(gerritArgs, env))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("github|gitlab");
   }
@@ -323,8 +314,8 @@ class CliArgsPlatformTest {
     // R5 共享函数：GitLab 拒收 --token 的守卫收敛到 PlatformArgs.tokenOrGitlabGuard（review/sweep 同源）
     Map<String, String> env = baseEnv();
     env.put("CRA_GITLAB_TOKEN", "glpat-env");
-    assertThatThrownBy(
-            () -> PlatformArgs.tokenOrGitlabGuard(Map.of("--token", "leaked"), env, true))
+    Map<String, String> cliOptions = Map.of("--token", "leaked");
+    assertThatThrownBy(() -> PlatformArgs.tokenOrGitlabGuard(cliOptions, env, true))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_GITLAB_TOKEN")
         .hasMessageContaining("--token 仅 GitHub");
@@ -370,7 +361,8 @@ class CliArgsPlatformTest {
     PlatformArgs.LlmEnvTriple triple = PlatformArgs.llmEnvTriple(llmEnv, true);
     assertThat(triple.apiKey()).isEqualTo("sk");
     assertThat(PlatformArgs.llmEnvTriple(Map.of(), false).apiKey()).isNull(); // 本地形态可缺省
-    assertThatThrownBy(() -> PlatformArgs.llmEnvTriple(Map.of("CRA_LLM_API_KEY", "sk"), true))
+    Map<String, String> keyOnlyEnv = Map.of("CRA_LLM_API_KEY", "sk");
+    assertThatThrownBy(() -> PlatformArgs.llmEnvTriple(keyOnlyEnv, true))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_BASE_URL");
 
@@ -380,12 +372,12 @@ class CliArgsPlatformTest {
         .hasMessageContaining("depth 非法");
 
     assertThat(PlatformArgs.crosscheckerModes(Map.of(), Map.of())).isEqualTo("assumption,sniff");
-    assertThatThrownBy(
-            () -> PlatformArgs.crosscheckerModes(Map.of("--crosschecker-modes", "bad"), Map.of()))
+    Map<String, String> badModes = Map.of("--crosschecker-modes", "bad");
+    assertThatThrownBy(() -> PlatformArgs.crosscheckerModes(badModes, Map.of()))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--crosschecker-modes 非法");
-    assertThatThrownBy(
-            () -> PlatformArgs.crosscheckerModes(Map.of(), Map.of("CRA_CROSSCHECKER_MODES", ",")))
+    Map<String, String> emptyModes = Map.of("CRA_CROSSCHECKER_MODES", ",");
+    assertThatThrownBy(() -> PlatformArgs.crosscheckerModes(Map.of(), emptyModes))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--crosschecker-modes 不能为空");
   }

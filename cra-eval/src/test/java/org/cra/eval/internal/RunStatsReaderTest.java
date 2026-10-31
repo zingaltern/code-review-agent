@@ -140,13 +140,15 @@ class RunStatsReaderTest {
     Files.createDirectories(runDir);
     Files.writeString(
         runDir.resolve("trace.ndjson"),
-        "{\"event\":\"run_end\",\"tokens_in\":1,\"tokens_out\":2,\"latency_ms\":3}\n"
-            + "{\"event\":\"run_end\",\"tokens_in\":9}\n");
+        """
+        {"event":"run_end","tokens_in":1,"tokens_out":2,"latency_ms":3}
+        {"event":"run_end","tokens_in":9}
+        """);
     // 最后一条 run_end 缺 tokens_out/latency_ms：available=false，不得以 0 值进均值分母
     CaseObservation.RunStats stats = RunStatsReader.read(runRoot);
     assertThat(stats.available()).isFalse();
-    assertThat(stats.tokensIn()).isEqualTo(0);
-    assertThat(stats.tokensOut()).isEqualTo(0);
-    assertThat(stats.latencyMs()).isEqualTo(0);
+    assertThat(stats.tokensIn()).isZero();
+    assertThat(stats.tokensOut()).isZero();
+    assertThat(stats.latencyMs()).isZero();
   }
 }

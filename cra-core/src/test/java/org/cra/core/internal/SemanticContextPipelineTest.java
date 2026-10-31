@@ -2,8 +2,12 @@ package org.cra.core.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,7 +45,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
 
 /**
  * M4e 语义上下文验收（ADR-0014）：开启时 reviewer/verifier brief 含 L2 跨文件切片（真实 git fixture，调用方文件+行可见）； 关闭时 brief
@@ -106,37 +109,28 @@ class SemanticContextPipelineTest {
   @BeforeEach
   void setUp() throws Exception {
     initFixtureRepo();
-    adapter = Mockito.mock(GitPlatformAdapter.class);
-    ledger = Mockito.mock(ReviewLedger.class);
+    adapter = mock(GitPlatformAdapter.class);
+    ledger = mock(ReviewLedger.class);
     scripted = new ScriptedGateway();
-    Mockito.when(ledger.findCompletion(Mockito.anyInt(), Mockito.anyString()))
-        .thenReturn(Optional.empty());
-    Mockito.when(ledger.publishedFindings(Mockito.anyInt())).thenReturn(List.of());
-    Mockito.when(ledger.completedRuns(Mockito.anyInt())).thenReturn(List.of());
-    Mockito.when(
-            ledger.findCompletion(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.findCompletion(anyInt(), anyString())).thenReturn(Optional.empty());
+    when(ledger.publishedFindings(anyInt())).thenReturn(List.of());
+    when(ledger.completedRuns(anyInt())).thenReturn(List.of());
+    when(ledger.findCompletion(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv -> {
               org.cra.common.git.ReviewKey key = inv.getArgument(0);
               return ledger.findCompletion(key.prNumber(), key.commitSha());
             });
-    Mockito.when(
-            ledger.completedRuns(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
-        .thenReturn(List.of());
-    Mockito.when(
-            ledger.publishedFindings(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
-        .thenReturn(List.of());
-    Mockito.when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
-    Mockito.when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
+    when(ledger.completedRuns(any(org.cra.common.git.ReviewKey.class))).thenReturn(List.of());
+    when(ledger.publishedFindings(any(org.cra.common.git.ReviewKey.class))).thenReturn(List.of());
+    when(adapter.fetchDiff(any(), anyString(), anyString())).thenReturn(diff());
+    when(adapter.readFile(any(), anyString(), eq("REVIEW.md")))
         .thenThrow(new CraIntegrationException("404: REVIEW.md"));
-    Mockito.when(adapter.readFile(any(), anyString(), eq(KEEP_ALIVE)))
+    when(adapter.readFile(any(), anyString(), eq(KEEP_ALIVE)))
         .thenReturn(FileContent.ofText(KEEP_ALIVE, KEEP_ALIVE_SRC));
-    Mockito.when(adapter.readFile(any(), anyString(), eq(CALLER)))
+    when(adapter.readFile(any(), anyString(), eq(CALLER)))
         .thenReturn(FileContent.ofText(CALLER, CALLER_SRC));
-    Mockito.when(adapter.postReview(any()))
+    when(adapter.postReview(any()))
         .thenAnswer(
             inv -> {
               PostReviewCommand cmd = inv.getArgument(0);
@@ -190,8 +184,8 @@ class SemanticContextPipelineTest {
         // 分层核对契约（04§2.6）：仅索引可用时随 dataflow brief 注入
         .contains("分层核对契约")
         .contains("controller→service→DAO")
-        .contains("视为不可见");
-    assertThat(dataflowPrompt).doesNotContain("（无切片）");
+        .contains("视为不可见")
+        .doesNotContain("（无切片）");
 
     // 语义索引事件进 trace（可观测性），覆盖声明含索引范围
     String trace = traceOf(result);
@@ -202,7 +196,7 @@ class SemanticContextPipelineTest {
 
     // 覆盖声明进 Summary（02§4：裁剪/不可得必须可见）
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("L2 跨文件切片启用").contains("仅支持 Java 源文件");
 
     // 切片计入单代理输入预算：brief 估算不越该角色硬限（04§2.2 / ADR-0014 决策 7）
@@ -247,7 +241,7 @@ class SemanticContextPipelineTest {
         .contains("\"event\":\"semantic_context\"")
         .contains("\"available\":false");
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
-    Mockito.verify(adapter).postReview(captor.capture());
+    verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("L2 跨文件切片不可得");
   }
 
