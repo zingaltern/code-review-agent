@@ -8,6 +8,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,14 +23,14 @@ import org.cra.store.api.ReviewLedger;
 /**
  * 本地 SQLite 账本（02§5 本地形态、05§1.5 存储子集；M1 T1.1，M2 本地 pre-PR 模式的账本事实源）。
  *
- * <p>表结构（05§1.5 中已有读写双方数据的表；verdict/published_comment 随各自数据面——M2 验证器与 M3 处置采集——落地，避免无读取方的投机
- * schema）：
+ * <p>表结构（05§1.5）：SQLite 只建当前读写双方在用的三表；verdict/published_comment
+ * 属服务形态的处置与仲裁数据面，本地形态不采集，故不建（避免无读取方的投机 schema）：
  *
  * <ul>
  *   <li><b>review_run</b>：run 完成标记（status ∈ DONE|DEGRADED，即 05§1.3 run 完成标记的持久化形态）；
  *   <li><b>finding</b>：已发布 finding 标记（指纹级去重与补发的事实源，02§4.1）；
  *   <li><b>prompt_template_version</b>：run 实际使用的 prompt 模板版本（05§1.2 prompt_template_versions
- *       的落库形态，T2.11）。
+ *       的落库形态）。
  * </ul>
  *
  * <p>与 GitHub 评论账本的分工（02§5）：CI 形态无本地库（账本 = 评论本身，写入由发布内嵌标记完成）； 本地形态每次 run 显式登记（{@code
@@ -39,6 +41,10 @@ public final class SqliteLedger implements ReviewLedger {
 
   private static final String COMPLETION_STATUSES = "('DONE','DEGRADED')";
 
+  /** 固定 9 位小数：created_at 是 TEXT 且按字典序排序，变长小数（Instant.toString）会让同秒内顺序反转。 */
+  private static final DateTimeFormatter SQLITE_INSTANT =
+      new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
+
   private final String repoKey;
   private final String jdbcUrl;
 
@@ -48,6 +54,12 @@ public final class SqliteLedger implements ReviewLedger {
    * @param dbFile SQLite 数据库文件（如 ~/.cra/ledger.db；不存在时由驱动自动创建）
    */
   public SqliteLedger(String repoOwner, String repoName, Path dbFile) {
+    if (repoOwner == null || repoOwner.isBlank() || repoName == null || repoName.isBlank()) {
+      throw new IllegalArgumentException("owner/repo must be non-blank");
+    }
+    if (dbFile == null) {
+      throw new IllegalArgumentException("dbFile 不能为空");
+    }
     this.repoKey = repoOwner + "/" + repoName;
     this.jdbcUrl = "jdbc:sqlite:" + dbFile.toAbsolutePath();
   }
@@ -65,7 +77,7 @@ public final class SqliteLedger implements ReviewLedger {
         marker.findings(),
         marker.suppressed(),
         marker.commentId() > 0 ? marker.commentId() : null,
-        Instant.now().toString());
+        SQLITE_INSTANT.format(Instant.now()));
   }
 
   @Override
@@ -84,7 +96,7 @@ public final class SqliteLedger implements ReviewLedger {
         marker.runId(),
         marker.commitSha(),
         marker.commentId() > 0 ? marker.commentId() : null,
-        Instant.now().toString());
+        SQLITE_INSTANT.format(Instant.now()));
   }
 
   @Override
@@ -98,7 +110,7 @@ public final class SqliteLedger implements ReviewLedger {
           runId,
           entry.getKey(),
           entry.getValue(),
-          Instant.now().toString());
+          SQLITE_INSTANT.format(Instant.now()));
     }
   }
 
@@ -225,37 +237,45 @@ public final class SqliteLedger implements ReviewLedger {
   }
 
   private Connection connection() {
+    Connection conn;
     try {
-      Connection conn = DriverManager.getConnection(jdbcUrl);
-      try (Statement stmt = conn.createStatement()) {
-        stmt.execute(
-            "CREATE TABLE IF NOT EXISTS review_run ("
-                + "run_id TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL,"
-                + " commit_sha TEXT NOT NULL, status TEXT NOT NULL, findings INTEGER NOT NULL,"
-                + " suppressed INTEGER NOT NULL, summary_comment_id INTEGER,"
-                + " created_at TEXT NOT NULL, PRIMARY KEY (repo, pr_number, run_id))");
-        stmt.execute(
-            "CREATE INDEX IF NOT EXISTS idx_review_run_commit"
-                + " ON review_run (repo, pr_number, commit_sha)");
-        stmt.execute(
-            "CREATE TABLE IF NOT EXISTS finding ("
-                + "finding_id TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL,"
-                + " fingerprint TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL,"
-                + " category TEXT NOT NULL, run_id TEXT NOT NULL, commit_sha TEXT NOT NULL,"
-                + " comment_id INTEGER, created_at TEXT NOT NULL,"
-                + " PRIMARY KEY (repo, pr_number, finding_id))");
-        stmt.execute(
-            "CREATE INDEX IF NOT EXISTS idx_finding_fingerprint"
-                + " ON finding (repo, pr_number, fingerprint)");
-        stmt.execute(
-            "CREATE TABLE IF NOT EXISTS prompt_template_version ("
-                + "repo TEXT NOT NULL, pr_number INTEGER NOT NULL, run_id TEXT NOT NULL,"
-                + " template_name TEXT NOT NULL, template_version TEXT NOT NULL,"
-                + " created_at TEXT NOT NULL, PRIMARY KEY (repo, pr_number, run_id, template_name))");
-      }
-      return conn;
+      conn = DriverManager.getConnection(jdbcUrl);
     } catch (SQLException e) {
       throw new CraLedgerException("SQLite 账本连接失败: " + jdbcUrl, e);
+    }
+    try (Statement stmt = conn.createStatement()) {
+      stmt.execute(
+          "CREATE TABLE IF NOT EXISTS review_run ("
+              + "run_id TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL,"
+              + " commit_sha TEXT NOT NULL, status TEXT NOT NULL, findings INTEGER NOT NULL,"
+              + " suppressed INTEGER NOT NULL, summary_comment_id INTEGER,"
+              + " created_at TEXT NOT NULL, PRIMARY KEY (repo, pr_number, run_id))");
+      stmt.execute(
+          "CREATE INDEX IF NOT EXISTS idx_review_run_commit"
+              + " ON review_run (repo, pr_number, commit_sha)");
+      stmt.execute(
+          "CREATE TABLE IF NOT EXISTS finding ("
+              + "finding_id TEXT NOT NULL, repo TEXT NOT NULL, pr_number INTEGER NOT NULL,"
+              + " fingerprint TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL,"
+              + " category TEXT NOT NULL, run_id TEXT NOT NULL, commit_sha TEXT NOT NULL,"
+              + " comment_id INTEGER, created_at TEXT NOT NULL,"
+              + " PRIMARY KEY (repo, pr_number, finding_id))");
+      stmt.execute(
+          "CREATE INDEX IF NOT EXISTS idx_finding_fingerprint"
+              + " ON finding (repo, pr_number, fingerprint)");
+      stmt.execute(
+          "CREATE TABLE IF NOT EXISTS prompt_template_version ("
+              + "repo TEXT NOT NULL, pr_number INTEGER NOT NULL, run_id TEXT NOT NULL,"
+              + " template_name TEXT NOT NULL, template_version TEXT NOT NULL,"
+              + " created_at TEXT NOT NULL, PRIMARY KEY (repo, pr_number, run_id, template_name))");
+      return conn;
+    } catch (SQLException e) {
+      try {
+        conn.close();
+      } catch (SQLException closeFailure) {
+        e.addSuppressed(closeFailure);
+      }
+      throw new CraLedgerException("SQLite 账本 schema 初始化失败: " + jdbcUrl, e);
     }
   }
 

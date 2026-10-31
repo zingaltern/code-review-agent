@@ -18,12 +18,8 @@
       <groupId>org.cra</groupId>
       <artifactId>cra-common</artifactId>
     </dependency>
-    <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-api</artifactId>
-    </dependency>
     <!-- SQLite JDBC 驱动：SqliteLedger 测试用（test scope）。主代码只依赖 java.sql，驱动须由
-         本地模式的运行时 classpath 提供（M2 组合根装配）。版本入 root dependencyManagement。 -->
+         本地模式的运行时 classpath 提供（cra-runner-cli 装配）。版本入 root dependencyManagement。 -->
     <dependency>
       <groupId>org.xerial</groupId>
       <artifactId>sqlite-jdbc</artifactId>
