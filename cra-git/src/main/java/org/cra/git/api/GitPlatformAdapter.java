@@ -13,8 +13,8 @@ import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.RepoRef;
 
 /**
- * Git 平台适配 SPI（05§2.1；11§4：只加 default 方法，入参出参只允许 cra-common 纯 POJO）。 平台实现见 cra-git-github；blame
- * 不在本接口——走 {@link LocalRepoContext}（05§2.1）。
+ * Git 平台适配 SPI（05§2.1；11§4：只加 default 方法，入参出参只允许 cra-common 纯 POJO）。 平台实现见 cra-git-github /
+ * cra-git-gitlab；blame 不在本接口——走 {@link LocalRepoContext}（05§2.1）。
  */
 public interface GitPlatformAdapter {
 

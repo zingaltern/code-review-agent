@@ -150,6 +150,56 @@ class JavaSourceScannerTest {
   }
 
   @Test
+  void enumConstantsWithArgumentsAreExtracted() {
+    String source =
+        """
+        package demo;
+
+        enum Level {
+          LOW(1), HIGH(2);
+
+          private final int rank;
+
+          Level(int rank) { this.rank = rank; }
+        }
+        """;
+
+    JavaSourceScanner.FileScan scan = JavaSourceScanner.scan("Level.java", source);
+    List<String> fields =
+        scan.definitions().stream()
+            .filter(d -> d.kind() == SymbolKind.FIELD)
+            .map(SymbolDefinition::name)
+            .toList();
+
+    assertThat(fields).contains("LOW", "HIGH", "rank");
+  }
+
+  @Test
+  void contextualKeywordsRemainUsableAsMethodNames() {
+    // module-info 的上下文关键字（open/to/with/uses…）不是普通源码的保留字
+    String source =
+        """
+        package demo;
+
+        class Ctx {
+          void open() {}
+          void to(String value) {}
+          String with(String value) { return value; }
+          void uses() {}
+        }
+        """;
+
+    JavaSourceScanner.FileScan scan = JavaSourceScanner.scan("Ctx.java", source);
+    List<String> methods =
+        scan.definitions().stream()
+            .filter(d -> d.kind() == SymbolKind.METHOD)
+            .map(SymbolDefinition::name)
+            .toList();
+
+    assertThat(methods).containsExactly("open", "to", "with", "uses");
+  }
+
+  @Test
   void toleratesUnbalancedBracesAndEmptySource() {
     assertThat(JavaSourceScanner.scan("Broken.java", "class Broken { void x() {").definitions())
         .isNotEmpty();

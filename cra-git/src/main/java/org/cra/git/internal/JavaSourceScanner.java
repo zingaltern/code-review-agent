@@ -93,17 +93,7 @@ final class JavaSourceScanner {
           "sealed",
           "permits",
           "yield",
-          "non",
-          "exports",
-          "module",
-          "open",
-          "opens",
-          "provides",
-          "requires",
-          "to",
-          "transitive",
-          "uses",
-          "with");
+          "non");
 
   /** 成员修饰符（成员起点跳过用）。 */
   private static final Set<String> MODIFIERS =
@@ -193,8 +183,10 @@ final class JavaSourceScanner {
     Map<String, Integer> identifierCounts = new LinkedHashMap<>();
     int depth = 0;
     List<String> typeStack = new ArrayList<>();
+    List<Boolean> enumBodies = new ArrayList<>();
     List<Integer> bodyDepths = new ArrayList<>();
     String pendingType = null;
+    boolean pendingEnum = false;
     int pendingTypeDepth = -1;
     int lastMemberName = -1;
     Token previous = null;
@@ -219,6 +211,7 @@ final class JavaSourceScanner {
                   null,
                   snippet(sourceLines, name.line())));
           pendingType = name.text();
+          pendingEnum = "enum".equals(token.text());
           pendingTypeDepth = depth;
         }
       }
@@ -226,14 +219,17 @@ final class JavaSourceScanner {
         depth++;
         if (pendingType != null && depth == pendingTypeDepth + 1) {
           typeStack.add(pendingType);
+          enumBodies.add(pendingEnum);
           bodyDepths.add(depth);
           pendingType = null;
+          pendingEnum = false;
           pendingTypeDepth = -1;
         }
       } else if (isBraceClose(token)) {
         if (!bodyDepths.isEmpty() && bodyDepths.get(bodyDepths.size() - 1) == depth) {
           bodyDepths.remove(bodyDepths.size() - 1);
           typeStack.remove(typeStack.size() - 1);
+          enumBodies.remove(enumBodies.size() - 1);
         }
         if (depth > 0) {
           depth--;
@@ -244,7 +240,13 @@ final class JavaSourceScanner {
           && (previous == null || MEMBER_START_PREV.contains(previous.text()))) {
         int nameIndex =
             tryMember(
-                path, tokens, i, typeStack.get(typeStack.size() - 1), sourceLines, definitions);
+                path,
+                tokens,
+                i,
+                typeStack.get(typeStack.size() - 1),
+                enumBodies.get(enumBodies.size() - 1),
+                sourceLines,
+                definitions);
         if (nameIndex >= 0) {
           lastMemberName = nameIndex;
         }
@@ -455,6 +457,7 @@ final class JavaSourceScanner {
       List<Token> tokens,
       int start,
       String owner,
+      boolean ownerIsEnum,
       String[] sourceLines,
       List<SymbolDefinition> out) {
     int i = start;
@@ -485,6 +488,11 @@ final class JavaSourceScanner {
       // 构造器（或 record 紧凑构造器形态外的无返回类型方法——语法上仅构造器合法）
       if (owner != null && owner.equals(first.text())) {
         out.add(method(path, first, owner, sourceLines));
+        return i;
+      }
+      if (ownerIsEnum) {
+        // 带实参的 enum 常量（A(1)）：类型体内成员起点出现"名字 + ( "且不是构造器，只能是常量
+        out.add(field(path, first, owner, sourceLines));
         return i;
       }
       return -1;

@@ -16,6 +16,8 @@ class JgitLocalRepoContextTest {
 
   @TempDir Path workspace;
 
+  @TempDir Path worktreeParent;
+
   private String firstCommit;
   private String secondCommit;
 
@@ -107,48 +109,50 @@ class JgitLocalRepoContextTest {
   @Test
   void localRepoRootPresentForGitRepo() {
     var ctx = new JgitLocalRepoContext(workspace);
-    {
-      assertThat(ctx.localRepoRoot()).isPresent();
-    }
+    assertThat(ctx.localRepoRoot()).isPresent();
   }
 
   @Test
   void emptyRootForNonRepoDirectory() {
     var ctx = new JgitLocalRepoContext(Path.of("/tmp/nonexistent-cra-test"));
-    {
-      assertThat(ctx.localRepoRoot()).isEmpty();
-    }
+    assertThat(ctx.localRepoRoot()).isEmpty();
+  }
+
+  @Test
+  void gitWorktreeWithDotGitFileIsAccepted() throws Exception {
+    // git worktree / submodule 的 .git 是 gitdir 指针文件，不是目录——仍是合法仓库
+    Path worktree = worktreeParent.resolve("wt");
+    git("worktree", "add", worktree.toString(), secondCommit);
+    assertThat(Files.isRegularFile(worktree.resolve(".git"))).isTrue();
+
+    var ctx = new JgitLocalRepoContext(worktree);
+    assertThat(ctx.localRepoRoot()).isPresent();
+    assertThat(ctx.blame("Foo.java", 1, secondCommit).commitSha()).isEqualTo(firstCommit);
   }
 
   @Test
   void blameTracesLineToLastModifyingCommit() {
     var ctx = new JgitLocalRepoContext(workspace);
-    {
-      BlameResult blame = ctx.blame("Foo.java", 1, secondCommit);
-      assertThat(blame.commitSha()).isEqualTo(firstCommit);
-      assertThat(blame.author()).isEqualTo("alice");
-      BlameResult changed = ctx.blame("Foo.java", 2, secondCommit);
-      assertThat(changed.commitSha()).isEqualTo(secondCommit);
-      assertThat(changed.author()).isEqualTo("bob");
-    }
+    BlameResult blame = ctx.blame("Foo.java", 1, secondCommit);
+    assertThat(blame.commitSha()).isEqualTo(firstCommit);
+    assertThat(blame.author()).isEqualTo("alice");
+    BlameResult changed = ctx.blame("Foo.java", 2, secondCommit);
+    assertThat(changed.commitSha()).isEqualTo(secondCommit);
+    assertThat(changed.author()).isEqualTo("bob");
   }
 
   @Test
   void blameMissingFileThrowsIntegrationException() {
     var ctx = new JgitLocalRepoContext(workspace);
-    {
-      assertThatThrownBy(() -> ctx.blame("Missing.java", 1, secondCommit))
-          .isInstanceOf(CraIntegrationException.class);
-    }
+    assertThatThrownBy(() -> ctx.blame("Missing.java", 1, secondCommit))
+        .isInstanceOf(CraIntegrationException.class);
   }
 
   @Test
   void blameWithoutRepoThrowsIntegrationException() {
     var ctx = new JgitLocalRepoContext(Path.of("/tmp/nonexistent-cra-test"));
-    {
-      assertThatThrownBy(() -> ctx.blame("Foo.java", 1, secondCommit))
-          .isInstanceOf(CraIntegrationException.class)
-          .hasMessageContaining("本地仓库不可得");
-    }
+    assertThatThrownBy(() -> ctx.blame("Foo.java", 1, secondCommit))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("本地仓库不可得");
   }
 }
