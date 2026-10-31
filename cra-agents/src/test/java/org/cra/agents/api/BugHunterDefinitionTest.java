@@ -2,12 +2,15 @@ package org.cra.agents.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.cra.agents.internal.TemplateLoader;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
- * T2.2 BugHunter 四视角定义测试（03§2.2 视角隔离 + 04§4.1 模板骨架 + 03§6 预算行）： 角色标识、模板版本互异、UNTRUSTED 定界、scoped
+ * T2.2 BugHunter 四视角定义测试（03§2.2 视角隔离 + 04§4.1 模板骨架 + 03§6 预算行）： 角色标识、模板内容互异、UNTRUSTED 定界、scoped
  * 工具范围声明、预算与白名单。
  */
 class BugHunterDefinitionTest {
@@ -33,10 +36,10 @@ class BugHunterDefinitionTest {
       assertThat(definition.role().id()).isEqualTo("bug-hunter/" + p.id).matches("[a-z0-9/-]+");
       assertThat(definition.role().displayName()).contains(p.label);
     }
-    // 模板版本互异（视角隔离落实到模板）
+    // 模板内容互异（视角隔离落实到 System 段；版本串含文件名，不能证明内容不同）
     long distinct =
-        java.util.Arrays.stream(BugHunterDefinition.Perspective.values())
-            .map(p -> new BugHunterDefinition(p, LOADER).buildBrief(input()).templateVersion())
+        Arrays.stream(BugHunterDefinition.Perspective.values())
+            .map(p -> new BugHunterDefinition(p, LOADER).buildBrief(input()).systemPrompt())
             .distinct()
             .count();
     assertThat(distinct).isEqualTo(BugHunterDefinition.Perspective.values().length);
@@ -68,16 +71,17 @@ class BugHunterDefinitionTest {
   void budgetAndToolsFollowSpecTable() {
     BugHunterDefinition definition =
         new BugHunterDefinition(BugHunterDefinition.Perspective.BOUNDARY, LOADER);
-    // 03§6：≤24k 输入 / ≤2k 输出 / 3 轮；read_file(scoped)；标准档
+    // 03§6：≤48k 输入 / ≤8k 输出 / 3 轮；read_file(scoped)；标准档
     assertThat(definition.budget()).isEqualTo(new AgentBudget(48_000, 8_000, 3, 240_000));
     assertThat(definition.tools()).isEqualTo(ToolWhitelist.READ_FILE);
     assertThat(definition.modelTier()).isEqualTo(AgentTier.STANDARD);
+    assertThat(definition.buildBrief(input()).modelTier()).isEqualTo(AgentTier.STANDARD);
   }
 
   @Test
   void blankOptionalSectionsRenderPlaceholders() {
     ReviewAgentInput blank =
-        new ReviewAgentInput("t", "m", "@@ -1 +1 @@", "", "", "", "", java.util.Set.of());
+        new ReviewAgentInput("t", "m", "@@ -1 +1 @@", "", "", "", "", Set.of());
     AgentBrief brief =
         new BugHunterDefinition(BugHunterDefinition.Perspective.RESOURCE, LOADER).buildBrief(blank);
     assertThat(brief.userPrompt()).contains("（无附加上下文）");
@@ -85,11 +89,11 @@ class BugHunterDefinitionTest {
   }
 
   @Test
+  @Timeout(10)
   void renderIsThreadSafeAcrossPerspectives() throws Exception {
     // M1 教训（TemplateLoader 并发渲染）：四视角并发构建 brief 不出异常即回归守护
     Thread[] threads = new Thread[8];
-    java.util.concurrent.atomic.AtomicInteger failures =
-        new java.util.concurrent.atomic.AtomicInteger();
+    AtomicInteger failures = new AtomicInteger();
     for (int i = 0; i < threads.length; i++) {
       threads[i] =
           new Thread(
@@ -99,7 +103,7 @@ class BugHunterDefinitionTest {
                       BugHunterDefinition.Perspective.values()) {
                     new BugHunterDefinition(p, LOADER).buildBrief(input());
                   }
-                } catch (RuntimeException e) {
+                } catch (Throwable e) {
                   failures.incrementAndGet();
                 }
               });

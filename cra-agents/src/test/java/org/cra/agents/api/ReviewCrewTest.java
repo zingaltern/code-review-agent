@@ -2,10 +2,16 @@ package org.cra.agents.api;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** T2.2/T2.3 班组装配测试：四视角齐备且派发序固定（dataflow → boundary → concurrency → resource）+ 四专角色装配。 */
 class ReviewCrewTest {
+
+  private static ReviewAgentInput input() {
+    return new ReviewAgentInput("PR", "m", "@@ -1 +1 @@", "", "", "", "", Set.of());
+  }
 
   @Test
   void crewShipsAllFourPerspectivesInPriorityOrder() {
@@ -18,14 +24,14 @@ class ReviewCrewTest {
             "bug-hunter/boundary",
             "bug-hunter/concurrency",
             "bug-hunter/resource");
-    // 同一 TemplateLoader 实例（模板缓存共享，线程安全由 TemplateLoader 保证）
+    // 四视角均为 BugHunterDefinition（同一 TemplateLoader 缓存由装配工厂共享）
     assertThat(crew.bugHunters())
         .allSatisfy(agent -> assertThat(agent).isInstanceOf(BugHunterDefinition.class));
   }
 
   @Test
   void emptyCrewIsTolerated() {
-    ReviewCrew crew = ReviewCrew.ofBugHunters(java.util.List.of());
+    ReviewCrew crew = ReviewCrew.ofBugHunters(List.of());
     assertThat(crew.bugHunters()).isEmpty();
     assertThat(crew.securityReviewer()).isNull();
     ReviewCrew nullTolerated = new ReviewCrew(null, null, null, null, null);
@@ -38,6 +44,7 @@ class ReviewCrewTest {
     ReviewCrew crew = AgentsAssembly.createReviewCrew();
     assertThat(crew.securityReviewer().role().id()).isEqualTo("security-reviewer");
     assertThat(crew.securityReviewer().modelTier()).isEqualTo(AgentTier.STRONG);
+    assertThat(crew.securityReviewer().buildBrief(input()).modelTier()).isEqualTo(AgentTier.STRONG);
     assertThat(crew.securityReviewer().tools()).isEqualTo(ToolWhitelist.READ_FILE_AND_GREP);
     assertThat(crew.securityReviewer().budget())
         .isEqualTo(new AgentBudget(48_000, 4_000, 3, 240_000));
@@ -45,6 +52,8 @@ class ReviewCrewTest {
     assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(32_000, 8_000, 2, 120_000));
     assertThat(crew.conventionReviewer().role().id()).isEqualTo("convention-reviewer");
     assertThat(crew.conventionReviewer().modelTier()).isEqualTo(AgentTier.LIGHT);
+    assertThat(crew.conventionReviewer().buildBrief(input()).modelTier())
+        .isEqualTo(AgentTier.LIGHT);
     assertThat(crew.conventionReviewer().tools()).isEqualTo(ToolWhitelist.NONE);
     assertThat(crew.conventionReviewer().budget())
         .isEqualTo(new AgentBudget(16_000, 2_000, 1, 60_000));

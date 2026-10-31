@@ -24,6 +24,11 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
   /** 默认输出预算（含 refutation 对象；agents.budget.verifier.output-tokens 可覆盖）。 */
   public static final long DEFAULT_OUTPUT_TOKENS = 4_000;
 
+  // AI Coding 放宽档（ADR-0015 §2.2 修订）：12k/1.5k → 16k/2k——调用点索引（≤1000 token）
+  // 与跨层 caller 证据需要更多代码上下文，输出预算随判定润色同步上调
+  private static final AgentBudget BUDGET =
+      new AgentBudget(DEFAULT_INPUT_TOKENS, DEFAULT_OUTPUT_TOKENS, 2, 240_000);
+
   private final TemplateSupport templates;
 
   /**
@@ -69,7 +74,8 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
                 input.testFileIndex().isBlank()
                     ? "（本批无 test 类结论或测试清单不可得）"
                     : TemplateSupport.untrusted(input.testFileIndex())));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(
+        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
   }
 
   @Override
@@ -78,14 +84,14 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
   }
 
   /**
-   * 强档（03§6 速查表 VerifierAgent 行：M2 强 / M3 V1 强 + V2 异构；T2.9 路由落地后本档位 从未回填——验证层长期跑在 standard
-   * 模型上，是拒真/复核能力不足的结构性原因，M3 验收 409 修复）。
+   * 强档（03§6 速查表 VerifierAgent 行：M2 强 / M3 V1 强 + V2 异构）；档位经 {@code briefOf} 透传进 brief，由 AgentRunner
+   * 路由消费。
    *
    * @return 强档
    */
   @Override
-  public org.cra.agents.api.AgentTier modelTier() {
-    return org.cra.agents.api.AgentTier.STRONG;
+  public AgentTier modelTier() {
+    return AgentTier.STRONG;
   }
 
   @Override
@@ -93,7 +99,7 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
     // AI Coding 放宽档（ADR-0015 §2.2 修订）：12k/1.5k → 16k/2k；2026-10-31 预算翻倍：16k/2k →
     // 32k/4k——调用点索引（≤1000 token）
     // 与跨层 caller 证据需要更多代码上下文，输出预算随判定润色同步上调
-    return new AgentBudget(DEFAULT_INPUT_TOKENS, DEFAULT_OUTPUT_TOKENS, 2, 240_000);
+    return BUDGET;
   }
 
   private static String renderFindings(List<VerificationItem> items) {

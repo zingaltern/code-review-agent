@@ -19,6 +19,9 @@ import java.util.Objects;
  */
 public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> {
 
+  /** scoped 路径清单上限（避免清单挤占 brief 输入预算）。 */
+  private static final int MAX_SCOPED_PATHS = 40;
+
   /** 预算（03§6 CrossChecker 行）。 */
   private static final AgentBudget BUDGET =
       // v1.3.2：输出 1.5k→4k——context finding 的 JSON（含矛盾来源引用）每条 ≈700-1k token，
@@ -64,7 +67,8 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(
+        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
   }
 
   @Override
@@ -84,6 +88,7 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
   }
 
   private static String scopedPathsNote(ReviewAgentInput input) {
-    return TemplateSupport.scopedPathsNote(input.scopedPaths(), "read_file", 40);
+    return TemplateSupport.scopedPathsNote(
+        input.scopedPaths(), ToolWhitelist.READ_FILE_NAME, MAX_SCOPED_PATHS);
   }
 }
