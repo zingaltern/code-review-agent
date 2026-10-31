@@ -1,5 +1,6 @@
 package org.cra.core.api;
 
+import java.util.Set;
 import org.cra.common.semantic.SymbolIndexOptions;
 
 /**
@@ -69,8 +70,8 @@ public record SemanticContextOptions(
         new SymbolIndexOptions(
             maxFiles,
             maxFileBytes,
-            java.util.Set.of(),
-            java.util.Set.of(),
+            Set.of(),
+            Set.of(),
             SymbolIndexOptions.OverLimitPolicy.TRUNCATE));
   }
 }

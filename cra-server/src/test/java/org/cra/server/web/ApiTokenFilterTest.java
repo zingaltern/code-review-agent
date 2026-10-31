@@ -45,4 +45,26 @@ class ApiTokenFilterTest {
     filter.doFilter(request, response, chain);
     assertThat(chain.getRequest()).isNotNull();
   }
+
+  @Test
+  void filtersApiPathsUnderContextPath() throws Exception {
+    // server.servlet.context-path 下 requestURI 含前缀：必须仍保护 /api/v1（不能整体跳过过滤）
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("POST", "/cra/api/v1/reports/attest");
+    request.setContextPath("/cra");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    filter.doFilter(request, response, new MockFilterChain());
+    assertThat(response.getStatus()).isEqualTo(401);
+  }
+
+  @Test
+  void acceptsLowerCaseBearerScheme() throws Exception {
+    // HTTP auth scheme 大小写不敏感（RFC 7235）
+    MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/reports/attest");
+    request.addHeader("Authorization", "bearer api-token");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    MockFilterChain chain = new MockFilterChain();
+    filter.doFilter(request, response, chain);
+    assertThat(chain.getRequest()).isNotNull();
+  }
 }

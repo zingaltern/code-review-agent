@@ -17,37 +17,31 @@ class LocalPrePrReportTest {
   @TempDir private Path tempDir;
 
   private static CraConfig config(boolean local, boolean dryRun) {
-    return new CraConfig(
-        "zingaltern",
-        "cra",
-        0,
-        "abc1234000000000000000000000000000000000",
-        "def5678000000000000000000000000000000000",
-        "standard",
-        dryRun,
-        false,
-        null,
-        "https://api.github.com",
-        null,
-        null,
-        null,
-        ".cra/runs",
-        ".",
-        2000,
-        8000,
-        3,
-        500_000L,
-        0.70,
-        0.85,
-        "never",
-        20,
-        local,
-        "mvn -B -ntp verify",
-        "/tmp/ledger.db",
-        null,
-        null,
-        "standard,light",
-        "");
+    return CraConfig.builder()
+        .repoOwner("zingaltern")
+        .repoName("cra")
+        .prNumber(0)
+        .baseSha("abc1234000000000000000000000000000000000")
+        .headSha("def5678000000000000000000000000000000000")
+        .depth("standard")
+        .dryRun(dryRun)
+        .githubApi("https://api.github.com")
+        .runRoot(".cra/runs")
+        .workspace(".")
+        .largeDiffLines(2000)
+        .hardCapLines(8000)
+        .nitBudget(3)
+        .runTotalTokens(500_000L)
+        .degradeAtFirst(0.70)
+        .degradeAtSecond(0.85)
+        .publishUnverified("never")
+        .spotCheckPercent(20)
+        .local(local)
+        .execCommand("mvn -B -ntp verify")
+        .ledgerDb("/tmp/ledger.db")
+        .fallbackChain("standard,light")
+        .rpm("")
+        .build();
   }
 
   private static BuildVerifyRunner.ExecResult exec(int code, String output) {
@@ -289,5 +283,17 @@ class LocalPrePrReportTest {
             null,
             null);
     assertThat(report).contains("签字建议: 已关闭（agents.signoff.enabled=false）");
+  }
+
+  @Test
+  void incompleteBuildLogIsNotClaimedComplete() {
+    // 读线程未收尾/日志落盘失败：报告必须声明可能不完整，不能写"完整输出"
+    BuildVerifyRunner.ExecResult incomplete =
+        new BuildVerifyRunner.ExecResult(
+            1, "[ERROR] boom\n", Path.of("/tmp/partial.log"), 10, false);
+    String report =
+        LocalPrePrReport.render(
+            config(true, true), incomplete, "zingaltern/cra", "main", null, "已跳过", null);
+    assertThat(report).contains("输出日志（可能不完整）: /tmp/partial.log").doesNotContain("完整输出: /tmp/");
   }
 }

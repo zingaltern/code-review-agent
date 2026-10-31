@@ -3,7 +3,7 @@ package org.cra.server.queue;
 /**
  * 一次异步评审任务（webhook 事件的队列载荷；02§5 服务形态）。
  *
- * @param deliveryId GitHub delivery id（幂等键）
+ * @param deliveryId 平台 delivery 键（GitHub delivery id / GitLab event UUID；幂等键）
  * @param repoOwner 仓库属主
  * @param repoName 仓库名
  * @param prNumber PR 编号

@@ -38,7 +38,7 @@ import org.mockito.Mockito;
  *   <li>"改前"语义对照：{@link PromotionEngine} 对无证据 REFUTED 直接 REJECT（旧路径）；
  *   <li>有可核查反证（GUARD_EXISTS + 简报内逐字 quote）时 REFUTED 成立、不调 Judge；
  *   <li>bug 类 brief 注入确定性调用点索引（同目录 peer 文件 + 符号命中）；
- *   <li>verifier 输入预算不突破（03§6 ≤16k，索引在预留内）。
+ *   <li>verifier 输入预算不突破（03§6 ≤32k，索引在预留内；fixture 断言沿用 ≤16k 更严锚）。
  * </ul>
  */
 class VerifierAntiRefutePipelineTest {

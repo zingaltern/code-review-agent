@@ -20,9 +20,6 @@ public final class EventHistoryCollectionJob {
 
   private static final Logger LOG = LoggerFactory.getLogger(EventHistoryCollectionJob.class);
 
-  /** 05§5 默认窗口（天）。 */
-  static final int DEFAULT_LOOKBACK_DAYS = 7;
-
   private final boolean enabled;
   private final EventHistoryCollector collector;
   private final int lookbackDays;
@@ -31,13 +28,7 @@ public final class EventHistoryCollectionJob {
   /**
    * @param enabled 开关（CRA_SERVER_EVENT_HISTORY_ENABLED）
    * @param collector 采集端口（关闭时装配 Noop）
-   */
-  public EventHistoryCollectionJob(boolean enabled, EventHistoryCollector collector) {
-    this(enabled, collector, DEFAULT_LOOKBACK_DAYS, Clock.systemUTC());
-  }
-
-  /**
-   * @param lookbackDays 单次窗口（天）
+   * @param lookbackDays 单次窗口（天；任务调度周期应不大于它，避免窗口空洞）
    */
   public EventHistoryCollectionJob(
       boolean enabled, EventHistoryCollector collector, int lookbackDays) {

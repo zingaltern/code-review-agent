@@ -6,8 +6,8 @@ import java.util.Objects;
 
 /**
  * BugHunter 视角化评审子代理定义（T2.2，03§2.2 视角隔离：同角色多实例用不同视角系统提示词； 04§4.1 模板骨架）。纯定义：模板装载 + brief 组装；LLM 循环在
- * cra-core （{@code AgentRunner} 隔离运行时）。预算与工具对齐 03§6 速查表 BugHunter 行（≤24k 输入 / v1.3.2 起 ≤4k 输出 / 3 轮
- * / read_file(scoped)）。
+ * cra-core （{@code AgentRunner} 隔离运行时）。预算与工具对齐 03§6 速查表 BugHunter 行（≤48k 输入 / ≤8k 输出 / 3 轮 /
+ * read_file(scoped)； 2026-10-31 预算翻倍，原 24k/4k）。
  */
 public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
 
@@ -37,7 +37,7 @@ public final class BugHunterDefinition implements SubAgent<ReviewAgentInput> {
   /** 预算（03§6 BugHunter 行）。 */
   // v1.3.2：输出 2k→4k——M3 实测 dataflow 单次输出 4379 token 击穿 2k（budget_exceeded）；
   // 每条 finding ≈600-900 token，4k 容纳 4-5 条
-  private static final AgentBudget BUDGET = new AgentBudget(24_000, 4_000, 3, 240_000);
+  private static final AgentBudget BUDGET = new AgentBudget(48_000, 8_000, 3, 240_000);
 
   private final Perspective perspective;
   private final TemplateSupport templates;

@@ -8,6 +8,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import org.cra.common.finding.AnchorStatus;
+import org.cra.common.finding.FindingCategory;
 import org.cra.common.run.Coverage;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
@@ -137,8 +138,7 @@ final class ReviewRunFinisher {
     int securityCount =
         (int)
             toPublish.stream()
-                .filter(
-                    s -> s.finding().category() == org.cra.common.finding.FindingCategory.SECURITY)
+                .filter(s -> s.finding().category() == FindingCategory.SECURITY)
                 .count();
     return new PublishCounters(fallbackCount, preExistingCount, filesReviewed, securityCount);
   }

@@ -1,10 +1,18 @@
 package org.cra.runner.cli;
 
+import java.util.Locale;
+import org.cra.agents.api.AgentBudgetOverrides;
+import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
+import org.cra.llm.api.LlmGatewayConfig;
 
 /**
- * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量，密钥只从环境变量读， 05§6）。组装期校验：缺项/非法值即 CraConfigException →
- * 退出码 2（05§3）。
+ * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量）。GitHub token 可经 `--token`/`GITHUB_TOKEN` 提供；LLM 与
+ * GitLab 密钥只从环境变量/文件读（05§3/§6）。组装期校验：缺项/非法值即 CraConfigException → 退出码 2。
+ *
+ * <p>构造入口是 {@link #builder()}：43 个组件的 record 位置参数散落在调用点既无法审阅，新增字段也无处收敛（JLS 8.10.4 要求 canonical
+ * 构造器可见性不低于 record 本身，故无法声明为 private——约定改为位置参数只出现在 {@link Builder#build()}）。默认值住在 Builder
+ * 字段初值；空值归一与校验仍在紧凑构造器（唯一校验点，不因入口变化而搬家）。
  *
  * @param repoOwner 仓库属主（本地模式可为 null，由 remote origin 推导后经 {@link #withResolvedLocal} 回填）
  * @param repoName 仓库名（同上）
@@ -14,7 +22,7 @@ import org.cra.common.run.ReviewMode;
  * @param depth 深度档位
  * @param dryRun dry-run（全程零写，05§6；本地模式默认 true，05§3）
  * @param securityBlock --security-block：存在 security finding 时退出码 3（05§3）
- * @param githubToken GitHub token（GITHUB_TOKEN 或 --token；本地模式不需要）
+ * @param githubToken GitHub token（GITHUB_TOKEN 或 --token；本地与 GitLab 模式为 null）
  * @param githubApi GitHub API 根（默认 https://api.github.com）
  * @param llmApiKey LLM 密钥（CRA_LLM_API_KEY；本地模式缺省 = 跳过评审并如实声明）
  * @param llmBaseUrl LLM 端点（CRA_LLM_BASE_URL）
@@ -24,7 +32,7 @@ import org.cra.common.run.ReviewMode;
  * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 4000；原 2000，#64 放宽）
  * @param hardCapLines 硬上限（review.hard-cap-lines，默认 16000；原 8000，#64 放宽）
  * @param nitBudget nit 预算默认（review.nit-budget-default，默认 3；REVIEW.md 显式配置优先）
- * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 800k；原 500k，#64 放宽）
+ * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 1.6M；2026-10-31 翻倍（原 800k））
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
  * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
@@ -38,6 +46,8 @@ import org.cra.common.run.ReviewMode;
  * @param llmModelLight light 档模型名（--model-light / CRA_LLM_MODEL_LIGHT；缺省继承 standard）
  * @param fallbackChain 降级链（--fallback-chain / CRA_LLM_FALLBACK_CHAIN，默认 standard,light；05§5）
  * @param rpm per-model RPM（--rpm / CRA_LLM_RPM，形如 standard=60,strong=30,light=60；默认 60/30/60）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param llmTemperature 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
  * @param crossCheckerEnabled CrossChecker 总开关（05§5 agents.crosschecker.enabled；--crosschecker /
  *     CRA_CROSSCHECKER_ENABLED，默认 false——关闭不动 Standard 基线算术，04§2.2）
@@ -84,6 +94,7 @@ public record CraConfig(
     String llmModelLight,
     String fallbackChain,
     String rpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -95,20 +106,39 @@ public record CraConfig(
     GitLabSettings gitlab,
     SemanticContextConfig semanticContext,
     boolean includeTestFiles,
-    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
+    AgentBudgetOverrides agentBudgets) {
+
+  /** 本地 trace/brief 落盘根默认（05§4 artifact 路径）。 */
+  public static final String DEFAULT_RUN_ROOT = ".cra/runs";
+
+  /** 本地 SQLite 账本文件默认（02§5 本地形态）。 */
+  public static final String DEFAULT_LEDGER_DB = "~/.cra/ledger.db";
+
+  /** LLM 降级链默认（05§5）。 */
+  public static final String DEFAULT_FALLBACK_CHAIN = "standard,light";
+
+  /** push 基线解析默认回溯步数（05§2.4）。 */
+  public static final int DEFAULT_PUSH_LOOKBACK = 20;
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
     semanticContext = semanticContext == null ? SemanticContextConfig.defaults() : semanticContext;
-    agentBudgets =
-        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
+    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
     platform =
         platform == null || platform.isBlank()
             ? "github"
-            : platform.strip().toLowerCase(java.util.Locale.ROOT);
+            : platform.strip().toLowerCase(Locale.ROOT);
     if (!"github".equals(platform) && !"gitlab".equals(platform)) {
-      throw new org.cra.common.exception.CraConfigException(
-          "platform 非法: " + platform + "（github|gitlab）");
+      throw new CraConfigException("platform 非法: " + platform + "（github|gitlab）");
+    }
+    // 校验必须落在紧凑构造器（唯一校验点）：Builder/位置参数/回填/tests 任一入口都不得绕过 1..64
+    // （0 = 信号量永久阻塞；>64 无意义——实际并发受线程池宽度约束，09§6）
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
     }
     gitlab = gitlab == null ? GitLabSettings.none() : gitlab;
   }
@@ -119,282 +149,32 @@ public record CraConfig(
   }
 
   /**
-   * M4c 前形态兼容构造（发布形态 = PR）。
+   * 空 Builder（默认值 = 05§5 文档默认与 M2 形态的兼容语义：CrossChecker 关闭、PR 发布形态、github 平台）。
    *
-   * @param repoOwner 仓库属主
-   * @param repoName 仓库名
-   * @param prNumber PR 编号
-   * @param baseSha 基线 sha
-   * @param headSha 目标 sha
-   * @param depth 深度档位
-   * @param dryRun dry-run
-   * @param securityBlock --security-block
-   * @param githubToken GitHub token
-   * @param githubApi GitHub API 根
-   * @param llmApiKey LLM 密钥
-   * @param llmBaseUrl LLM 端点
-   * @param llmModel 模型名
-   * @param runRoot trace 落盘根
-   * @param workspace 本地工作区根
-   * @param largeDiffLines 大 diff 降档线
-   * @param hardCapLines 硬上限
-   * @param nitBudget nit 预算默认
-   * @param runTotalTokens run 级预算
-   * @param degradeAtFirst 第一降档阈值
-   * @param degradeAtSecond 第二降档阈值
-   * @param publishUnverified UNVERIFIED 发布策略
-   * @param spotCheckPercent 抽查保险丝百分比
-   * @param local 本地 pre-PR 模式
-   * @param execCommand 本地实跑命令
-   * @param ledgerDb 本地账本
-   * @param llmModelStrong strong 档模型
-   * @param llmModelLight light 档模型
-   * @param fallbackChain 降级链
-   * @param rpm per-model RPM
-   * @param crossCheckerEnabled CrossChecker 总开关
-   * @param crossCheckerModes 模式开关
-   * @param crossCheckerHistoryWeeks 变更史回溯周数
-   * @param llmTemperature 采样温度
+   * @return 新建 Builder
    */
-  public CraConfig(
-      String repoOwner,
-      String repoName,
-      int prNumber,
-      String baseSha,
-      String headSha,
-      String depth,
-      boolean dryRun,
-      boolean securityBlock,
-      String githubToken,
-      String githubApi,
-      String llmApiKey,
-      String llmBaseUrl,
-      String llmModel,
-      String runRoot,
-      String workspace,
-      int largeDiffLines,
-      int hardCapLines,
-      int nitBudget,
-      long runTotalTokens,
-      double degradeAtFirst,
-      double degradeAtSecond,
-      String publishUnverified,
-      int spotCheckPercent,
-      boolean local,
-      String execCommand,
-      String ledgerDb,
-      String llmModelStrong,
-      String llmModelLight,
-      String fallbackChain,
-      String rpm,
-      boolean crossCheckerEnabled,
-      String crossCheckerModes,
-      int crossCheckerHistoryWeeks,
-      String llmTemperature) {
-    this(
-        repoOwner,
-        repoName,
-        prNumber,
-        baseSha,
-        headSha,
-        depth,
-        dryRun,
-        securityBlock,
-        githubToken,
-        githubApi,
-        llmApiKey,
-        llmBaseUrl,
-        llmModel,
-        runRoot,
-        workspace,
-        largeDiffLines,
-        hardCapLines,
-        nitBudget,
-        runTotalTokens,
-        degradeAtFirst,
-        degradeAtSecond,
-        publishUnverified,
-        spotCheckPercent,
-        local,
-        execCommand,
-        ledgerDb,
-        llmModelStrong,
-        llmModelLight,
-        fallbackChain,
-        rpm,
-        crossCheckerEnabled,
-        crossCheckerModes,
-        crossCheckerHistoryWeeks,
-        llmTemperature,
-        DEFAULT_PUSH_LOOKBACK,
-        ReviewMode.PULL_REQUEST,
-        SignoffConfig.defaults(),
-        "github",
-        GitLabSettings.none(),
-        SemanticContextConfig.defaults(),
-        false,
-        org.cra.agents.api.AgentBudgetOverrides.none());
+  public static Builder builder() {
+    return new Builder();
   }
 
-  /** push 基线解析默认回溯步数（05§2.4）。 */
-  public static final int DEFAULT_PUSH_LOOKBACK = 20;
-
   /**
-   * M2 形态兼容构造（CrossChecker 关闭，05§5 agents.crosschecker.enabled=false）。
+   * 以本配置为初值的 Builder：只覆盖目标组件，其余原样保留（回填不再逐字段复制 42 项）。
    *
-   * @param repoOwner 仓库属主
-   * @param repoName 仓库名
-   * @param prNumber PR 编号
-   * @param baseSha 基线 sha
-   * @param headSha 目标 sha
-   * @param depth 深度档位
-   * @param dryRun dry-run
-   * @param securityBlock --security-block
-   * @param githubToken GitHub token
-   * @param githubApi GitHub API 根
-   * @param llmApiKey LLM 密钥
-   * @param llmBaseUrl LLM 端点
-   * @param llmModel 模型名
-   * @param runRoot trace 落盘根
-   * @param workspace 本地工作区根
-   * @param largeDiffLines 大 diff 降档线
-   * @param hardCapLines 硬上限
-   * @param nitBudget nit 预算默认
-   * @param runTotalTokens run 级预算
-   * @param degradeAtFirst 第一降档阈值
-   * @param degradeAtSecond 第二降档阈值
-   * @param publishUnverified UNVERIFIED 发布策略
-   * @param spotCheckPercent 抽查保险丝百分比
-   * @param local 本地 pre-PR 模式
-   * @param execCommand 本地实跑命令
-   * @param ledgerDb 本地账本
-   * @param llmModelStrong strong 档模型
-   * @param llmModelLight light 档模型
-   * @param fallbackChain 降级链
-   * @param rpm per-model RPM
+   * @return 预填当前全部组件的 Builder
    */
-  public CraConfig(
-      String repoOwner,
-      String repoName,
-      int prNumber,
-      String baseSha,
-      String headSha,
-      String depth,
-      boolean dryRun,
-      boolean securityBlock,
-      String githubToken,
-      String githubApi,
-      String llmApiKey,
-      String llmBaseUrl,
-      String llmModel,
-      String runRoot,
-      String workspace,
-      int largeDiffLines,
-      int hardCapLines,
-      int nitBudget,
-      long runTotalTokens,
-      double degradeAtFirst,
-      double degradeAtSecond,
-      String publishUnverified,
-      int spotCheckPercent,
-      boolean local,
-      String execCommand,
-      String ledgerDb,
-      String llmModelStrong,
-      String llmModelLight,
-      String fallbackChain,
-      String rpm) {
-    this(
-        repoOwner,
-        repoName,
-        prNumber,
-        baseSha,
-        headSha,
-        depth,
-        dryRun,
-        securityBlock,
-        githubToken,
-        githubApi,
-        llmApiKey,
-        llmBaseUrl,
-        llmModel,
-        runRoot,
-        workspace,
-        largeDiffLines,
-        hardCapLines,
-        nitBudget,
-        runTotalTokens,
-        degradeAtFirst,
-        degradeAtSecond,
-        publishUnverified,
-        spotCheckPercent,
-        local,
-        execCommand,
-        ledgerDb,
-        llmModelStrong,
-        llmModelLight,
-        fallbackChain,
-        rpm,
-        false,
-        "assumption,sniff",
-        8,
-        null,
-        DEFAULT_PUSH_LOOKBACK,
-        ReviewMode.PULL_REQUEST,
-        SignoffConfig.defaults(),
-        "github",
-        GitLabSettings.none(),
-        SemanticContextConfig.defaults(),
-        false,
-        org.cra.agents.api.AgentBudgetOverrides.none());
+  public Builder toBuilder() {
+    return new Builder(this);
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */
   public CraConfig withResolvedLocal(
       String owner, String name, String resolvedBase, String resolvedHead) {
-    return new CraConfig(
-        owner,
-        name,
-        prNumber(),
-        resolvedBase,
-        resolvedHead,
-        depth(),
-        dryRun(),
-        securityBlock(),
-        githubToken(),
-        githubApi(),
-        llmApiKey(),
-        llmBaseUrl(),
-        llmModel(),
-        runRoot(),
-        workspace(),
-        largeDiffLines(),
-        hardCapLines(),
-        nitBudget(),
-        runTotalTokens(),
-        degradeAtFirst(),
-        degradeAtSecond(),
-        publishUnverified(),
-        spotCheckPercent(),
-        local(),
-        execCommand(),
-        ledgerDb(),
-        llmModelStrong(),
-        llmModelLight(),
-        fallbackChain(),
-        rpm(),
-        crossCheckerEnabled(),
-        crossCheckerModes(),
-        crossCheckerHistoryWeeks(),
-        llmTemperature(),
-        pushLookback(),
-        reviewMode(),
-        signoff(),
-        platform(),
-        gitlab(),
-        semanticContext(),
-        includeTestFiles(),
-        agentBudgets());
+    return toBuilder()
+        .repoOwner(owner)
+        .repoName(name)
+        .baseSha(resolvedBase)
+        .headSha(resolvedHead)
+        .build();
   }
 
   /**
@@ -404,48 +184,370 @@ public record CraConfig(
    * @return 回填后的配置
    */
   public CraConfig withResolvedPushBase(String resolvedBase) {
-    return new CraConfig(
-        repoOwner(),
-        repoName(),
-        prNumber(),
-        resolvedBase,
-        headSha(),
-        depth(),
-        dryRun(),
-        securityBlock(),
-        githubToken(),
-        githubApi(),
-        llmApiKey(),
-        llmBaseUrl(),
-        llmModel(),
-        runRoot(),
-        workspace(),
-        largeDiffLines(),
-        hardCapLines(),
-        nitBudget(),
-        runTotalTokens(),
-        degradeAtFirst(),
-        degradeAtSecond(),
-        publishUnverified(),
-        spotCheckPercent(),
-        local(),
-        execCommand(),
-        ledgerDb(),
-        llmModelStrong(),
-        llmModelLight(),
-        fallbackChain(),
-        rpm(),
-        crossCheckerEnabled(),
-        crossCheckerModes(),
-        crossCheckerHistoryWeeks(),
-        llmTemperature(),
-        pushLookback(),
-        reviewMode(),
-        signoff(),
-        platform(),
-        gitlab(),
-        semanticContext(),
-        includeTestFiles(),
-        agentBudgets());
+    return toBuilder().baseSha(resolvedBase).build();
+  }
+
+  /** 逐字段构建（setter 名与 record 组件一一对应；未设置的组件取 Builder 默认）。 */
+  public static final class Builder {
+
+    private String repoOwner;
+    private String repoName;
+    private int prNumber;
+    private String baseSha;
+    private String headSha;
+    private String depth;
+    private boolean dryRun;
+    private boolean securityBlock;
+    private String githubToken;
+    private String githubApi;
+    private String llmApiKey;
+    private String llmBaseUrl;
+    private String llmModel;
+    private String runRoot;
+    private String workspace;
+    private int largeDiffLines;
+    private int hardCapLines;
+    private int nitBudget;
+    private long runTotalTokens;
+    private double degradeAtFirst;
+    private double degradeAtSecond;
+    private String publishUnverified;
+    private int spotCheckPercent;
+    private boolean local;
+    private String execCommand;
+    private String ledgerDb;
+    private String llmModelStrong;
+    private String llmModelLight;
+    private String fallbackChain;
+    private String rpm;
+    private int llmMaxConcurrency = LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY;
+    private boolean crossCheckerEnabled;
+    private String crossCheckerModes = "assumption,sniff";
+    private int crossCheckerHistoryWeeks = 8;
+    private String llmTemperature;
+    private int pushLookback = DEFAULT_PUSH_LOOKBACK;
+    private ReviewMode reviewMode = ReviewMode.PULL_REQUEST;
+    private SignoffConfig signoff;
+    private String platform;
+    private GitLabSettings gitlab;
+    private SemanticContextConfig semanticContext;
+    private boolean includeTestFiles;
+    private AgentBudgetOverrides agentBudgets;
+
+    private Builder() {}
+
+    /** 以既有配置预填全部组件（{@link CraConfig#toBuilder()} 的唯一实现）。 */
+    private Builder(CraConfig source) {
+      this.repoOwner = source.repoOwner();
+      this.repoName = source.repoName();
+      this.prNumber = source.prNumber();
+      this.baseSha = source.baseSha();
+      this.headSha = source.headSha();
+      this.depth = source.depth();
+      this.dryRun = source.dryRun();
+      this.securityBlock = source.securityBlock();
+      this.githubToken = source.githubToken();
+      this.githubApi = source.githubApi();
+      this.llmApiKey = source.llmApiKey();
+      this.llmBaseUrl = source.llmBaseUrl();
+      this.llmModel = source.llmModel();
+      this.runRoot = source.runRoot();
+      this.workspace = source.workspace();
+      this.largeDiffLines = source.largeDiffLines();
+      this.hardCapLines = source.hardCapLines();
+      this.nitBudget = source.nitBudget();
+      this.runTotalTokens = source.runTotalTokens();
+      this.degradeAtFirst = source.degradeAtFirst();
+      this.degradeAtSecond = source.degradeAtSecond();
+      this.publishUnverified = source.publishUnverified();
+      this.spotCheckPercent = source.spotCheckPercent();
+      this.local = source.local();
+      this.execCommand = source.execCommand();
+      this.ledgerDb = source.ledgerDb();
+      this.llmModelStrong = source.llmModelStrong();
+      this.llmModelLight = source.llmModelLight();
+      this.fallbackChain = source.fallbackChain();
+      this.rpm = source.rpm();
+      this.llmMaxConcurrency = source.llmMaxConcurrency();
+      this.crossCheckerEnabled = source.crossCheckerEnabled();
+      this.crossCheckerModes = source.crossCheckerModes();
+      this.crossCheckerHistoryWeeks = source.crossCheckerHistoryWeeks();
+      this.llmTemperature = source.llmTemperature();
+      this.pushLookback = source.pushLookback();
+      this.reviewMode = source.reviewMode();
+      this.signoff = source.signoff();
+      this.platform = source.platform();
+      this.gitlab = source.gitlab();
+      this.semanticContext = source.semanticContext();
+      this.includeTestFiles = source.includeTestFiles();
+      this.agentBudgets = source.agentBudgets();
+    }
+
+    public Builder repoOwner(String value) {
+      this.repoOwner = value;
+      return this;
+    }
+
+    public Builder repoName(String value) {
+      this.repoName = value;
+      return this;
+    }
+
+    public Builder prNumber(int value) {
+      this.prNumber = value;
+      return this;
+    }
+
+    public Builder baseSha(String value) {
+      this.baseSha = value;
+      return this;
+    }
+
+    public Builder headSha(String value) {
+      this.headSha = value;
+      return this;
+    }
+
+    public Builder depth(String value) {
+      this.depth = value;
+      return this;
+    }
+
+    public Builder dryRun(boolean value) {
+      this.dryRun = value;
+      return this;
+    }
+
+    public Builder securityBlock(boolean value) {
+      this.securityBlock = value;
+      return this;
+    }
+
+    public Builder githubToken(String value) {
+      this.githubToken = value;
+      return this;
+    }
+
+    public Builder githubApi(String value) {
+      this.githubApi = value;
+      return this;
+    }
+
+    public Builder llmApiKey(String value) {
+      this.llmApiKey = value;
+      return this;
+    }
+
+    public Builder llmBaseUrl(String value) {
+      this.llmBaseUrl = value;
+      return this;
+    }
+
+    public Builder llmModel(String value) {
+      this.llmModel = value;
+      return this;
+    }
+
+    public Builder runRoot(String value) {
+      this.runRoot = value;
+      return this;
+    }
+
+    public Builder workspace(String value) {
+      this.workspace = value;
+      return this;
+    }
+
+    public Builder largeDiffLines(int value) {
+      this.largeDiffLines = value;
+      return this;
+    }
+
+    public Builder hardCapLines(int value) {
+      this.hardCapLines = value;
+      return this;
+    }
+
+    public Builder nitBudget(int value) {
+      this.nitBudget = value;
+      return this;
+    }
+
+    public Builder runTotalTokens(long value) {
+      this.runTotalTokens = value;
+      return this;
+    }
+
+    public Builder degradeAtFirst(double value) {
+      this.degradeAtFirst = value;
+      return this;
+    }
+
+    public Builder degradeAtSecond(double value) {
+      this.degradeAtSecond = value;
+      return this;
+    }
+
+    public Builder publishUnverified(String value) {
+      this.publishUnverified = value;
+      return this;
+    }
+
+    public Builder spotCheckPercent(int value) {
+      this.spotCheckPercent = value;
+      return this;
+    }
+
+    public Builder local(boolean value) {
+      this.local = value;
+      return this;
+    }
+
+    public Builder execCommand(String value) {
+      this.execCommand = value;
+      return this;
+    }
+
+    public Builder ledgerDb(String value) {
+      this.ledgerDb = value;
+      return this;
+    }
+
+    public Builder llmModelStrong(String value) {
+      this.llmModelStrong = value;
+      return this;
+    }
+
+    public Builder llmModelLight(String value) {
+      this.llmModelLight = value;
+      return this;
+    }
+
+    public Builder fallbackChain(String value) {
+      this.fallbackChain = value;
+      return this;
+    }
+
+    public Builder rpm(String value) {
+      this.rpm = value;
+      return this;
+    }
+
+    public Builder llmMaxConcurrency(int value) {
+      this.llmMaxConcurrency = value;
+      return this;
+    }
+
+    public Builder crossCheckerEnabled(boolean value) {
+      this.crossCheckerEnabled = value;
+      return this;
+    }
+
+    public Builder crossCheckerModes(String value) {
+      this.crossCheckerModes = value;
+      return this;
+    }
+
+    public Builder crossCheckerHistoryWeeks(int value) {
+      this.crossCheckerHistoryWeeks = value;
+      return this;
+    }
+
+    public Builder llmTemperature(String value) {
+      this.llmTemperature = value;
+      return this;
+    }
+
+    public Builder pushLookback(int value) {
+      this.pushLookback = value;
+      return this;
+    }
+
+    public Builder reviewMode(ReviewMode value) {
+      this.reviewMode = value;
+      return this;
+    }
+
+    public Builder signoff(SignoffConfig value) {
+      this.signoff = value;
+      return this;
+    }
+
+    public Builder platform(String value) {
+      this.platform = value;
+      return this;
+    }
+
+    public Builder gitlab(GitLabSettings value) {
+      this.gitlab = value;
+      return this;
+    }
+
+    public Builder semanticContext(SemanticContextConfig value) {
+      this.semanticContext = value;
+      return this;
+    }
+
+    public Builder includeTestFiles(boolean value) {
+      this.includeTestFiles = value;
+      return this;
+    }
+
+    public Builder agentBudgets(AgentBudgetOverrides value) {
+      this.agentBudgets = value;
+      return this;
+    }
+
+    /**
+     * 构造配置（空值归一与校验由 record 紧凑构造器完成——唯一校验点）。
+     *
+     * @return 不可变配置
+     */
+    public CraConfig build() {
+      return new CraConfig(
+          repoOwner,
+          repoName,
+          prNumber,
+          baseSha,
+          headSha,
+          depth,
+          dryRun,
+          securityBlock,
+          githubToken,
+          githubApi,
+          llmApiKey,
+          llmBaseUrl,
+          llmModel,
+          runRoot,
+          workspace,
+          largeDiffLines,
+          hardCapLines,
+          nitBudget,
+          runTotalTokens,
+          degradeAtFirst,
+          degradeAtSecond,
+          publishUnverified,
+          spotCheckPercent,
+          local,
+          execCommand,
+          ledgerDb,
+          llmModelStrong,
+          llmModelLight,
+          fallbackChain,
+          rpm,
+          llmMaxConcurrency,
+          crossCheckerEnabled,
+          crossCheckerModes,
+          crossCheckerHistoryWeeks,
+          llmTemperature,
+          pushLookback,
+          reviewMode,
+          signoff,
+          platform,
+          gitlab,
+          semanticContext,
+          includeTestFiles,
+          agentBudgets);
+    }
   }
 }

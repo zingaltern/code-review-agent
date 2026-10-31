@@ -17,19 +17,19 @@ class AgentBudgetOverridesTest {
   void defaultsMatchSpecRows() {
     // 03§6 速查表（AI Coding 放宽档）：三个角色上调，其余保持现值
     assertThat(AgentsAssembly.createVerifier().budget())
-        .isEqualTo(new AgentBudget(16_000, 2_000, 2, 240_000));
+        .isEqualTo(new AgentBudget(32_000, 4_000, 2, 240_000));
     assertThat(AgentsAssembly.createJudge().budget())
-        .isEqualTo(new AgentBudget(20_000, 1_500, 2, 240_000));
+        .isEqualTo(new AgentBudget(40_000, 3_000, 2, 240_000));
     ReviewCrew crew = AgentsAssembly.createReviewCrew();
-    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(16_000, 4_000, 2, 120_000));
+    assertThat(crew.testReviewer().budget()).isEqualTo(new AgentBudget(32_000, 8_000, 2, 120_000));
     assertThat(crew.bugHunters().get(0).budget())
-        .isEqualTo(new AgentBudget(24_000, 4_000, 3, 240_000));
+        .isEqualTo(new AgentBudget(48_000, 8_000, 3, 240_000));
     assertThat(crew.securityReviewer().budget())
-        .isEqualTo(new AgentBudget(24_000, 2_000, 3, 240_000));
-    assertThat(crew.crossChecker().budget()).isEqualTo(new AgentBudget(16_000, 4_000, 2, 240_000));
+        .isEqualTo(new AgentBudget(48_000, 4_000, 3, 240_000));
+    assertThat(crew.crossChecker().budget()).isEqualTo(new AgentBudget(32_000, 8_000, 2, 240_000));
     assertThat(crew.conventionReviewer().budget())
-        .isEqualTo(new AgentBudget(8_000, 1_000, 1, 60_000));
-    assertThat(crew.perfReviewer().budget()).isEqualTo(new AgentBudget(16_000, 1_000, 2, 120_000));
+        .isEqualTo(new AgentBudget(16_000, 2_000, 1, 60_000));
+    assertThat(crew.perfReviewer().budget()).isEqualTo(new AgentBudget(32_000, 2_000, 2, 120_000));
   }
 
   @Test
@@ -40,7 +40,7 @@ class AgentBudgetOverridesTest {
     SubAgent<VerificationBatchInput> verifier = overrides.apply(AgentsAssembly.createVerifier());
 
     assertThat(verifier.budget())
-        .isEqualTo(new AgentBudget(18_000, 2_000, 2, 240_000)); // 输出/轮次/超时沿用默认
+        .isEqualTo(new AgentBudget(18_000, 4_000, 2, 240_000)); // 输出/轮次/超时沿用默认
     assertThat(verifier.role().id()).isEqualTo("verifier");
     assertThat(verifier.tools()).isEqualTo(ToolWhitelist.NONE);
   }
@@ -58,10 +58,10 @@ class AgentBudgetOverridesTest {
         .allSatisfy(
             hunter -> {
               assertThat(hunter.role().id()).startsWith("bug-hunter/");
-              assertThat(hunter.budget()).isEqualTo(new AgentBudget(28_000, 4_000, 3, 240_000));
+              assertThat(hunter.budget()).isEqualTo(new AgentBudget(28_000, 8_000, 3, 240_000));
             });
     // 其他角色不受该键影响
-    assertThat(crew.testReviewer().budget().maxInputTokens()).isEqualTo(16_000);
+    assertThat(crew.testReviewer().budget().maxInputTokens()).isEqualTo(32_000);
   }
 
   @Test
@@ -77,10 +77,10 @@ class AgentBudgetOverridesTest {
     assertThat(overrides.byRole()).containsOnlyKeys("verifier", "judge");
 
     SubAgent<VerificationBatchInput> verifier = overrides.apply(AgentsAssembly.createVerifier());
-    assertThat(verifier.budget()).isEqualTo(new AgentBudget(18_000, 2_000, 2, 240_000));
+    assertThat(verifier.budget()).isEqualTo(new AgentBudget(18_000, 4_000, 2, 240_000));
 
     SubAgent<JudgeCaseInput> judge = overrides.apply(AgentsAssembly.createJudge());
-    assertThat(judge.budget()).isEqualTo(new AgentBudget(20_000, 2_000, 2, 240_000));
+    assertThat(judge.budget()).isEqualTo(new AgentBudget(40_000, 2_000, 2, 240_000));
   }
 
   @Test
@@ -109,9 +109,10 @@ class AgentBudgetOverridesTest {
 
   @Test
   void applyRejectsOutputOverrideNotSmallerThanDefaultInput() {
-    // 单维度覆盖只有与定义默认值合并后才能判定：输出 20000 会撞上 verifier 默认输入 16000
+    // 单维度覆盖只有与定义默认值合并后才能判定：输出 32000 与 verifier 默认输入 32000 相等即违规
+    // （2026-10-31 翻倍后；RoleOverride 构造期上限同为 32000）
     AgentBudgetOverrides overrides =
-        AgentBudgetOverrides.fromConfig(Map.of("agents.budget.verifier.output-tokens", "20000"));
+        AgentBudgetOverrides.fromConfig(Map.of("agents.budget.verifier.output-tokens", "32000"));
 
     assertThatThrownBy(() -> overrides.apply(AgentsAssembly.createVerifier()))
         .isInstanceOf(IllegalArgumentException.class)
@@ -200,7 +201,7 @@ class AgentBudgetOverridesTest {
     assertThat(decorated.role()).isEqualTo(dataflow.role());
     assertThat(decorated.modelTier()).isEqualTo(dataflow.modelTier());
     assertThat(decorated.tools()).isEqualTo(dataflow.tools());
-    assertThat(decorated.budget()).isEqualTo(new AgentBudget(30_000, 4_000, 3, 240_000));
+    assertThat(decorated.budget()).isEqualTo(new AgentBudget(30_000, 8_000, 3, 240_000));
 
     ReviewAgentInput input =
         new ReviewAgentInput("t", "m", "@@ -1 +1 @@", "", "", "", "", Set.of());

@@ -1,6 +1,7 @@
 package org.cra.core.internal.pipeline;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -111,7 +112,10 @@ public final class ReviewStage {
     this.waitTimeoutMs = waitTimeoutMs;
   }
 
-  /** 全部代理的汇聚产出（对齐原 RunOutcome 形状，publish 段无感）。 */
+  /**
+   * 全部代理的汇聚产出（对齐原 RunOutcome 形状，publish 段无感）。防御拷贝（§6 不外泄可变引用）； templateVersions 保序拷贝——trace
+   * template_versions 事件序可观察，不能用 {@link Map#copyOf}。
+   */
   public record StageOutcome(
       List<CandidateFinding> findings,
       long tokensIn,
@@ -124,7 +128,19 @@ public final class ReviewStage {
       List<String> trimDecisions,
       boolean stoppedByBudget,
       boolean truncationReached,
-      Map<String, String> templateVersions) {}
+      Map<String, String> templateVersions) {
+    public StageOutcome {
+      findings = List.copyOf(findings);
+      schemaErrors = List.copyOf(schemaErrors);
+      degradations = List.copyOf(degradations);
+      contextNotes = List.copyOf(contextNotes);
+      trimDecisions = List.copyOf(trimDecisions);
+      templateVersions =
+          templateVersions == null
+              ? Map.of()
+              : Collections.unmodifiableMap(new LinkedHashMap<>(templateVersions));
+    }
+  }
 
   /**
    * 执行评审扇出。

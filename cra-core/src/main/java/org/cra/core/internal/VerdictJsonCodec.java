@@ -1,8 +1,12 @@
 package org.cra.core.internal;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -61,20 +65,16 @@ public final class VerdictJsonCodec {
 
   /** 解析结果：finding_id → 判定 + 错误列表（携错重试载体）。 */
   public record ParseResult(
-      Map<String, ParsedVerdict> verdicts,
-      Map<String, String> followups,
-      java.util.List<String> errors) {
+      Map<String, ParsedVerdict> verdicts, Map<String, String> followups, List<String> errors) {
 
     public ParseResult {
       verdicts =
-          verdicts == null
-              ? Map.of()
-              : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(verdicts));
+          verdicts == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(verdicts));
       followups =
           followups == null
               ? Map.of()
-              : java.util.Collections.unmodifiableMap(new LinkedHashMap<>(followups));
-      errors = java.util.List.copyOf(errors == null ? java.util.List.of() : errors);
+              : Collections.unmodifiableMap(new LinkedHashMap<>(followups));
+      errors = List.copyOf(errors == null ? List.of() : errors);
     }
   }
 
@@ -91,17 +91,17 @@ public final class VerdictJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
       return new ParseResult(
-          Map.of(), Map.of(), java.util.List.of("root: 非合法 JSON: " + e.getOriginalMessage()));
+          Map.of(), Map.of(), List.of("root: 非合法 JSON: " + e.getOriginalMessage()));
     }
     JsonNode array = root.path("verdicts");
     if (!array.isArray() || array.isEmpty()) {
-      return new ParseResult(Map.of(), Map.of(), java.util.List.of("root: 缺非空 verdicts 数组"));
+      return new ParseResult(Map.of(), Map.of(), List.of("root: 缺非空 verdicts 数组"));
     }
     Map<String, ParsedVerdict> verdicts = new LinkedHashMap<>();
     Map<String, String> followups = new LinkedHashMap<>();
-    java.util.List<String> errors = new java.util.ArrayList<>();
+    List<String> errors = new ArrayList<>();
     int index = 0;
     for (JsonNode node : array) {
       String findingId = textOf(node, "finding_id");

@@ -7,7 +7,7 @@ import java.util.Objects;
  * JudgeAgent 定义（07 T2.6；03§4.4 一次性终裁：INSUFFICIENT 仲裁 + important/security 级 REFUTED 抽查复核）。
  * 一次性——不做多轮辩论（Debate or Vote：仲裁不做辩论循环）；强模型档位由路由层决定（T2.9）。
  *
- * <p>预算对齐 03§6 速查表 JudgeAgent 行（AI Coding 放宽档：≤20k 输入 / ≤1.5k 输出 / 2 轮）；上下文按案件界定（≤3 文件，
+ * <p>预算对齐 03§6 速查表 JudgeAgent 行（≤40k 输入 / ≤3k 输出 / 2 轮；2026-10-31 预算翻倍，原 20k/1.5k）；上下文按案件界定（≤3 文件，
  * 截取在编排器组装侧完成）。
  */
 public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
@@ -18,10 +18,10 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
   private static final String TEMPLATE = "prompts/judge/arbitrate.md";
 
   /** 默认输入预算（03§6 JudgeAgent 行；agents.budget.judge.input-tokens 可覆盖）。 */
-  public static final long DEFAULT_INPUT_TOKENS = 20_000;
+  public static final long DEFAULT_INPUT_TOKENS = 40_000;
 
   /** 默认输出预算（agents.budget.judge.output-tokens 可覆盖）。 */
-  public static final long DEFAULT_OUTPUT_TOKENS = 1_500;
+  public static final long DEFAULT_OUTPUT_TOKENS = 3_000;
 
   // AI Coding 放宽档（ADR-0015 §2.2 修订）：16k/1k → 20k/1.5k——案件上下文 ≤3 文件 + 调用点索引
   private static final AgentBudget BUDGET =
@@ -80,6 +80,7 @@ public final class JudgeAgentDefinition implements SubAgent<JudgeCaseInput> {
 
   @Override
   public AgentBudget budget() {
+    // AI Coding 放宽档（ADR-0015 §2.2 修订）：16k/1k → 20k/1.5k；2026-10-31 预算翻倍：20k/1.5k → 40k/3k
     return BUDGET;
   }
 

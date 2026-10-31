@@ -3,9 +3,11 @@ package org.cra.server.history;
 import java.time.Instant;
 
 /**
- * 产品事件史采集端口（M4f-full 的数据面；07§5 M4b 只落接口与调度骨架）。
+ * 产品事件史采集端口（M4f-full 的数据面；11§2 登记的演进扩展点）。
  *
- * <p>M4f-full 实现将从工单/事故复盘等来源结构化入库；tribal knowledge 不可见是硬边界（01§3.4），本接口只覆盖已文档化部分。
+ * <p>第一版实现经 JSONL 来源（{@link JsonlEventHistorySource} → {@link IncrementalEventHistoryCollector} →
+ * {@link PostgresEventHistoryStore} 落库）；Jira / Confluence / 服务台等 API 连接器是后续扩展，实现本接口即可接入调度与入库。tribal
+ * knowledge 不可见是硬边界（01§3.4），本接口只覆盖已文档化部分。
  */
 public interface EventHistoryCollector {
 
@@ -42,7 +44,7 @@ public interface EventHistoryCollector {
       int failed) {
 
     /**
-     * 兼容构造（M4b 骨架/测试的最小结果形态）。
+     * 便捷构造（测试用最小结果形态；采集器实现返回完整计数与 note）。
      *
      * @param executed 是否执行
      * @param tickets 工单数

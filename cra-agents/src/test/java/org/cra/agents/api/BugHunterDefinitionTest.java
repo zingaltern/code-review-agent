@@ -71,8 +71,8 @@ class BugHunterDefinitionTest {
   void budgetAndToolsFollowSpecTable() {
     BugHunterDefinition definition =
         new BugHunterDefinition(BugHunterDefinition.Perspective.BOUNDARY, LOADER);
-    // 03§6：≤24k 输入 / ≤4k 输出 / 3 轮；read_file(scoped)；标准档
-    assertThat(definition.budget()).isEqualTo(new AgentBudget(24_000, 4_000, 3, 240_000));
+    // 03§6：≤48k 输入 / ≤8k 输出 / 3 轮；read_file(scoped)；标准档
+    assertThat(definition.budget()).isEqualTo(new AgentBudget(48_000, 8_000, 3, 240_000));
     assertThat(definition.tools()).isEqualTo(ToolWhitelist.READ_FILE);
     assertThat(definition.modelTier()).isEqualTo(AgentTier.STANDARD);
     assertThat(definition.buildBrief(input()).modelTier()).isEqualTo(AgentTier.STANDARD);

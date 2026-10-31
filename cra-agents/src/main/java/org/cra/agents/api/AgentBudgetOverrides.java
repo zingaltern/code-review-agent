@@ -135,6 +135,7 @@ public final class AgentBudgetOverrides {
     }
     Map<String, RoleOverride> collected = new LinkedHashMap<>();
     for (Map.Entry<String, String> entry : values.entrySet()) {
+      // 整键先归一（首尾空白）：此前仅在 role/field 段 strip，键首空白会让 startsWith 失配而静默丢弃配置
       String key = entry.getKey() == null ? null : entry.getKey().strip();
       if (key == null || !key.startsWith("agents.budget.")) {
         continue;

@@ -57,7 +57,7 @@ class DefaultContextAssemblerTest {
 
   @Test
   void windowExtractionWithHeadSideLineNumbers() {
-    // hunk 起始 50 → 窗口 [50-30, 50+1-1+30] = [20, 80]，行号为 head 侧真实行号
+    // hunk 起始 50、newLines 2 → 窗口 [50-30, 50+2-1+30] = [20, 81]，行号为 head 侧真实行号
     DiffFile f = file("src/A.java", "@@ -48,3 +50,2 @@\n+new\n", new DiffHunk(48, 3, 50, 2));
     AssembledContext ctx =
         assembler.assemble(
@@ -204,5 +204,26 @@ class DefaultContextAssemblerTest {
     // [5,16] 与 [7,18] 相邻重叠 → 合并为单区间
     assertThat(ctx.windowText()).contains("#### L5-L18");
     assertThat(ctx.windowText()).doesNotContain("#### L7-L");
+  }
+
+  @Test
+  void hunkAnchorBeyondHeadFileIsSkippedNotCrashing() {
+    // diff 与预取全文错位（评测 fixture 装配不一致等）：锚点远超文件行数的 hunk 跳过，组装不抛越界
+    DiffFile f =
+        file(
+            "src/A.java",
+            "@@ -998,2 +1000,2 @@\n+x\n",
+            new DiffHunk(998, 2, 1000, 2),
+            new DiffHunk(1, 2, 5, 2));
+    AssembledContext ctx =
+        assembler.assemble(
+            input(
+                List.of(f),
+                Map.of("src/A.java", FileContent.ofText("src/A.java", HUNDRED_LINES)),
+                15,
+                false,
+                10_000));
+    assertThat(ctx.windowText()).contains("#### L1-L21");
+    assertThat(ctx.windowText()).doesNotContain("#### L985");
   }
 }

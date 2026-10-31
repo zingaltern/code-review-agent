@@ -2,7 +2,9 @@ package org.cra.core.internal.pipeline;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
 import org.cra.common.finding.Severity;
@@ -102,5 +104,18 @@ class ExactDedupMergerTest {
     String first = ExactDedupMerger.merge(List.of(a, b)).kept().get(0).id();
     String second = ExactDedupMerger.merge(List.of(b, a)).kept().get(0).id();
     assertThat(first).isEqualTo(second);
+  }
+
+  @Test
+  void resultToleratesNullMapAndNullValues() {
+    ExactDedupMerger.Result empty = new ExactDedupMerger.Result(List.of(), null, 0, 0);
+    assertThat(empty.mergedFrom()).isEmpty();
+
+    // Map.of 拒绝 null 值，须用 HashMap 才能真正走进值空防御分支
+    Map<String, List<String>> withNullValue = new HashMap<>();
+    withNullValue.put("f_x", null);
+    ExactDedupMerger.Result tolerant = new ExactDedupMerger.Result(null, withNullValue, 0, 0);
+    assertThat(tolerant.kept()).isEmpty();
+    assertThat(tolerant.mergedFrom()).containsEntry("f_x", List.of());
   }
 }

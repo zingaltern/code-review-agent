@@ -1,5 +1,6 @@
 package org.cra.core.internal.pipeline;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -71,7 +72,7 @@ public final class AntiAnchorValidator {
   /** 代码围栏内容行（去首尾空白；围栏语言标注行不算内容）。 */
   private static List<String> fencedLines(String text) {
     List<String> lines = text.lines().collect(Collectors.toList());
-    List<String> content = new java.util.ArrayList<>();
+    List<String> content = new ArrayList<>();
     boolean inside = false;
     for (String line : lines) {
       if (line.trim().startsWith("```")) {

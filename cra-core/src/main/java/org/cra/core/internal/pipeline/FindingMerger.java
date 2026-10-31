@@ -2,10 +2,10 @@ package org.cra.core.internal.pipeline;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.Severity;
+import org.cra.core.internal.TraceWriter;
 
 /**
  * 跨代理精确去重合并（T2.2 汇聚侧实现，03§4.5 groupByIdentity/mergeDuplicates 的 M2 前置形态）： 同 file 同 category 且锚行 ±3
@@ -26,8 +26,7 @@ final class FindingMerger {
    * @param trace trace 写入器（被丢弃候选记 dedup/in-run-exact，05§1.4）
    * @return 合并后的候选列表（保序）
    */
-  static List<CandidateFinding> mergePrecise(
-      List<CandidateFinding> findings, org.cra.core.internal.TraceWriter trace) {
+  static List<CandidateFinding> mergePrecise(List<CandidateFinding> findings, TraceWriter trace) {
     List<CandidateFinding> kept = new ArrayList<>();
     for (CandidateFinding candidate : findings) {
       int duplicateIndex = -1;
@@ -67,13 +66,5 @@ final class FindingMerger {
 
   private static int rank(CandidateFinding finding) {
     return finding.severityProposed() == Severity.IMPORTANT ? 1 : 0;
-  }
-
-  static String describe(CandidateFinding finding) {
-    return finding.file()
-        + ":"
-        + finding.line()
-        + "/"
-        + finding.category().name().toLowerCase(Locale.ROOT);
   }
 }
