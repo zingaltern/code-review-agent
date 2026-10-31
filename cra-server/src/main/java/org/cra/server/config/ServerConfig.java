@@ -9,6 +9,7 @@ import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SemanticContextOptions;
+import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmParsing;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
@@ -47,6 +48,8 @@ import org.springframework.scheduling.support.CronExpression;
  * @param llmTemperature 采样温度（空 = 不传；建议 0.2，05§5）
  * @param llmFallbackChain 降级链（逗号分隔档位）
  * @param llmRpm per-model RPM（形如 standard=60,strong=30,light=60；空 = 默认）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param crossCheckerEnabled CrossChecker 总开关（默认 false，05§5）
  * @param crossCheckerModes CrossChecker 模式串（assumption,sniff）
  * @param crossCheckerHistoryWeeks 变更史回溯周数
@@ -59,7 +62,19 @@ import org.springframework.scheduling.support.CronExpression;
  * @param eventHistoryRetryBackoffMillis 重试退避基数（毫秒）
  * @param eventHistoryMaxBytes 事件源单次读取字节上限
  * @param eventHistoryMaxEvents 单次入库事件上限
- * @param runTotalTokens run 级 token 预算（02§4.4，默认 800k）
+ * @param runTotalTokens run 级 token 预算（02§4.4，默认 1.6M）
+ * @param reviewLargeDiffLines 大 diff 降档线（review.large-diff-lines / CRA_REVIEW_LARGE_DIFF_LINES，默认
+ *     PipelineOptions 基准值 4000）
+ * @param reviewHardCapLines 硬上限（review.hard-cap-lines / CRA_REVIEW_HARD_CAP_LINES，默认 16000；须 &gt;
+ *     large）
+ * @param reviewNitBudget nit 预算默认（review.nit-budget-default / CRA_REVIEW_NIT_BUDGET，默认 3，&gt;=0）
+ * @param reviewDegradeAtFirst 第一降档阈值（agents.budget.degrade-at[0] / CRA_REVIEW_DEGRADE_AT，默认 0.70）
+ * @param reviewDegradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
+ * @param reviewSpotCheckPercent important/security 级 REFUTED
+ *     抽查保险丝百分比（CRA_REVIEW_SPOT_CHECK_PERCENT， 默认 20，0..100）
+ * @param reviewPublishUnverified UNVERIFIED 发布策略（review.publish-unverified /
+ *     CRA_REVIEW_PUBLISH_UNVERIFIED：never|labeled，默认 never）
+ * @param reviewIncludeTestFiles 测试文件是否进入评审范围（02§4.4 / CRA_REVIEW_TESTS，默认 false）
  * @param semanticContextEnabled 语义上下文（L2 跨文件切片）开关（M4e，ADR-0014；CRA_SEMANTIC_CONTEXT_ENABLED，默认
  *     false——关闭不动基线行为）
  * @param semanticContextMaxFiles 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES，默认 2000）
@@ -94,6 +109,7 @@ public record ServerConfig(
     String llmTemperature,
     String llmFallbackChain,
     String llmRpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -107,6 +123,14 @@ public record ServerConfig(
     long eventHistoryMaxBytes,
     int eventHistoryMaxEvents,
     long runTotalTokens,
+    int reviewLargeDiffLines,
+    int reviewHardCapLines,
+    int reviewNitBudget,
+    double reviewDegradeAtFirst,
+    double reviewDegradeAtSecond,
+    int reviewSpotCheckPercent,
+    String reviewPublishUnverified,
+    boolean reviewIncludeTestFiles,
     boolean semanticContextEnabled,
     int semanticContextMaxFiles,
     long semanticContextMaxFileBytes,
@@ -148,6 +172,42 @@ public record ServerConfig(
     reviewDepth = depth;
     if (runTotalTokens <= 0) {
       throw new CraConfigException("CRA_SERVER_RUN_TOTAL_TOKENS 必须为正: " + runTotalTokens);
+    }
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
+    }
+    if (reviewLargeDiffLines <= 0 || reviewHardCapLines <= reviewLargeDiffLines) {
+      throw new CraConfigException(
+          "CRA_REVIEW_LARGE_DIFF_LINES / CRA_REVIEW_HARD_CAP_LINES 非法（必须为正且 hard cap > large）: "
+              + reviewLargeDiffLines
+              + "/"
+              + reviewHardCapLines);
+    }
+    if (reviewNitBudget < 0) {
+      throw new CraConfigException("CRA_REVIEW_NIT_BUDGET 必须为非负整数: " + reviewNitBudget);
+    }
+    if (reviewDegradeAtFirst <= 0
+        || reviewDegradeAtSecond <= reviewDegradeAtFirst
+        || reviewDegradeAtSecond > 1.0) {
+      throw new CraConfigException(
+          "CRA_REVIEW_DEGRADE_AT 阈值非法（0 < first < second <= 1）: "
+              + reviewDegradeAtFirst
+              + ","
+              + reviewDegradeAtSecond);
+    }
+    if (reviewSpotCheckPercent < 0 || reviewSpotCheckPercent > 100) {
+      throw new CraConfigException(
+          "CRA_REVIEW_SPOT_CHECK_PERCENT 必须在 [0,100]: " + reviewSpotCheckPercent);
+    }
+    reviewPublishUnverified =
+        reviewPublishUnverified == null ? "" : reviewPublishUnverified.strip();
+    if (!"never".equals(reviewPublishUnverified) && !"labeled".equals(reviewPublishUnverified)) {
+      throw new CraConfigException(
+          "CRA_REVIEW_PUBLISH_UNVERIFIED 非法: " + reviewPublishUnverified + "（never|labeled）");
     }
     if (eventHistoryLookbackDays <= 0 || eventHistoryLookbackDays > 365) {
       throw new CraConfigException(
@@ -199,6 +259,12 @@ public record ServerConfig(
    * @return 服务配置
    */
   public static ServerConfig from(Environment env) {
+    PipelineOptions defaults = PipelineOptions.defaults();
+    DegradeThresholds degradeAt =
+        parseDegradeAt(
+            env.getProperty("CRA_REVIEW_DEGRADE_AT"),
+            defaults.degradeAtFirst(),
+            defaults.degradeAtSecond());
     return new ServerConfig(
         env.getProperty("CRA_SERVER_WEBHOOK_SECRET", ""),
         env.getProperty("CRA_SERVER_PLATFORM", "github"),
@@ -228,6 +294,7 @@ public record ServerConfig(
         blankToNull(env.getProperty("CRA_LLM_TEMPERATURE")),
         env.getProperty("CRA_LLM_FALLBACK_CHAIN", "standard,light"),
         env.getProperty("CRA_LLM_RPM", ""),
+        intValue(env, "CRA_LLM_MAX_CONCURRENCY", LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY),
         bool(env, "CRA_CROSSCHECKER_ENABLED", false),
         env.getProperty("CRA_CROSSCHECKER_MODES", "assumption,sniff"),
         intValue(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", 8),
@@ -241,6 +308,15 @@ public record ServerConfig(
         longValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_BYTES", 67_108_864L),
         intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS", 5_000),
         longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS),
+        intValue(env, "CRA_REVIEW_LARGE_DIFF_LINES", defaults.largeDiffLines()),
+        intValue(env, "CRA_REVIEW_HARD_CAP_LINES", defaults.hardCapLines()),
+        intValue(env, "CRA_REVIEW_NIT_BUDGET", defaults.nitBudgetDefault()),
+        degradeAt.first(),
+        degradeAt.second(),
+        intValue(env, "CRA_REVIEW_SPOT_CHECK_PERCENT", defaults.importantRefutedSpotCheckPercent()),
+        firstNonBlank(
+            env.getProperty("CRA_REVIEW_PUBLISH_UNVERIFIED"), defaults.publishUnverified()),
+        bool(env, "CRA_REVIEW_TESTS", defaults.includeTestFiles()),
         bool(env, "CRA_SEMANTIC_CONTEXT_ENABLED", false),
         intValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILES", 2_000),
         longValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", 262_144L),
@@ -327,6 +403,40 @@ public record ServerConfig(
    */
   public Double parsedTemperature() {
     return LlmParsing.parseTemperature(llmTemperature, "CRA_LLM_TEMPERATURE");
+  }
+
+  /**
+   * 降级阈值（0 &lt; first &lt; second &lt;= 1；未配置/空白取 PipelineOptions 基准值）。 与 CLI 的 {@code
+   * PlatformArgs.degradeAt} 逐条同语义（空白=默认、恰两段、区间校验）；尾逗号视为空段忽略（与 fallback-chain/RPM
+   * 的“空段跳过”约定一致），中间空段/多余段按段数拒绝。 server 侧只在 env 装配期出现，错误前缀保留 CRA_REVIEW_DEGRADE_AT key 名。
+   */
+  private record DegradeThresholds(double first, double second) {}
+
+  private static DegradeThresholds parseDegradeAt(
+      String value, double defaultFirst, double defaultSecond) {
+    if (value == null || value.isBlank()) {
+      return new DegradeThresholds(defaultFirst, defaultSecond);
+    }
+    // split(",") 默认丢弃尾部空段：\"0.70,0.85,\" 与 \"0.70,0.85\" 等价；\",0.70,0.85\" / \"0.70,,0.85\" 段数 >2
+    // 拒绝
+    String[] parts = value.split(",");
+    if (parts.length != 2) {
+      throw new CraConfigException("CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85: " + value);
+    }
+    try {
+      double first = Double.parseDouble(parts[0].strip());
+      double second = Double.parseDouble(parts[1].strip());
+      if (!Double.isFinite(first)
+          || !Double.isFinite(second)
+          || first <= 0
+          || second <= first
+          || second > 1.0) {
+        throw new NumberFormatException();
+      }
+      return new DegradeThresholds(first, second);
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("CRA_REVIEW_DEGRADE_AT 阈值非法（0 < first < second <= 1）: " + value);
+    }
   }
 
   private static void requireText(String value, String name) {

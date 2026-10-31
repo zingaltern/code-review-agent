@@ -7,8 +7,8 @@ import java.util.Objects;
  * Test/Convention/Perf 三专角色定义（T2.3，03§3 角色表 + 03§6 预算行）。 条件触发判定在编排器（ReviewStage）；本类只做模板装载与 brief
  * 组装。
  *
- * <p>预算（03§6）：Test 16k/4k/2 轮 read_file 标准档；Convention 8k/1k/1 轮 无工具 轻档； Perf 16k/1k/2 轮 read_file
- * 标准档（按 chunk）。
+ * <p>预算（03§6，2026-10-31 预算翻倍）：Test 32k/8k/2 轮 read_file 标准档；Convention 16k/2k/1 轮 无工具 轻档； Perf
+ * 32k/2k/2 轮 read_file 标准档（按 chunk）。
  */
 public final class SpecialistReviewers {
 
@@ -21,11 +21,11 @@ public final class SpecialistReviewers {
     // v1.3.2：输出 1k→2k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
     // M3 实测 90 观测中 11 次输出预算击穿（12%）导致该角色零产出
     /** 默认输入预算（03§6 TestReviewer 行；agents.budget.test-reviewer.input-tokens 可覆盖）。 */
-    public static final long DEFAULT_INPUT_TOKENS = 16_000;
+    public static final long DEFAULT_INPUT_TOKENS = 32_000;
 
-    // AI Coding 放宽档（ADR-0015 §2.2 修订）：输入 12k → 16k（输出 4k 不变）
+    // 2026-10-31 预算翻倍：输入 16k → 32k、输出 4k → 8k（ADR-0015 §2.2 放宽档之上；原 12k→16k）
     private static final AgentBudget BUDGET =
-        new AgentBudget(DEFAULT_INPUT_TOKENS, 4_000, 2, 120_000);
+        new AgentBudget(DEFAULT_INPUT_TOKENS, 8_000, 2, 120_000);
 
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("test-reviewer", "测试缺口评审");
@@ -82,7 +82,7 @@ public final class SpecialistReviewers {
   public static final class ConventionReviewer implements SubAgent<ReviewAgentInput> {
 
     /** 预算（03§6 ConventionReviewer 行：无工具）。 */
-    private static final AgentBudget BUDGET = new AgentBudget(8_000, 1_000, 1, 60_000);
+    private static final AgentBudget BUDGET = new AgentBudget(16_000, 2_000, 1, 60_000);
 
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("convention-reviewer", "约定评审");
@@ -141,7 +141,7 @@ public final class SpecialistReviewers {
   public static final class PerfReviewer implements SubAgent<ReviewAgentInput> {
 
     /** 预算（03§6 PerfReviewer 行）。 */
-    private static final AgentBudget BUDGET = new AgentBudget(16_000, 1_000, 2, 120_000);
+    private static final AgentBudget BUDGET = new AgentBudget(32_000, 2_000, 2, 120_000);
 
     /** 角色。 */
     public static final AgentRole ROLE = new AgentRole("perf-reviewer", "性能评审");

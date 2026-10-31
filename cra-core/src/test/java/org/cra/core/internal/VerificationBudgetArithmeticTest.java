@@ -28,8 +28,8 @@ import org.cra.core.internal.pipeline.FindingAggregator;
 import org.junit.jupiter.api.Test;
 
 /**
- * 验证 brief 预算算术（04§2.2、ADR-0015 §2.2 修订）：verifier 16k 下 findings + 1.2k 余量 + 测试清单 + 索引（≤1000） +
- * 切片（≤6000）不越界；超预算按优先级截断并声明。
+ * 验证 brief 预算算术（04§2.2、ADR-0015 §2.2 修订）：显式 16k 预算下（默认 2026-10-31 已翻倍至 32k，算术按比例成立） findings + 1.2k
+ * 余量 + 测试清单 + 索引（≤1000） + 切片（≤6000）不越界；超预算按优先级截断并声明。
  */
 class VerificationBudgetArithmeticTest {
 
@@ -63,8 +63,8 @@ class VerificationBudgetArithmeticTest {
       }
       """;
 
-  private static final AgentBudget VERIFIER_16K =
-      new AgentBudget(VerifierAgentDefinition.DEFAULT_INPUT_TOKENS, 2_000, 2, 240_000);
+  // 显式 16k 小预算算术锚点（不跟随默认值：默认 2026-10-31 已翻倍至 32k，窄预算下的截断算术仍需被守护）
+  private static final AgentBudget VERIFIER_16K = new AgentBudget(16_000, 2_000, 2, 240_000);
 
   @Test
   void sixteenKVerifierKeepsIndexAndSlicesWithinBudget() {
