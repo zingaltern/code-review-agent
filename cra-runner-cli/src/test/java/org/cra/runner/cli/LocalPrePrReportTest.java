@@ -290,4 +290,16 @@ class LocalPrePrReportTest {
             null);
     assertThat(report).contains("签字建议: 已关闭（agents.signoff.enabled=false）");
   }
+
+  @Test
+  void incompleteBuildLogIsNotClaimedComplete() {
+    // 读线程未收尾/日志落盘失败：报告必须声明可能不完整，不能写"完整输出"
+    BuildVerifyRunner.ExecResult incomplete =
+        new BuildVerifyRunner.ExecResult(
+            1, "[ERROR] boom\n", Path.of("/tmp/partial.log"), 10, false);
+    String report =
+        LocalPrePrReport.render(
+            config(true, true), incomplete, "zingaltern/cra", "main", null, "已跳过", null);
+    assertThat(report).contains("输出日志（可能不完整）: /tmp/partial.log").doesNotContain("完整输出: /tmp/");
+  }
 }

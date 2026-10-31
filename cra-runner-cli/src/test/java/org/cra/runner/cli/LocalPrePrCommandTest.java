@@ -82,6 +82,37 @@ class LocalPrePrCommandTest {
   }
 
   @Test
+  void reviewRuntimeFailureStillKeepsBuildReport() {
+    // 评审段非 CraException 故障（如非法 LLM 端点）：仍须渲染已完成的实跑报告，退出码 2
+    CraConfig config =
+        CliArgs.parse(
+            new String[] {
+              "--local",
+              "--base",
+              branch,
+              "--workspace",
+              workspace.toString(),
+              "--run-root",
+              runRoot.toString(),
+              "--exec",
+              "/bin/echo ok",
+              "--ledger-db",
+              "l.db"
+            },
+            Map.of(
+                "CRA_LLM_API_KEY", "sk",
+                "CRA_LLM_BASE_URL", "not-a-url",
+                "CRA_LLM_MODEL", "glm"));
+    assertThat(new LocalPrePrCommand().execute(config)).isEqualTo(2);
+    try (var files = Files.list(runRoot)) {
+      // 构建段先于评审段执行：日志存在即证明报告数据面未因评审装配失败而丢失
+      assertThat(files.anyMatch(p -> p.getFileName().toString().startsWith("build-"))).isTrue();
+    } catch (Exception e) {
+      throw new AssertionError(e);
+    }
+  }
+
+  @Test
   void missingRepoDirectoryFailsAtBootstrap() {
     CraConfig config =
         CliArgs.parse(
