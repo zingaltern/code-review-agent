@@ -67,14 +67,17 @@ class CliArgsTest {
 
   @Test
   void m1OptionsRejectInvalidValues() {
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--degrade-at", "0.9,0.8"), ENV))
+    String[] invalidDegradeAt = concat(baseArgs(), "--degrade-at", "0.9,0.8");
+    assertThatThrownBy(() -> CliArgs.parse(invalidDegradeAt, ENV))
         .isInstanceOf(CraConfigException.class);
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--degrade-at", "1.2,0.9"), ENV))
+    String[] invalidDegradeAt2 = concat(baseArgs(), "--degrade-at", "1.2,0.9");
+    assertThatThrownBy(() -> CliArgs.parse(invalidDegradeAt2, ENV))
         .isInstanceOf(CraConfigException.class);
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--nit-budget", "-1"), ENV))
+    String[] invalidNitBudget = concat(baseArgs(), "--nit-budget", "-1");
+    assertThatThrownBy(() -> CliArgs.parse(invalidNitBudget, ENV))
         .isInstanceOf(CraConfigException.class);
-    assertThatThrownBy(
-            () -> CliArgs.parse(concat(baseArgs(), "--publish-unverified", "always"), ENV))
+    String[] invalidPublishUnverified = concat(baseArgs(), "--publish-unverified", "always");
+    assertThatThrownBy(() -> CliArgs.parse(invalidPublishUnverified, ENV))
         .isInstanceOf(CraConfigException.class);
   }
 
@@ -104,7 +107,8 @@ class CliArgsTest {
   void depthValidation() {
     String[] args = concat(baseArgs(), "--depth", "quick");
     assertThat(CliArgs.parse(args, ENV).depth()).isEqualTo("quick");
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--depth", "ultra"), ENV))
+    String[] invalidDepth = concat(baseArgs(), "--depth", "ultra");
+    assertThatThrownBy(() -> CliArgs.parse(invalidDepth, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("depth");
   }
@@ -119,14 +123,16 @@ class CliArgsTest {
   @Test
   void missingLlmKeyFails() {
     Map<String, String> noLlm = Map.of("GITHUB_TOKEN", "gh-token");
-    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), noLlm))
+    String[] invalidArgs = baseArgs();
+    assertThatThrownBy(() -> CliArgs.parse(invalidArgs, noLlm))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("CRA_LLM_API_KEY");
   }
 
   @Test
   void unknownArgAndBadPrRejected() {
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--wat"), ENV))
+    String[] invalidWat = concat(baseArgs(), "--wat");
+    assertThatThrownBy(() -> CliArgs.parse(invalidWat, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("未知参数");
     assertThatThrownBy(
@@ -182,10 +188,12 @@ class CliArgsTest {
             CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "100"), ENV)
                 .spotCheckPercent())
         .isEqualTo(100);
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "101"), ENV))
+    String[] invalidSpotCheckPercent = concat(baseArgs(), "--spot-check-percent", "101");
+    assertThatThrownBy(() -> CliArgs.parse(invalidSpotCheckPercent, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("[0,100]");
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "-1"), ENV))
+    String[] invalidSpotCheckPercent2 = concat(baseArgs(), "--spot-check-percent", "-1");
+    assertThatThrownBy(() -> CliArgs.parse(invalidSpotCheckPercent2, ENV))
         .isInstanceOf(CraConfigException.class);
   }
 
@@ -333,12 +341,9 @@ class CliArgsTest {
 
   @Test
   void semanticContextRejectsOutOfRangeSliceTokens() {
-    assertThatThrownBy(
-            () ->
-                CliArgs.parse(
-                    concat(
-                        baseArgs(), "--semantic-context", "--semantic-context-slice-tokens", "10"),
-                    ENV))
+    String[] invalidSemanticContextSliceTokens =
+        concat(baseArgs(), "--semantic-context", "--semantic-context-slice-tokens", "10");
+    assertThatThrownBy(() -> CliArgs.parse(invalidSemanticContextSliceTokens, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("sliceTokens");
   }
@@ -366,14 +371,14 @@ class CliArgsTest {
 
   @Test
   void crossCheckerRejectsInvalidModesAndWeeks() {
-    assertThatThrownBy(
-            () ->
-                CliArgs.parse(
-                    concat(baseArgs(), "--crosschecker", "--crosschecker-modes", "bad"), ENV))
+    String[] invalidCrosscheckerModes =
+        concat(baseArgs(), "--crosschecker", "--crosschecker-modes", "bad");
+    assertThatThrownBy(() -> CliArgs.parse(invalidCrosscheckerModes, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--crosschecker-modes");
-    assertThatThrownBy(
-            () -> CliArgs.parse(concat(baseArgs(), "--crosschecker-history-weeks", "0"), ENV))
+    String[] invalidCrosscheckerHistoryWeeks =
+        concat(baseArgs(), "--crosschecker-history-weeks", "0");
+    assertThatThrownBy(() -> CliArgs.parse(invalidCrosscheckerHistoryWeeks, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("crosschecker-history-weeks");
   }
@@ -422,7 +427,8 @@ class CliArgsTest {
     assertThat(config.signoff().author()).isEqualTo("dana");
     assertThat(config.signoff().testsStatus()).isEqualTo("failed");
 
-    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--tests-status", "green"), ENV))
+    String[] invalidTestsStatus = concat(baseArgs(), "--tests-status", "green");
+    assertThatThrownBy(() -> CliArgs.parse(invalidTestsStatus, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--tests-status");
   }
@@ -433,7 +439,8 @@ class CliArgsTest {
     assertThatThrownBy(() -> CliArgs.parse(new String[] {}, ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--pr");
-    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), EMPTY_ENV))
+    String[] invalidArgs2 = baseArgs();
+    assertThatThrownBy(() -> CliArgs.parse(invalidArgs2, EMPTY_ENV))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--token");
     assertThatThrownBy(
