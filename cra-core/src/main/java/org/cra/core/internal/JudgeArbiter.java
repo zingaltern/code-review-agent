@@ -43,7 +43,9 @@ final class JudgeArbiter {
    */
   Judgement arbitrate(JudgeCaseInput input, String runId, String findingId) {
     AgentBrief brief = judge.buildBrief(input);
-    var persisted = trace.persistBrief(brief, "case-" + Math.abs(findingId.hashCode()) % 100000);
+    // 位掩码取正（& 0x7fffffff）：Math.abs(Integer.MIN_VALUE) 仍为负，会生成 "case--…" 文件名
+    var persisted =
+        trace.persistBrief(brief, "case-" + (findingId.hashCode() & 0x7fffffff) % 100000);
     trace.emit(
         "judge_start",
         Map.of(

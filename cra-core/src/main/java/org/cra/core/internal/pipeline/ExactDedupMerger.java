@@ -1,9 +1,11 @@
 package org.cra.core.internal.pipeline;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
@@ -21,12 +23,22 @@ public final class ExactDedupMerger {
   /** 合并行距半径（03§4.5：同 file ±3 行同 category）。 */
   static final int MERGE_RADIUS = 3;
 
-  /** 合并结果。 */
+  /**
+   * 合并结果。防御拷贝并保序：mergedFrom 的键序 = kept 顺序，ReviewPipeline 按序 emit trace "merge" 事件—— 不能用 {@link
+   * Map#copyOf}（丢插入序，trace 序不可重放）。
+   */
   public record Result(
       List<CandidateFinding> kept,
       Map<String, List<String>> mergedFrom,
       int mergedAway,
-      int clusters) {}
+      int clusters) {
+    public Result {
+      kept = List.copyOf(kept);
+      Map<String, List<String>> mergedFromCopy = new LinkedHashMap<>();
+      mergedFrom.forEach((k, v) -> mergedFromCopy.put(k, List.copyOf(v)));
+      mergedFrom = Collections.unmodifiableMap(mergedFromCopy);
+    }
+  }
 
   private ExactDedupMerger() {}
 
@@ -98,6 +110,6 @@ public final class ExactDedupMerger {
 
   private static String categoryOf(CandidateFinding finding) {
     FindingCategory category = finding.category();
-    return category.name().toLowerCase(java.util.Locale.ROOT);
+    return category.name().toLowerCase(Locale.ROOT);
   }
 }
