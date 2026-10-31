@@ -4,6 +4,7 @@ import java.util.Locale;
 import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
+import org.cra.llm.api.LlmGatewayConfig;
 
 /**
  * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量）。GitHub token 可经 `--token`/`GITHUB_TOKEN` 提供；LLM 与
@@ -41,6 +42,8 @@ import org.cra.common.run.ReviewMode;
  * @param llmModelLight light 档模型名（--model-light / CRA_LLM_MODEL_LIGHT；缺省继承 standard）
  * @param fallbackChain 降级链（--fallback-chain / CRA_LLM_FALLBACK_CHAIN，默认 standard,light；05§5）
  * @param rpm per-model RPM（--rpm / CRA_LLM_RPM，形如 standard=60,strong=30,light=60；默认 60/30/60）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param llmTemperature 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
  * @param crossCheckerEnabled CrossChecker 总开关（05§5 agents.crosschecker.enabled；--crosschecker /
  *     CRA_CROSSCHECKER_ENABLED，默认 false——关闭不动 Standard 基线算术，04§2.2）
@@ -87,6 +90,7 @@ public record CraConfig(
     String llmModelLight,
     String fallbackChain,
     String rpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -232,6 +236,7 @@ public record CraConfig(
         llmModelLight,
         fallbackChain,
         rpm,
+        LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
         crossCheckerEnabled,
         crossCheckerModes,
         crossCheckerHistoryWeeks,
@@ -345,6 +350,7 @@ public record CraConfig(
         llmModelLight,
         fallbackChain,
         rpm,
+        LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
         false,
         "assumption,sniff",
         8,
@@ -393,6 +399,7 @@ public record CraConfig(
         llmModelLight(),
         fallbackChain(),
         rpm(),
+        llmMaxConcurrency(),
         crossCheckerEnabled(),
         crossCheckerModes(),
         crossCheckerHistoryWeeks(),
@@ -445,6 +452,7 @@ public record CraConfig(
         llmModelLight(),
         fallbackChain(),
         rpm(),
+        llmMaxConcurrency(),
         crossCheckerEnabled(),
         crossCheckerModes(),
         crossCheckerHistoryWeeks(),

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.llm.api.LlmGatewayConfig;
 import org.junit.jupiter.api.Test;
 
 /** 05§3 CLI 契约：参数解析（参数优先于环境变量；密钥只认环境变量；缺项拒绝启动）。 */
@@ -289,6 +290,31 @@ class CliArgsTest {
                 "CRA_LLM_MODEL_LIGHT", "  "));
     assertThat(config.llmModelStrong()).isNull();
     assertThat(config.llmModelLight()).isNull();
+  }
+
+  @Test
+  void llmMaxConcurrencyDefaultsAndEnvOverride() {
+    // 05§5 max-concurrency：CRA_LLM_MAX_CONCURRENCY（只走环境变量）；默认 8，合法域 1..64
+    assertThat(CliArgs.parse(baseArgs(), ENV).llmMaxConcurrency())
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_LLM_MAX_CONCURRENCY", "16");
+    assertThat(CliArgs.parse(baseArgs(), env).llmMaxConcurrency()).isEqualTo(16);
+
+    // GitHub Actions 空 input = ""：等同于未设置（回落默认值，不拒绝启动）
+    Map<String, String> blank = new java.util.HashMap<>(ENV);
+    blank.put("CRA_LLM_MAX_CONCURRENCY", "  ");
+    assertThat(CliArgs.parse(baseArgs(), blank).llmMaxConcurrency())
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+
+    for (String invalid : new String[] {"0", "65", "abc"}) {
+      Map<String, String> bad = new java.util.HashMap<>(ENV);
+      bad.put("CRA_LLM_MAX_CONCURRENCY", invalid);
+      assertThatThrownBy(() -> CliArgs.parse(baseArgs(), bad))
+          .isInstanceOf(CraConfigException.class)
+          .hasMessageContaining("CRA_LLM_MAX_CONCURRENCY 必须在 1..64");
+    }
   }
 
   @Test

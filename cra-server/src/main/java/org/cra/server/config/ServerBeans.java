@@ -109,7 +109,8 @@ public class ServerBeans {
             config.llmModelLight(),
             config.parsedFallbackChain(),
             config.parsedRpm(LlmGatewayConfig.defaultRpm()),
-            config.parsedTemperature()));
+            config.parsedTemperature(),
+            config.llmMaxConcurrency()));
   }
 
   /**

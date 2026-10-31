@@ -9,6 +9,7 @@ import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SemanticContextOptions;
+import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmParsing;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
@@ -47,6 +48,8 @@ import org.springframework.scheduling.support.CronExpression;
  * @param llmTemperature 采样温度（空 = 不传；建议 0.2，05§5）
  * @param llmFallbackChain 降级链（逗号分隔档位）
  * @param llmRpm per-model RPM（形如 standard=60,strong=30,light=60；空 = 默认）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param crossCheckerEnabled CrossChecker 总开关（默认 false，05§5）
  * @param crossCheckerModes CrossChecker 模式串（assumption,sniff）
  * @param crossCheckerHistoryWeeks 变更史回溯周数
@@ -94,6 +97,7 @@ public record ServerConfig(
     String llmTemperature,
     String llmFallbackChain,
     String llmRpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -148,6 +152,13 @@ public record ServerConfig(
     reviewDepth = depth;
     if (runTotalTokens <= 0) {
       throw new CraConfigException("CRA_SERVER_RUN_TOTAL_TOKENS 必须为正: " + runTotalTokens);
+    }
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
     }
     if (eventHistoryLookbackDays <= 0 || eventHistoryLookbackDays > 365) {
       throw new CraConfigException(
@@ -228,6 +239,7 @@ public record ServerConfig(
         blankToNull(env.getProperty("CRA_LLM_TEMPERATURE")),
         env.getProperty("CRA_LLM_FALLBACK_CHAIN", "standard,light"),
         env.getProperty("CRA_LLM_RPM", ""),
+        intValue(env, "CRA_LLM_MAX_CONCURRENCY", LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY),
         bool(env, "CRA_CROSSCHECKER_ENABLED", false),
         env.getProperty("CRA_CROSSCHECKER_MODES", "assumption,sniff"),
         intValue(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", 8),

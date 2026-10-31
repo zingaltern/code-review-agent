@@ -117,6 +117,7 @@ final class CliArgs {
         tuning.lightModel(),
         tuning.fallbackChain(),
         tuning.rpm(),
+        tuning.maxConcurrency(),
         advanced.crossCheckerEnabled(),
         advanced.crossCheckerModes(),
         advanced.historyWeeks(),
@@ -172,12 +173,13 @@ final class CliArgs {
       int pushLookback,
       boolean includeTestFiles) {}
 
-  /** LLM 档位与采样配置（05§5 models.* / fallback-chain / per-model-rpm）。 */
+  /** LLM 档位与采样配置（05§5 models.* / fallback-chain / per-model-rpm / max-concurrency）。 */
   private record LlmTuning(
       String strongModel,
       String lightModel,
       String fallbackChain,
       String rpm,
+      int maxConcurrency,
       String temperature) {}
 
   /** 可选 review 子命令前缀（05§3/05§4：java -jar cra-runner-cli.jar review …）。 */
@@ -381,7 +383,7 @@ final class CliArgs {
         signoffEnabled, trustedAuthors, prAuthor == null ? "" : prAuthor, testsStatus);
   }
 
-  /** LLM 档位/降级链/RPM/温度解析（05§5；与 cra-server 组合根同语义，公共体在 LlmParsing）。 */
+  /** LLM 档位/降级链/RPM/温度/并发解析（05§5；与 cra-server 组合根同语义，公共体在 LlmParsing）。 */
   private static LlmTuning parseLlmTuning(Map<String, String> named, Map<String, String> env) {
     String strongModel =
         PlatformArgs.blankToNull(
@@ -394,10 +396,15 @@ final class CliArgs {
             "--fallback-chain",
             PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN));
     String rpm = named.getOrDefault("--rpm", PlatformArgs.envOr(env, "CRA_LLM_RPM", ""));
+    // CRA_LLM_MAX_CONCURRENCY 只走环境变量（CI 配置面；不为单一上限新增 flag）
+    int maxConcurrency =
+        LlmParsing.parseMaxConcurrency(
+            PlatformArgs.blankToNull(env.get("CRA_LLM_MAX_CONCURRENCY")),
+            "CRA_LLM_MAX_CONCURRENCY");
     String temperature =
         PlatformArgs.blankToNull(
             named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE")));
-    return new LlmTuning(strongModel, lightModel, fallbackChain, rpm, temperature);
+    return new LlmTuning(strongModel, lightModel, fallbackChain, rpm, maxConcurrency, temperature);
   }
 
   /** tri-state 旗标匹配（R5 描述符表；`--flag=value` 仅表内旗标合法）。 */

@@ -6,6 +6,7 @@ import java.util.Set;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
 import org.cra.core.api.PipelineOptions;
+import org.cra.llm.api.LlmParsing;
 
 /**
  * `cra sweep` 参数解析（M4d 夜间存量评审，05§3/§2.5）。
@@ -64,6 +65,11 @@ final class SweepArgs {
             8);
     String modes = PlatformArgs.crosscheckerModes(scan.named(), env);
     String temperature = temperature(scan.named(), env);
+    // CRA_LLM_MAX_CONCURRENCY 与 review 同源（CI 配置面，只走环境变量）
+    int maxConcurrency =
+        LlmParsing.parseMaxConcurrency(
+            PlatformArgs.blankToNull(env.get("CRA_LLM_MAX_CONCURRENCY")),
+            "CRA_LLM_MAX_CONCURRENCY");
     PipelineOptions defaults = PipelineOptions.defaults();
     CraConfig config =
         new CraConfig(
@@ -100,6 +106,7 @@ final class SweepArgs {
                 scan.named().getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
             PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN),
             PlatformArgs.envOr(env, "CRA_LLM_RPM", ""),
+            maxConcurrency,
             scan.crossChecker(),
             modes,
             historyWeeks,
