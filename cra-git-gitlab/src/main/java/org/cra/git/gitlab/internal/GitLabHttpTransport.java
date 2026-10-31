@@ -28,8 +28,11 @@ final class GitLabHttpTransport {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final int MAX_BACKOFF_RETRIES = 3;
 
-  /** 单次退避上限：Retry-After 是外部输入，不设上限可让 run 挂起数天（ADR-0011 只要求退避，不要求盲从）。 */
-  private static final long MAX_BACKOFF_MS = 60_000L;
+  /** 外部 Retry-After 的单次等待上限：响应头可控，不设上限可让 run 挂起数天（ADR-0011 只要求退避，不要求盲从）。 */
+  private static final long MAX_RETRY_AFTER_MS = 60_000L;
+
+  /** 内部指数退避基数（1s/2s/4s/8s/16s）：与外部头分离，不受攻击者可控延迟影响。 */
+  private static final long BASE_BACKOFF_MS = 1_000L;
 
   private final String apiBase;
   private final String token;
@@ -190,9 +193,9 @@ final class GitLabHttpTransport {
   private long retryAfterMs(HttpResponse<?> response, int attempt) {
     String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
     if (retryAfter != null && retryAfter.matches("\\d{1,9}")) {
-      return Math.min(Long.parseLong(retryAfter) * 1000L, MAX_BACKOFF_MS);
+      return Math.min(Long.parseLong(retryAfter) * 1000L, MAX_RETRY_AFTER_MS);
     }
-    return Math.min(1_000L * (1L << Math.min(attempt, 4)), MAX_BACKOFF_MS);
+    return BASE_BACKOFF_MS * (1L << Math.min(attempt, 4));
   }
 
   private void throttleIfCloseToLimit(HttpResponse<?> response) {
