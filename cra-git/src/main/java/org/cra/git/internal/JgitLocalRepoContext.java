@@ -1,5 +1,8 @@
 package org.cra.git.internal;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -15,6 +18,7 @@ import org.cra.common.text.Texts;
 import org.cra.git.api.LocalRepoContext;
 import org.eclipse.jgit.api.BlameCommand;
 import org.eclipse.jgit.api.errors.GitAPIException;
+import org.eclipse.jgit.diff.DiffEntry;
 import org.eclipse.jgit.diff.DiffFormatter;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
@@ -22,11 +26,15 @@ import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.filter.PathFilterGroup;
+import org.eclipse.jgit.treewalk.filter.TreeFilter;
 import org.eclipse.jgit.util.io.DisabledOutputStream;
 
 /**
  * jgit blame 实现（05§2.1：GitHub REST/GraphQL 无行级 blame 端点，CI checkout / 本地模式天然有仓库）。 blame 不可得（目录非仓库 /
  * 文件缺失 / 行越界 / 对象缺失）抛 {@link CraIntegrationException}，由消费方逐条降级，不炸穿 run。
+ *
+ * <p>仓库判定接受普通 clone（{@code .git} 为目录）与 git worktree / submodule（{@code .git} 为 gitdir 指针文件）——jgit
+ * 两者均可打开， 降级只应发生在真正没有仓库的场景。
  */
 public final class JgitLocalRepoContext implements LocalRepoContext {
 
@@ -44,7 +52,11 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
 
   @Override
   public Optional<String> localRepoRoot() {
-    return root != null && Files.isDirectory(root.resolve(".git"))
+    if (root == null) {
+      return Optional.empty();
+    }
+    Path gitPath = root.resolve(".git");
+    return Files.isDirectory(gitPath) || Files.isRegularFile(gitPath)
         ? Optional.of(root.toString())
         : Optional.empty();
   }
@@ -65,13 +77,13 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
         throw new CraIntegrationException(
             "blame 不可得: " + path + " L" + line + " @" + shortSha(sha));
       }
-      org.eclipse.jgit.revwalk.RevCommit commit = result.getSourceCommit(line - 1);
+      RevCommit commit = result.getSourceCommit(line - 1);
       if (commit == null) {
         throw new CraIntegrationException("blame 行无来源 commit: " + path + " L" + line);
       }
       String author = commit.getAuthorIdent() == null ? "" : commit.getAuthorIdent().getName();
       return new BlameResult(path, line, commit.getName(), author);
-    } catch (GitAPIException | java.io.IOException e) {
+    } catch (GitAPIException | IOException e) {
       throw new CraIntegrationException("jgit blame 失败: " + path + " @" + shortSha(sha), e);
     }
   }
@@ -86,27 +98,25 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
       if (commitId == null) {
         return Optional.empty();
       }
-      org.eclipse.jgit.revwalk.RevCommit commit;
-      try (org.eclipse.jgit.revwalk.RevWalk walk =
-          new org.eclipse.jgit.revwalk.RevWalk(repository)) {
+      RevCommit commit;
+      try (RevWalk walk = new RevWalk(repository)) {
         commit = walk.parseCommit(commitId);
       }
       if (commit.getParentCount() == 0) {
         return Optional.empty();
       }
-      java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-      try (org.eclipse.jgit.diff.DiffFormatter formatter =
-          new org.eclipse.jgit.diff.DiffFormatter(out)) {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      try (DiffFormatter formatter = new DiffFormatter(out)) {
         formatter.setRepository(repository);
-        for (org.eclipse.jgit.diff.DiffEntry entry : formatter.scan(commit.getParent(0), commit)) {
+        for (DiffEntry entry : formatter.scan(commit.getParent(0), commit)) {
           if (path.equals(entry.getNewPath()) || path.equals(entry.getOldPath())) {
-            formatter.format(java.util.List.of(entry));
-            return Optional.of(out.toString(java.nio.charset.StandardCharsets.UTF_8));
+            formatter.format(List.of(entry));
+            return Optional.of(out.toString(StandardCharsets.UTF_8));
           }
         }
         return Optional.empty();
       }
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       return Optional.empty();
     }
   }
@@ -132,8 +142,7 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
         walk.sort(RevSort.COMMIT_TIME_DESC);
         walk.markStart(head);
         int scanned = 0;
-        org.eclipse.jgit.treewalk.filter.TreeFilter filter =
-            PathFilterGroup.createFromStrings(paths);
+        TreeFilter filter = PathFilterGroup.createFromStrings(paths);
         for (RevCommit commit : walk) {
           // 时间窗口以 head 的 committer time 为锚（确定性）；COMMIT_TIME_DESC 下可提前结束
           if (commit.getCommitterIdent() == null
@@ -160,7 +169,7 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
         }
       }
       return List.copyOf(entries);
-    } catch (java.io.IOException | RuntimeException e) {
+    } catch (IOException | RuntimeException e) {
       // best effort（05§2.1 降级语义）：历史不可得不炸 run，消费方如实声明
       return List.of();
     }
@@ -188,7 +197,7 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
         }
       }
       return List.copyOf(out);
-    } catch (java.io.IOException | RuntimeException e) {
+    } catch (IOException | RuntimeException e) {
       // best effort（同 recentCommits 降级语义）：不可得返回空列表，调用方要求显式基线
       return List.of();
     }

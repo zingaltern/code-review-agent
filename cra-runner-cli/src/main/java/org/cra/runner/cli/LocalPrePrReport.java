@@ -1,15 +1,22 @@
 package org.cra.runner.cli;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.ReviewSuggestion;
+import org.cra.common.signoff.SignoffAdvice;
+import org.cra.common.signoff.SignoffRuleHit;
 import org.cra.common.text.Texts;
 
 /**
- * 本地 pre-PR 报告渲染（07 T2.10）：构建/测试实跑段（退出码 + 失败摘录置顶——对齐"必须展示输出而非 声称完成"）+ 本地评审段（建议清单）。纯文本到
+ * 本地 pre-PR 报告渲染（07 T2.10）：构建/测试实跑段（退出码 + 失败摘录置顶——对齐"必须展示输出而非 声称完成"）+ 本地评审段（建议清单）。纯函数返回文本， 由命令层打印到
  * stdout，无状态可单测。
  */
 final class LocalPrePrReport {
+
+  /** 签字证据折叠上限（超出显示"等 N 个"，避免单条规则刷屏）。 */
+  private static final int MAX_EVIDENCE_ITEMS = 5;
 
   private LocalPrePrReport() {}
 
@@ -53,7 +60,7 @@ final class LocalPrePrReport {
         .append("  耗时: ")
         .append(exec.durationMs() / 1000.0)
         .append("s\n");
-    out.append("完整输出: ")
+    out.append(exec.logComplete() ? "完整输出: " : "输出日志（可能不完整）: ")
         .append(exec.logFile() == null ? "（日志落盘失败，输出见上方回显/内存留存）" : exec.logFile())
         .append('\n');
     if (exec.failed()) {
@@ -78,7 +85,7 @@ final class LocalPrePrReport {
         .append(config.ledgerDb())
         .append("  PR 编号: ")
         .append(config.prNumber())
-        .append(config.local() ? "（本地形态无 PR）" : "")
+        .append(config.prNumber() == 0 ? "（本地形态无 PR）" : "")
         .append('\n');
     if (reviewSkipReason != null) {
       out.append("状态: 已跳过——").append(reviewSkipReason).append('\n');
@@ -132,7 +139,7 @@ final class LocalPrePrReport {
   }
 
   /** 签字建议（M4a；advisory 非审批——agent 永远不是 approver）。 */
-  static void renderSignoff(StringBuilder out, org.cra.common.signoff.SignoffAdvice advice) {
+  static void renderSignoff(StringBuilder out, SignoffAdvice advice) {
     if (advice == null) {
       return;
     }
@@ -148,7 +155,7 @@ final class LocalPrePrReport {
         .append(shortSha(advice.commitSha()))
         .append("（approve 只对该 commit 有效；新 commit 出现即 stale）\n");
     out.append("  触发规则:\n");
-    for (org.cra.common.signoff.SignoffRuleHit hit : advice.rules()) {
+    for (SignoffRuleHit hit : advice.rules()) {
       out.append("  - ")
           .append(hit.id())
           .append("（")
@@ -163,7 +170,7 @@ final class LocalPrePrReport {
     out.append("  条件: 作者 ")
         .append(advice.context().authorKnown() ? advice.context().author() : "未知")
         .append("；测试状态 ")
-        .append(advice.context().testsStatus().name().toLowerCase(java.util.Locale.ROOT))
+        .append(advice.context().testsStatus().name().toLowerCase(Locale.ROOT))
         .append('\n');
     out.append("  声明: agent 的赞成票不计为审批（agent 永远不是 approver）；签字语义 = 核实意图/假设/设计，不是逐行读过\n");
     out.append("  名单: 指挥 agent 写代码的人必须在签字名单上（PR 模板提示项，05§5）\n");
@@ -173,11 +180,10 @@ final class LocalPrePrReport {
   }
 
   private static List<String> fold(List<String> values) {
-    int max = 5;
-    if (values.size() <= max) {
+    if (values.size() <= MAX_EVIDENCE_ITEMS) {
       return values;
     }
-    List<String> folded = new java.util.ArrayList<>(values.subList(0, max));
+    List<String> folded = new ArrayList<>(values.subList(0, MAX_EVIDENCE_ITEMS));
     folded.add("等 " + values.size() + " 个");
     return folded;
   }

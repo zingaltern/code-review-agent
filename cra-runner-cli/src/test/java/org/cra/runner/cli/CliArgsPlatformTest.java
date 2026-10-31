@@ -280,7 +280,9 @@ class CliArgsPlatformTest {
 
   @Test
   void splitRepoAllowsNestedGitlabGroupOnly() {
-    assertThat(PlatformArgs.splitRepo("group/sub/proj", true)).containsExactly("group/sub", "proj");
+    PlatformArgs.OwnerRepo nested = PlatformArgs.splitRepo("group/sub/proj", true);
+    assertThat(nested.owner()).isEqualTo("group/sub");
+    assertThat(nested.name()).isEqualTo("proj");
     assertThatThrownBy(() -> PlatformArgs.splitRepo("group/sub/proj", false))
         .isInstanceOf(CraConfigException.class);
     assertThatThrownBy(() -> PlatformArgs.splitRepo("broken", true))
@@ -298,6 +300,22 @@ class CliArgsPlatformTest {
     assertThat(parsed.config().repoOwner()).isEqualTo("group/sub");
     assertThat(parsed.config().repoName()).isEqualTo("proj");
     assertThat(parsed.config().gitlab().token()).isEqualTo("glpat-sweep");
+    assertThat(parsed.config().githubToken()).isNull();
+  }
+
+  @Test
+  void sweepBlankFallbackChainEnvKeepsDefault() {
+    // GitHub Actions 空 env（""）等同未设置：不得静默丢失降级链（与 CliArgs envOr 同语义）
+    Map<String, String> env = baseEnv();
+    env.put("CRA_LLM_FALLBACK_CHAIN", "");
+    SweepArgs.Parsed parsed = SweepArgs.parse(new String[] {"--repo", "o/r"}, env);
+    assertThat(parsed.config().fallbackChain()).isEqualTo("standard,light");
+    assertThat(parsed.config().runTotalTokens())
+        .isEqualTo(org.cra.core.api.PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS);
+    assertThat(parsed.config().nitBudget()).isEqualTo(3);
+    assertThat(parsed.config().spotCheckPercent()).isEqualTo(20);
+    assertThat(parsed.config().degradeAtFirst()).isEqualTo(0.70);
+    assertThat(parsed.config().degradeAtSecond()).isEqualTo(0.85);
   }
 
   @Test
