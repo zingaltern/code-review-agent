@@ -1,6 +1,8 @@
 package org.cra.runner.cli;
 
 import org.cra.common.exception.CraException;
+import org.cra.common.run.Depth;
+import org.cra.common.run.ReviewMode;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
@@ -29,7 +31,7 @@ final class ReviewCommand {
         return new LocalPrePrCommand().execute(config);
       }
       CraConfig effective =
-          config.reviewMode() == org.cra.common.run.ReviewMode.COMMIT
+          config.reviewMode() == ReviewMode.COMMIT
               ? config.withResolvedPushBase(PushBaseResolver.resolve(config))
               : config;
       try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
@@ -81,11 +83,11 @@ final class ReviewCommand {
     return 0; // 有 finding 不是失败（05§3）
   }
 
-  static org.cra.common.run.Depth toDepth(String depth) {
+  static Depth toDepth(String depth) {
     return switch (depth) {
-      case "quick" -> org.cra.common.run.Depth.QUICK;
-      case "deep" -> org.cra.common.run.Depth.DEEP;
-      default -> org.cra.common.run.Depth.STANDARD;
+      case "quick" -> Depth.QUICK;
+      case "deep" -> Depth.DEEP;
+      default -> Depth.STANDARD;
     };
   }
 }

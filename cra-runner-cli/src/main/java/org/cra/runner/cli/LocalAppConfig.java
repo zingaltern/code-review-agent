@@ -7,16 +7,23 @@ import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.core.api.CoreAssembly;
+import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
+import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
+import org.cra.core.api.SignoffOptions;
+import org.cra.git.api.GitAssembly;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalGitAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmAssembly;
 import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 import org.cra.store.api.StoreAssembly;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
 /**
  * 本地 pre-PR 模式组合根（02§5 本地形态；T2.10）：账本 = SQLite（--ledger-db，默认 ~/.cra/ledger.db）、 diff 数据面 = 本地
@@ -34,7 +41,7 @@ class LocalAppConfig {
   }
 
   @Bean
-  @org.springframework.context.annotation.Primary
+  @Primary
   GitPlatformAdapter gitPlatformAdapter() {
     // @Primary：LocalGitAdapter 同时被命令层 registerBean 注册（localGitAdapter）——本地形态
     // 的主 GitPlatformAdapter 恒为本 bean，避免 orchestrator 按类型注入时双候选歧义
@@ -72,21 +79,21 @@ class LocalAppConfig {
 
   @Bean
   LocalRepoContext localRepoContext() {
-    return org.cra.git.api.GitAssembly.createLocalRepoContext(Path.of(config.workspace()));
+    return GitAssembly.createLocalRepoContext(Path.of(config.workspace()));
   }
 
   @Bean
-  org.cra.core.api.CrossCheckerOptions crossCheckerOptions() {
+  CrossCheckerOptions crossCheckerOptions() {
     // 05§5 agents.crosschecker：默认关闭；模式串在 CLI 解析期已校验
-    return new org.cra.core.api.CrossCheckerOptions(
+    return new CrossCheckerOptions(
         config.crossCheckerEnabled(),
         CrossCheckerModeParser.parse(config.crossCheckerModes()),
         config.crossCheckerHistoryWeeks());
   }
 
   @Bean
-  org.cra.core.api.PipelineOptions pipelineOptions() {
-    return new org.cra.core.api.PipelineOptions(
+  PipelineOptions pipelineOptions() {
+    return new PipelineOptions(
         config.runTotalTokens(),
         config.degradeAtFirst(),
         config.degradeAtSecond(),
@@ -99,21 +106,21 @@ class LocalAppConfig {
   }
 
   @Bean
-  org.cra.core.api.SignoffOptions signoffOptions() {
+  SignoffOptions signoffOptions() {
     // 05§5 agents.signoff（M4a）：本地形态同样生成签字建议（测试状态由实跑结果覆盖）
     return config.signoff().toOptions();
   }
 
   @Bean
-  org.cra.core.api.SemanticContextOptions semanticContextOptions() {
+  SemanticContextOptions semanticContextOptions() {
     // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片
     return config.semanticContext().toOptions();
   }
 
   @Bean
-  org.cra.git.api.SymbolIndex symbolIndex() {
+  SymbolIndex symbolIndex() {
     // ADR-0014：jgit 树读取 + Java 词法抽取；非 git checkout 时 build 返回不可得快照（不炸 run）
-    return org.cra.git.api.GitAssembly.createSymbolIndex(java.nio.file.Path.of(config.workspace()));
+    return GitAssembly.createSymbolIndex(Path.of(config.workspace()));
   }
 
   @Bean
@@ -124,12 +131,12 @@ class LocalAppConfig {
       ReviewCrew crew,
       SubAgent<VerificationBatchInput> verifier,
       SubAgent<JudgeCaseInput> judge,
-      org.cra.core.api.PipelineOptions pipelineOptions,
-      org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
-      org.cra.core.api.SignoffOptions signoffOptions,
+      PipelineOptions pipelineOptions,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
       LocalRepoContext localRepoContext,
-      org.cra.core.api.SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex) {
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex) {
     return CoreAssembly.createOrchestrator(
         adapter,
         ledger,
@@ -142,6 +149,7 @@ class LocalAppConfig {
         localRepoContext,
         crossCheckerOptions,
         signoffOptions,
+        // 本地形态不装配事件史端口（ADR-0012 默认关闭；本地 pre-PR 不查询历史事件）
         null,
         semanticContextOptions,
         symbolIndex);
