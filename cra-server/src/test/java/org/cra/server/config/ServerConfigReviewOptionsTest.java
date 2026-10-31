@@ -54,6 +54,20 @@ class ServerConfigReviewOptionsTest {
   }
 
   @Test
+  void degradeAtParsingMatchesCliSemantics() {
+    // 与 CLI PlatformArgs.degradeAt 同语义：段内空白忽略、尾逗号按空段丢弃、段数 ≠2 拒绝
+    MockEnvironment tolerant = baseEnv();
+    tolerant.setProperty("CRA_REVIEW_DEGRADE_AT", " 0.60 , 0.80 ,");
+    ServerConfig config = ServerConfig.from(tolerant);
+    assertThat(config.reviewDegradeAtFirst()).isEqualTo(0.60);
+    assertThat(config.reviewDegradeAtSecond()).isEqualTo(0.80);
+
+    assertRejected("CRA_REVIEW_DEGRADE_AT", "0.60,,0.80", "CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85");
+    assertRejected("CRA_REVIEW_DEGRADE_AT", ",0.60,0.80", "CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85");
+    assertRejected("CRA_REVIEW_DEGRADE_AT", "0.60", "CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85");
+  }
+
+  @Test
   void boundaryValuesAreAccepted() {
     MockEnvironment env = baseEnv();
     env.setProperty("CRA_REVIEW_LARGE_DIFF_LINES", "1");

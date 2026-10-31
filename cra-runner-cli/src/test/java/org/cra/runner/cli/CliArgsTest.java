@@ -360,6 +360,22 @@ class CliArgsTest {
   }
 
   @Test
+  void degradeAtParsingMatchesServerSemantics() {
+    // 与 cra-server ServerConfig.parseDegradeAt 同语义：段内空白忽略、尾逗号按空段丢弃
+    Map<String, String> tolerant = new java.util.HashMap<>(ENV);
+    tolerant.put("CRA_REVIEW_DEGRADE_AT", " 0.60 , 0.80 ,");
+    CraConfig config = CliArgs.parse(baseArgs(), tolerant);
+    assertThat(config.degradeAtFirst()).isEqualTo(0.60);
+    assertThat(config.degradeAtSecond()).isEqualTo(0.80);
+
+    Map<String, String> blankSegment = new java.util.HashMap<>(ENV);
+    blankSegment.put("CRA_REVIEW_DEGRADE_AT", "0.60,,0.80");
+    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), blankSegment))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85");
+  }
+
+  @Test
   void semanticContextDefaultsOffAndParsesConfig() {
     // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；flag/env 优先级 = flag > env > 默认
     CraConfig defaults = CliArgs.parse(baseArgs(), ENV);

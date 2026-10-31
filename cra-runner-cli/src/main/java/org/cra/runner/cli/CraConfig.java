@@ -10,7 +10,7 @@ import org.cra.llm.api.LlmGatewayConfig;
  * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量）。GitHub token 可经 `--token`/`GITHUB_TOKEN` 提供；LLM 与
  * GitLab 密钥只从环境变量/文件读（05§3/§6）。组装期校验：缺项/非法值即 CraConfigException → 退出码 2。
  *
- * <p>构造入口是 {@link #builder()}：42 个组件的 record 位置参数散落在调用点既无法审阅，新增字段也无处收敛（JLS 8.10.4 要求 canonical
+ * <p>构造入口是 {@link #builder()}：43 个组件的 record 位置参数散落在调用点既无法审阅，新增字段也无处收敛（JLS 8.10.4 要求 canonical
  * 构造器可见性不低于 record 本身，故无法声明为 private——约定改为位置参数只出现在 {@link Builder#build()}）。默认值住在 Builder
  * 字段初值；空值归一与校验仍在紧凑构造器（唯一校验点，不因入口变化而搬家）。
  *
@@ -130,6 +130,15 @@ public record CraConfig(
             : platform.strip().toLowerCase(Locale.ROOT);
     if (!"github".equals(platform) && !"gitlab".equals(platform)) {
       throw new CraConfigException("platform 非法: " + platform + "（github|gitlab）");
+    }
+    // 校验必须落在紧凑构造器（唯一校验点）：Builder/位置参数/回填/tests 任一入口都不得绕过 1..64
+    // （0 = 信号量永久阻塞；>64 无意义——实际并发受线程池宽度约束，09§6）
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
     }
     gitlab = gitlab == null ? GitLabSettings.none() : gitlab;
   }

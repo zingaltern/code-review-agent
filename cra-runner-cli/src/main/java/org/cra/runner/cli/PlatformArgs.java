@@ -390,7 +390,8 @@ final class PlatformArgs {
   record DegradeAt(double first, double second) {}
 
   /**
-   * 降级阈值解析（R5 共享）：null/空白 = 默认值；形如 {@code 0.70,0.85}。
+   * 降级阈值解析（R5 共享）：null/空白 = 默认值；形如 {@code 0.70,0.85}（段内空白忽略； 尾逗号按空段丢弃，与 fallback-chain/RPM
+   * 的“空段跳过”约定一致；段数 ≠2 拒绝）。与 cra-server 的 {@code ServerConfig.parseDegradeAt} 逐条同语义。
    *
    * @param key 来源键名（错误文案）
    * @param value 原始值

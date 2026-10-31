@@ -406,8 +406,9 @@ public record ServerConfig(
   }
 
   /**
-   * 降级阈值（0 &lt; first &lt; second &lt;= 1；未配置取 PipelineOptions 基准值）。 与 CLI 同语义；server 侧只在 env
-   * 装配期出现，错误前缀保留 CRA_REVIEW_DEGRADE_AT key 名。
+   * 降级阈值（0 &lt; first &lt; second &lt;= 1；未配置/空白取 PipelineOptions 基准值）。 与 CLI 的 {@code
+   * PlatformArgs.degradeAt} 逐条同语义（空白=默认、恰两段、区间校验）；尾逗号视为空段忽略（与 fallback-chain/RPM
+   * 的“空段跳过”约定一致），中间空段/多余段按段数拒绝。 server 侧只在 env 装配期出现，错误前缀保留 CRA_REVIEW_DEGRADE_AT key 名。
    */
   private record DegradeThresholds(double first, double second) {}
 
@@ -416,6 +417,8 @@ public record ServerConfig(
     if (value == null || value.isBlank()) {
       return new DegradeThresholds(defaultFirst, defaultSecond);
     }
+    // split(",") 默认丢弃尾部空段：\"0.70,0.85,\" 与 \"0.70,0.85\" 等价；\",0.70,0.85\" / \"0.70,,0.85\" 段数 >2
+    // 拒绝
     String[] parts = value.split(",");
     if (parts.length != 2) {
       throw new CraConfigException("CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85: " + value);
