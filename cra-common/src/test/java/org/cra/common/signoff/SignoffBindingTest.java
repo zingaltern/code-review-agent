@@ -55,7 +55,8 @@ class SignoffBindingTest {
     assertThat(stale.tier()).isEqualTo(RiskTier.MEDIUM);
     assertThat(stale.staleReason()).contains(NEW).contains(OLD).contains("stale");
     assertThat(SignoffBinding.markStale(stale, "another")).isSameAs(stale);
-    assertThatThrownBy(() -> SignoffBinding.markStale(advice(OLD), " "))
+    SignoffAdvice original = advice(OLD);
+    assertThatThrownBy(() -> SignoffBinding.markStale(original, " "))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
