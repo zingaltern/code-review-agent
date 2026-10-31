@@ -6,8 +6,10 @@ import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.event.EventHistoryQuery;
+import org.cra.core.internal.ReviewPipeline;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 
@@ -123,8 +125,9 @@ public final class CoreAssembly {
   }
 
   /**
-   * 创建 M4e 形态编排器（追加语义上下文：L2 跨文件切片；ADR-0014）。
+   * 创建全参形态编排器（M4f 事件史 + M4e 语义上下文 + 符号索引；ADR-0012/0014）。
    *
+   * @param eventHistoryQuery 事件史检索端口（cross-checker 的 context 类外部证据面，ADR-0012；null = 未装配）
    * @param semanticContextOptions 语义上下文配置（05§5 semantic_context；null 用关闭态）
    * @param symbolIndex 语义索引端口（null = 未装配；开启时按不可得声明）
    * @return Orchestrator
@@ -143,8 +146,8 @@ public final class CoreAssembly {
       SignoffOptions signoffOptions,
       EventHistoryQuery eventHistoryQuery,
       SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex) {
-    return new org.cra.core.internal.ReviewPipeline(
+      SymbolIndex symbolIndex) {
+    return new ReviewPipeline(
         adapter,
         ledger,
         gateway,

@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
@@ -17,6 +18,7 @@ import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.event.EventHistoryQuery;
+import org.cra.common.finding.FindingCategory;
 import org.cra.common.git.DiffFile;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
@@ -33,6 +35,7 @@ import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SemanticContextOptions;
 import org.cra.core.api.SignoffOptions;
+import org.cra.core.internal.pipeline.CallSiteIndex;
 import org.cra.core.internal.pipeline.ChunkPlanner;
 import org.cra.core.internal.pipeline.ConvergenceGuard;
 import org.cra.core.internal.pipeline.CrossCheckEvents;
@@ -97,7 +100,6 @@ public final class ReviewPipeline implements Orchestrator {
   private final CitedEvidenceResolver citedResolver;
   private final SignoffAdvisor signoffAdvisor;
   private final ExecutorService verifyPool;
-  private final EventHistoryQuery eventHistoryQuery;
   private final long verificationWaitTimeoutMs;
 
   public ReviewPipeline(
@@ -246,7 +248,6 @@ public final class ReviewPipeline implements Orchestrator {
     this.runRoot = runRoot;
     this.options = options == null ? PipelineOptions.defaults() : options;
     this.verifier = verifier;
-    this.eventHistoryQuery = eventHistoryQuery;
     this.agentRunner = new AgentRunner(gateway);
     CrossCheckerOptions effectiveCrossChecker =
         crossCheckerOptions == null ? CrossCheckerOptions.disabled() : crossCheckerOptions;
@@ -414,7 +415,7 @@ public final class ReviewPipeline implements Orchestrator {
               depthPlan,
               semanticContext.enabled()
                   ? semanticContext.relatedPaths(allPlanFiles(plan), CROSS_CHECK_PATH_CAP)
-                  : java.util.Set.of());
+                  : Set.of());
       CrossCheckEvents crossCheckEvents =
           dataLoader.resolveCrossCheckEvents(request, diff, plan, depthPlan, crossCheckHistory);
       ReviewStage.StageOutcome outcome =
@@ -505,9 +506,7 @@ public final class ReviewPipeline implements Orchestrator {
 
       // v1.4（ADR-0015）：bug 类候选的确定性调用点索引——一次仓库树列举，逐批次有界扫描
       List<String> javaFileIndex =
-          candidates.stream()
-                  .anyMatch(
-                      s -> s.finding().category() == org.cra.common.finding.FindingCategory.BUG)
+          candidates.stream().anyMatch(s -> s.finding().category() == FindingCategory.BUG)
               ? dataLoader.javaFileIndex(request, trace)
               : List.of();
 
@@ -522,7 +521,7 @@ public final class ReviewPipeline implements Orchestrator {
               path -> dataLoader.contentOf(path, request.headSha(), request, contentCache),
               citedResolver,
               (file, batch) ->
-                  org.cra.core.internal.pipeline.CallSiteIndex.build(
+                  CallSiteIndex.build(
                       file,
                       batch,
                       reviewDiff,
@@ -533,9 +532,7 @@ public final class ReviewPipeline implements Orchestrator {
               verificationWaitTimeoutMs);
       // v1.3.2 test 类分型：仅当候选含 test 类时采集测试文件清单（一次 listFiles，避免无谓 API 调用）
       List<String> testFileIndex =
-          candidates.stream()
-                  .anyMatch(
-                      s -> s.finding().category() == org.cra.common.finding.FindingCategory.TEST)
+          candidates.stream().anyMatch(s -> s.finding().category() == FindingCategory.TEST)
               ? dataLoader.testFileIndex(request, trace)
               : List.of();
       String repoKey = request.repoOwner() + "/" + request.repoName();

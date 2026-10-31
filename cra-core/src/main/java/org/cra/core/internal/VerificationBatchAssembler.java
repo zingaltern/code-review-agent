@@ -13,6 +13,7 @@ import org.cra.agents.api.VerificationItem;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.context.TokenMath;
 import org.cra.common.finding.CandidateFinding;
+import org.cra.common.finding.ContextCitation;
 import org.cra.common.finding.FindingCategory;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
@@ -254,8 +255,7 @@ final class VerificationBatchAssembler {
   private static String renderTestFileIndex(
       List<FindingAggregator.Scored> batch, List<String> testFileIndex) {
     boolean hasTestFinding =
-        batch.stream()
-            .anyMatch(s -> s.finding().category() == org.cra.common.finding.FindingCategory.TEST);
+        batch.stream().anyMatch(s -> s.finding().category() == FindingCategory.TEST);
     if (!hasTestFinding || testFileIndex == null || testFileIndex.isEmpty()) {
       return "";
     }
@@ -504,7 +504,7 @@ final class VerificationBatchAssembler {
     sb.append("结论 ").append(finding.id()).append(" 引用的矛盾证据：\n");
     boolean resolved = false;
     int rendered = 0;
-    for (org.cra.common.finding.ContextCitation.CommitRef ref : citation.commits()) {
+    for (ContextCitation.CommitRef ref : citation.commits()) {
       if (rendered >= CITED_COMMIT_MAX) {
         break;
       }
