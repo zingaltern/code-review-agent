@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.cra.agents.internal.TemplateLoader;
 import org.junit.jupiter.api.Test;
 
@@ -64,22 +66,61 @@ class AgentBudgetOverridesTest {
 
   @Test
   void fromConfigNormalizesRoleKeyCaseAndWhitespace() {
-    // PR #64 评审跟进：fromConfig 与 of() 同一归一化口径——大小写/首尾空白不静默丢弃
+    // 整键首尾空白 + 角色段大小写/空白归一；用非默认值确保“覆盖生效”与“被丢弃”可区分
     AgentBudgetOverrides overrides =
         AgentBudgetOverrides.fromConfig(
             Map.of(
-                " agents.budget.VERIFIER.input-tokens ", " 16000 ",
-                "agents.budget. Judge .output-tokens", "1500"));
+                " agents.budget.VERIFIER.input-tokens ", " 18000 ",
+                "agents.budget. Judge .output-tokens", "2000"));
+
+    assertThat(overrides.isEmpty()).isFalse();
+    assertThat(overrides.byRole()).containsOnlyKeys("verifier", "judge");
 
     SubAgent<VerificationBatchInput> verifier = overrides.apply(AgentsAssembly.createVerifier());
-    assertThat(verifier.budget()).isEqualTo(new AgentBudget(16_000, 2_000, 2, 240_000));
+    assertThat(verifier.budget()).isEqualTo(new AgentBudget(18_000, 2_000, 2, 240_000));
 
     SubAgent<JudgeCaseInput> judge = overrides.apply(AgentsAssembly.createJudge());
-    assertThat(judge.budget()).isEqualTo(new AgentBudget(20_000, 1_500, 2, 240_000));
+    assertThat(judge.budget()).isEqualTo(new AgentBudget(20_000, 2_000, 2, 240_000));
   }
 
   @Test
-  void crewAndSingleAgentOverridesAreComposable() {
+  void overrideReachesBriefBudgetConsumedByExecution() {
+    // AgentRunner 读 brief.budget()；装饰器必须把覆盖同步进 brief，否则输出覆盖完全无效
+    AgentBudgetOverrides overrides =
+        AgentBudgetOverrides.fromConfig(
+            Map.of(
+                "agents.budget.verifier.input-tokens", "18000",
+                "agents.budget.verifier.output-tokens", "2500"));
+    SubAgent<VerificationBatchInput> verifier = overrides.apply(AgentsAssembly.createVerifier());
+
+    AgentBrief brief =
+        verifier.buildBrief(
+            new VerificationBatchInput(
+                "src/Foo.java",
+                List.of(new VerificationItem("f_01", "bug", "important", "t", "d", "f", "e", null)),
+                "code",
+                "",
+                "",
+                ""));
+
+    assertThat(brief.budget()).isEqualTo(new AgentBudget(18_000, 2_500, 2, 240_000));
+    assertThat(brief.role().id()).isEqualTo("verifier");
+  }
+
+  @Test
+  void applyRejectsOutputOverrideNotSmallerThanDefaultInput() {
+    // 单维度覆盖只有与定义默认值合并后才能判定：输出 20000 会撞上 verifier 默认输入 16000
+    AgentBudgetOverrides overrides =
+        AgentBudgetOverrides.fromConfig(Map.of("agents.budget.verifier.output-tokens", "20000"));
+
+    assertThatThrownBy(() -> overrides.apply(AgentsAssembly.createVerifier()))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("必须大于")
+        .hasMessageContaining("含定义默认值");
+  }
+
+  @Test
+  void judgeOverrideAndNoneAreComposable() {
     AgentBudgetOverrides overrides =
         AgentBudgetOverrides.fromConfig(
             Map.of(
@@ -159,5 +200,11 @@ class AgentBudgetOverridesTest {
     assertThat(decorated.role()).isEqualTo(dataflow.role());
     assertThat(decorated.modelTier()).isEqualTo(dataflow.modelTier());
     assertThat(decorated.tools()).isEqualTo(dataflow.tools());
+    assertThat(decorated.budget()).isEqualTo(new AgentBudget(30_000, 4_000, 3, 240_000));
+
+    ReviewAgentInput input =
+        new ReviewAgentInput("t", "m", "@@ -1 +1 @@", "", "", "", "", Set.of());
+    assertThat(decorated.buildBrief(input).templateVersion())
+        .isEqualTo(dataflow.buildBrief(input).templateVersion());
   }
 }

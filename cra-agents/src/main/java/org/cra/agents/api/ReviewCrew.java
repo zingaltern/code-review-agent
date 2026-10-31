@@ -3,9 +3,9 @@ package org.cra.agents.api;
 import java.util.List;
 
 /**
- * M2 评审班组（T2.2/T2.3，03§3 角色表）：BugHunter 视角实例 + 四专角色。 视角数量由编排器按深度档位路由（02§4.3：quick 1 / standard 2 /
- * deep 3–4）； 专角色触发条件由编排器判定（Security 每 chunk 必跑；Test/Convention 条件触发；Perf Deep 档）。 全部为纯定义（执行在
- * cra-core 隔离运行时）；null = 该角色未装配（编排器跳过）。
+ * 评审班组（M2 四专角色 + M4f-lite CrossChecker，T2.2/T2.3，03§3 角色表）：BugHunter 视角实例 + 四专角色。
+ * 视角数量由编排器按深度档位路由（02§4.3：quick 1 / standard 2 / deep 3–4）； 专角色触发条件由编排器判定（Security 每 chunk
+ * 必跑；Test/Convention 条件触发；Perf Deep 档）。 全部为纯定义（执行在 cra-core 隔离运行时）；null = 该角色未装配（编排器跳过）。
  *
  * @param bugHunters BugHunter 视角定义（派发序 = 优先级序，编排器按档位取前 N 个）
  * @param securityReviewer SecurityReviewer（独立 pass，按 chunk 扇出，03§6 v1.2）

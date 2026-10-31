@@ -17,8 +17,7 @@ public final class SpecialistReviewers {
   /** TestReviewer 定义（测试缺口，category=test）。 */
   public static final class TestReviewer implements SubAgent<ReviewAgentInput> {
 
-    /** 预算（03§6 TestReviewer 行）。 */
-    // v1.3.2：输出 1k→2k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
+    // v1.3.2/ADR-0015：输出 1k→2k→4k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
     // M3 实测 90 观测中 11 次输出预算击穿（12%）导致该角色零产出
     /** 默认输入预算（03§6 TestReviewer 行；agents.budget.test-reviewer.input-tokens 可覆盖）。 */
     public static final long DEFAULT_INPUT_TOKENS = 16_000;
@@ -64,7 +63,8 @@ public final class SpecialistReviewers {
                   input.reviewPolicySection().isBlank()
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
-      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+      return TemplateSupport.briefOf(
+          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
     }
 
     @Override
@@ -118,7 +118,8 @@ public final class SpecialistReviewers {
                   input.reviewPolicySection().isBlank()
                       ? "（本仓库未配置 REVIEW.md 评审策略）"
                       : input.reviewPolicySection()));
-      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+      return TemplateSupport.briefOf(
+          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
     }
 
     @Override
@@ -186,7 +187,8 @@ public final class SpecialistReviewers {
                       : input.reviewPolicySection(),
                   "scoped_paths_note",
                   TemplateSupport.scopedPathsNote(input.scopedPaths())));
-      return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+      return TemplateSupport.briefOf(
+          templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
     }
 
     @Override
