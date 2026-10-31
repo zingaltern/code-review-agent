@@ -6,7 +6,7 @@ public interface AttestationStore {
   /**
    * 记录一次签发。
    *
-   * @param record 签发记录
+   * @param attestation 签发记录
    */
-  void record(AttestationRecord record);
+  void recordIssued(AttestationRecord attestation);
 }

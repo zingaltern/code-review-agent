@@ -47,7 +47,7 @@ public record SymbolIndexOptions(
     }
     includePatterns = Set.copyOf(includePatterns == null ? Set.of() : includePatterns);
     excludePatterns = Set.copyOf(excludePatterns == null ? Set.of() : excludePatterns);
-    overLimitPolicy = Objects.requireNonNull(overLimitPolicy, "overLimitPolicy");
+    Objects.requireNonNull(overLimitPolicy, "overLimitPolicy");
   }
 
   /**

@@ -119,7 +119,6 @@ final class CrossFileSliceAssembler {
       long importTokens = TokenMath.estimateTokens(importSection.text());
       if (used + importTokens + FOOTER_RESERVE <= budgetTokens) {
         body.append(importSection.text());
-        used += importTokens;
         renderedPaths.addAll(importSection.paths());
       }
     }

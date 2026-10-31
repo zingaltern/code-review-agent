@@ -56,29 +56,34 @@ public final class PathGlobs {
    */
   public static Pattern compile(String glob) {
     StringBuilder regex = new StringBuilder("^");
-    for (int i = 0; i < glob.length(); i++) {
+    int i = 0;
+    while (i < glob.length()) {
       char c = glob.charAt(i);
       if (c == '*') {
         if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
           if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
             // `**/` 匹配零或多级目录：**/foo 命中根级 foo，a/**/b 命中 a/b 与 a/x/y/b
             regex.append("(?:.*/)?");
-            i += 2;
+            i += 3;
           } else {
             regex.append(".*");
-            i++;
+            i += 2;
           }
         } else {
           regex.append("[^/]*");
+          i++;
         }
       } else if (c == '?') {
         // 单段通配（不跨 /）：采纳 jgit 适配器的更严语义（ADR-0016），非字面量 '?'
         regex.append("[^/]");
+        i++;
       } else if (c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}'
           || c == '\\' || c == '^' || c == '$' || c == '+' || c == '|') {
         regex.append('\\').append(c);
+        i++;
       } else {
         regex.append(c);
+        i++;
       }
     }
     return Pattern.compile(regex.append('$').toString());

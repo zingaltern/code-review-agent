@@ -1,6 +1,7 @@
 package org.cra.archtest;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -265,10 +266,9 @@ class ArchitectureRulesTest {
     // 防"0 类空转绿灯"（10§5 同源问题）：reactor 内模块类以 target/classes 目录入 classpath，
     // 单模块构建时以本地仓库 jar 入 classpath——两种形态都必须导入到 org.cra 类。
     com.tngtech.archunit.core.domain.JavaClasses classes = importedClasses();
-    if (classes.size() < 10) {
-      throw new AssertionError(
-          "org.cra 类视图只有 " + classes.size() + " 个类，架构规则将在空集上空转；" + "请从仓库根执行 mvn verify（00§4 自检口径）");
-    }
+    assertTrue(
+        classes.size() >= 10,
+        "org.cra 类视图只有 " + classes.size() + " 个类，架构规则将在空集上空转；" + "请从仓库根执行 mvn verify（00§4 自检口径）");
   }
 
   private static com.tngtech.archunit.core.domain.JavaClasses importedClasses() {

@@ -38,7 +38,7 @@ public final class SignoffAdvisor {
   private static final Pattern FLAG_LINE =
       Pattern.compile(
           "(?i)(?:^|[._-])(?:feature|flags?|toggle|enabled|disabled)(?:[._-]|\\s*[:=])"
-              + "|^[A-Za-z0-9_.-]+\\s*:\\s*(?:true|false)$");
+              + "|^[a-z0-9_.-]+\\s*:\\s*(?:true|false)$");
 
   private static final int RULE_VERSION = 1;
 

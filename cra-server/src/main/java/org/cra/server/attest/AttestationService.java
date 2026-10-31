@@ -125,7 +125,7 @@ public final class AttestationService {
             tier,
             issuedAt.toString(),
             attestationId);
-    attestationStore.record(
+    attestationStore.recordIssued(
         new AttestationRecord(
             attestationId,
             reportSha256,

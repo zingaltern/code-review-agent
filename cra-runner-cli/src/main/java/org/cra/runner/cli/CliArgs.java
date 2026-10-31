@@ -199,19 +199,22 @@ final class CliArgs {
     boolean securityBlock = false;
     boolean local = false;
     boolean push = false;
-    for (int i = 0; i < args.length; i++) {
+    int i = 0;
+    while (i < args.length) {
       String arg = args[i];
       if (VALUE_FLAGS.contains(arg)) {
         if (i + 1 >= args.length) {
           throw new CraConfigException("参数缺值: " + arg);
         }
-        named.put(arg, args[++i]);
+        named.put(arg, args[i + 1]);
+        i += 2;
         continue;
       }
       TriStateMatch triState = matchTriState(arg);
       if (triState != null) {
         triSeen.add(triState.flag().flag());
         triValues.put(triState.flag().flag(), triState.value());
+        i++;
         continue;
       }
       switch (arg) {
@@ -220,6 +223,7 @@ final class CliArgs {
         case "--push" -> push = true;
         default -> throw unknownArg(arg);
       }
+      i++;
     }
     return new Scan(named, triValues, triSeen, securityBlock, local, push);
   }
@@ -262,21 +266,14 @@ final class CliArgs {
       String prEnv = gitlab ? env.get("CI_MERGE_REQUEST_IID") : env.get("PR_NUMBER");
       pr =
           local ? parseIntOrDefault(named.get("--pr"), 0) : parsePr(required(named, "--pr", prEnv));
-      base =
-          named.containsKey("--base") || !local
-              ? required(
-                  named,
-                  "--base",
-                  gitlab ? env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA") : env.get("BASE_SHA"))
-              : "main";
+      String baseEnv = gitlab ? env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA") : env.get("BASE_SHA");
+      base = named.containsKey("--base") || !local ? required(named, "--base", baseEnv) : "main";
     }
     // 本地模式 head 可省（= HEAD）；CI 必填
     String head = PlatformArgs.blankToNull(named.get("--head"));
     if (head == null) {
-      head =
-          local
-              ? null
-              : required(named, "--head", gitlab ? env.get("CI_COMMIT_SHA") : env.get("HEAD_SHA"));
+      String headEnv = gitlab ? env.get("CI_COMMIT_SHA") : env.get("HEAD_SHA");
+      head = local ? null : required(named, "--head", headEnv);
     }
     String depth = PlatformArgs.depthCheck(named.getOrDefault("--depth", "standard"));
     // token 解析（R5 共享）：GitLab 拒收 --token；本地形态与平台无关，不读取任何远端 token

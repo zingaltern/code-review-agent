@@ -94,7 +94,7 @@ public final class DefaultContextAssembler implements ContextAssembler {
     for (DiffFile file : input.files()) {
       FileContent content = input.headFiles().get(file.path());
       List<String> lines = textLines(content);
-      if (lines == null) {
+      if (lines.isEmpty()) {
         skippedFiles.add(file.path() + "（无 head 文件内容：" + describe(file) + "）");
         continue;
       }
@@ -129,7 +129,7 @@ public final class DefaultContextAssembler implements ContextAssembler {
 
   private static List<String> textLines(FileContent content) {
     if (content == null || content.binary() || content.text() == null) {
-      return null;
+      return List.of();
     }
     String text = content.text();
     // 文件末尾换行产生的幻影空行不参与展示（finding.line 直接索引原文行，指纹锚行语义不受影响）

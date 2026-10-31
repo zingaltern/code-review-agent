@@ -117,27 +117,33 @@ public final class CoreReviewExecutor implements ReviewExecutor {
             depth,
             dryRun,
             false);
-    LOG.info(
-        "review 开始: delivery={} repo={} pr={} head={} depth={}",
-        job.deliveryId(),
-        job.repoKey(),
-        job.prNumber(),
-        job.headSha(),
-        depth.name().toLowerCase(Locale.ROOT));
+    if (LOG.isInfoEnabled()) {
+      LOG.info(
+          "review 开始: delivery={} repo={} pr={} head={} depth={}",
+          job.deliveryId(),
+          job.repoKey(),
+          job.prNumber(),
+          job.headSha(),
+          depth.name().toLowerCase(Locale.ROOT));
+    }
     ReviewResult result = orchestrator.run(request);
-    LOG.info(
-        "review 结束: delivery={} repo={} pr={} run={} status={} findings={}",
-        job.deliveryId(),
-        job.repoKey(),
-        job.prNumber(),
-        result.runId(),
-        result.status(),
-        result.stats().findingsPublished());
+    if (LOG.isInfoEnabled()) {
+      LOG.info(
+          "review 结束: delivery={} repo={} pr={} run={} status={} findings={}",
+          job.deliveryId(),
+          job.repoKey(),
+          job.prNumber(),
+          result.runId(),
+          result.status(),
+          result.stats().findingsPublished());
+    }
     return result;
   }
 
   private Orchestrator newOrchestrator(ReviewJob job) {
-    LOG.info("为仓库创建 orchestrator: repo={}（PG 账本实例按仓库绑定）", job.repoKey());
+    if (LOG.isInfoEnabled()) {
+      LOG.info("为仓库创建 orchestrator: repo={}（PG 账本实例按仓库绑定）", job.repoKey());
+    }
     return CoreAssembly.createOrchestrator(
         adapter,
         StoreAssembly.createPostgresLedger(job.repoOwner(), job.repoName(), dataSource),

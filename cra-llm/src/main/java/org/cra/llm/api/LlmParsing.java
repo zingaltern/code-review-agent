@@ -39,7 +39,7 @@ public final class LlmParsing {
    */
   public static String normalizeGitLabApiBase(String raw, String fallback) {
     String value = raw == null || raw.isBlank() ? fallback : raw.strip();
-    String base = value.replaceAll("/+$", "");
+    String base = value.replaceAll("/++$", "");
     if (base.endsWith("/api/v4")) {
       return base;
     }

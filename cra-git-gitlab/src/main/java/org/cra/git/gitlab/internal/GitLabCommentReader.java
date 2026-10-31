@@ -329,10 +329,14 @@ final class GitLabCommentReader implements CommentSource {
             getPagedArray(
                 repo, "/merge_requests/" + prNumber + "/notes/" + noteId + "/award_emoji")) {
           String name = award.path("name").asText("");
-          String content =
-              "thumbsup".equals(name)
-                  ? DispositionSignal.REACTION_UP
-                  : "thumbsdown".equals(name) ? DispositionSignal.REACTION_DOWN : null;
+          String content;
+          if ("thumbsup".equals(name)) {
+            content = DispositionSignal.REACTION_UP;
+          } else if ("thumbsdown".equals(name)) {
+            content = DispositionSignal.REACTION_DOWN;
+          } else {
+            content = null;
+          }
           if (content == null) {
             continue;
           }

@@ -1,5 +1,6 @@
 package org.cra.server.history;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -201,10 +202,7 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     for (int attemptNo = 1; attemptNo <= settings.maxAttempts(); attemptNo++) {
       try {
         return attempt.run();
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new CollectFailure(operation + " 被中断", e);
-      } catch (Exception e) {
+      } catch (IOException | RuntimeException e) {
         last = e;
         if (attemptNo < settings.maxAttempts()) {
           warnings.add(
@@ -245,9 +243,9 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
      * 执行。
      *
      * @return 结果
-     * @throws Exception 任意失败（由重试器收敛）
+     * @throws IOException 来源读取失败（重试动作的受检异常仅此一种，由重试器收敛）
      */
-    T run() throws Exception;
+    T run() throws IOException;
   }
 
   /** 重试耗尽/中断。 */

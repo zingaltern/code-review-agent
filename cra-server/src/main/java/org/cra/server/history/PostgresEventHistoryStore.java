@@ -9,7 +9,6 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -26,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 /**
  * PostgreSQL 事件史存储（M4f-full，ADR-0012；05§1.6 的 {@code product_event} + 水位表）。
@@ -61,12 +61,14 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final JdbcTemplate jdbc;
+  private final NamedParameterJdbcTemplate namedJdbc;
 
   /**
    * @param dataSource PG 连接池（与 M4b 账本共用）
    */
   public PostgresEventHistoryStore(DataSource dataSource) {
     this.jdbc = new JdbcTemplate(dataSource);
+    this.namedJdbc = new NamedParameterJdbcTemplate(jdbc);
   }
 
   @Override
@@ -183,9 +185,8 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       if (i > 0) {
         sql.append(" OR ");
       }
-      sql.append(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(commit_refs) AS c(v)"
-              + " WHERE lower(c.v) LIKE lower(?) || '%' OR lower(?) LIKE lower(c.v) || '%')");
+      sql.append("EXISTS (SELECT 1 FROM jsonb_array_elements_text(commit_refs) AS c(v)");
+      sql.append(" WHERE lower(c.v) LIKE lower(?) || '%' OR lower(?) LIKE lower(c.v) || '%')");
       args.add(commitRefs.get(i));
       args.add(commitRefs.get(i));
     }
@@ -202,9 +203,8 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
         sql.append(" OR ");
       }
       // 目录前缀按路径段边界匹配（ADR-0012 §2.2）：不用 LIKE——事件路径中的 `_`/`%` 会被当通配符误命中
-      sql.append(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(paths) AS p(v)"
-              + " WHERE ? = p.v OR substr(?, 1, char_length(p.v) + 1) = p.v || '/')");
+      sql.append("EXISTS (SELECT 1 FROM jsonb_array_elements_text(paths) AS p(v)");
+      sql.append(" WHERE ? = p.v OR substr(?, 1, char_length(p.v) + 1) = p.v || '/')");
       args.add(paths.get(i));
       args.add(paths.get(i));
     }
@@ -241,17 +241,13 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       List<String> ids = entry.getValue();
       for (int start = 0; start < ids.size(); start += IN_CHUNK) {
         List<String> chunk = ids.subList(start, Math.min(start + IN_CHUNK, ids.size()));
-        String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
-        List<Object> args = new ArrayList<>();
-        args.add(entry.getKey());
-        args.addAll(chunk);
+        // SQL 文本无动态拼接：IN 列表占位由 NamedParameterJdbcTemplate 按集合大小展开，
+        // 仓库名与事件 id 全部走绑定参数，用户输入不直达 SQL 文本
         List<String> existing =
-            jdbc.queryForList(
-                "SELECT event_id FROM product_event WHERE repo = ? AND event_id IN ("
-                    + placeholders
-                    + ")",
-                String.class,
-                args.toArray());
+            namedJdbc.queryForList(
+                "SELECT event_id FROM product_event WHERE repo = :repo AND event_id IN (:ids)",
+                Map.of("repo", entry.getKey(), "ids", chunk),
+                String.class);
         existing.forEach(id -> found.add(entry.getKey() + "\u0000" + id));
       }
     }

@@ -113,7 +113,7 @@ public record SignoffAdvice(
    * @return 恒 false
    */
   public boolean approval() {
-    return false;
+    return AGENT_IS_APPROVER;
   }
 
   /**

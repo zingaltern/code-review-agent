@@ -201,8 +201,7 @@ class ReviewStageTest {
   void standardDepthDispatchesTwoPerspectivesPerChunk() {
     ReviewStageScriptedGateway gateway =
         new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
-    ReviewStage.StageOutcome outcome =
-        runStage(stubCrew(), gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
+    runStage(stubCrew(), gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
 
     assertThat(gateway.callers())
         .containsExactlyInAnyOrder("bug-hunter/dataflow", "bug-hunter/boundary");

@@ -146,7 +146,7 @@ public final class DefaultLlmGateway implements LlmGateway {
       List<String> attemptFailures)
       throws InterruptedException {
     // 尾斜杠归一只做一次，URL 拼接与 RPM 物理端点标识共用同一形态（避免仅差尾斜杠的配置分窗）
-    String base = endpoint.baseUrl().replaceAll("/+$", "");
+    String base = endpoint.baseUrl().replaceAll("/++$", "");
     String url = base + "/chat/completions";
     String body =
         OpenAiCodec.encodeRequest(

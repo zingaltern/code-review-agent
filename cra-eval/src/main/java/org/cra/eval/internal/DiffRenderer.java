@@ -52,7 +52,7 @@ final class DiffRenderer {
         sb.append('\n');
       }
     }
-    if (sb.length() == 0) {
+    if (sb.isEmpty()) {
       throw new CraConfigException("compare 结果为空，无法生成 badcase diff.patch");
     }
     return sb.toString();

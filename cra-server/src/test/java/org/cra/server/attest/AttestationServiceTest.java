@@ -20,8 +20,8 @@ class AttestationServiceTest {
     private final List<AttestationRecord> records = new ArrayList<>();
 
     @Override
-    public void record(AttestationRecord record) {
-      records.add(record);
+    public void recordIssued(AttestationRecord attestation) {
+      records.add(attestation);
     }
   }
 

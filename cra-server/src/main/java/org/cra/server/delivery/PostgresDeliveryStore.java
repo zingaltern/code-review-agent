@@ -32,26 +32,26 @@ public final class PostgresDeliveryStore implements DeliveryStore {
   }
 
   @Override
-  public boolean claim(DeliveryRecord record) {
+  public boolean claim(DeliveryRecord delivery) {
     String sql =
         "INSERT INTO webhook_delivery(delivery_id, repo, pr_number, head_sha, event_action, status,"
             + " run_id, detail, received_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)"
             + " ON CONFLICT (delivery_id) DO NOTHING";
     try (Connection conn = dataSource.getConnection();
         PreparedStatement ps = conn.prepareStatement(sql)) {
-      ps.setString(1, record.deliveryId());
-      ps.setString(2, record.repo());
-      ps.setInt(3, record.prNumber());
-      ps.setString(4, record.headSha());
-      ps.setString(5, record.eventAction());
-      ps.setString(6, record.status());
-      ps.setString(7, record.runId());
-      ps.setString(8, record.detail());
-      ps.setTimestamp(9, Timestamp.from(record.receivedAt()));
-      ps.setTimestamp(10, Timestamp.from(record.updatedAt()));
+      ps.setString(1, delivery.deliveryId());
+      ps.setString(2, delivery.repo());
+      ps.setInt(3, delivery.prNumber());
+      ps.setString(4, delivery.headSha());
+      ps.setString(5, delivery.eventAction());
+      ps.setString(6, delivery.status());
+      ps.setString(7, delivery.runId());
+      ps.setString(8, delivery.detail());
+      ps.setTimestamp(9, Timestamp.from(delivery.receivedAt()));
+      ps.setTimestamp(10, Timestamp.from(delivery.updatedAt()));
       return ps.executeUpdate() == 1;
     } catch (SQLException e) {
-      throw new CraLedgerException("delivery claim 失败: " + record.deliveryId(), e);
+      throw new CraLedgerException("delivery claim 失败: " + delivery.deliveryId(), e);
     }
   }
 

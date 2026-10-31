@@ -46,26 +46,34 @@ public final class ContextCitation {
   /** 嗅探检查段名。 */
   public static final String SNIFF_TESTS = "Sniff tests";
 
+  // S8786/S5843：\s 用占有量词（后续原子均不匹配空白，回溯不可能产生新匹配，语言不变）；
+  // \p{XDigit} 在 CASE_INSENSITIVE 下与 [0-9a-f] 等价（均匹配 0-9a-fA-F），且不引入字符类复杂度；
+  // 尾随 (?![0-9a-f]) 防止超长 hex 串被截断匹配（评审跟进，合并自 context-common 审计）。
   private static final Pattern COMMIT_REF =
       Pattern.compile(
-          "(?i)\\bcommit\\s*[:：=]?\\s*([0-9a-f]{7,40})(?![0-9a-f])"
-              + "(?:\\s+(?:path|file)\\s*[:：=]?\\s*([^\\s,;，；()（）\\[\\]]+))?");
+          "\\bcommit\\s*+[:：=]?\\s*+(\\p{XDigit}{7,40})(?![0-9a-f])"
+              + "(?:\\s++(?:path|file)\\s*+[:：=]?\\s*+([^\\s,;，；()（）\\[\\]]+))?",
+          Pattern.CASE_INSENSITIVE);
 
   private static final Pattern BARE_SHA = Pattern.compile("\\b[0-9a-f]{7,40}\\b");
 
-  /** 事件引用（行首或列表项；id 字符集与 ProductEvent.EVENT_ID_PATTERN 一致）。 */
+  /**
+   * 事件引用（行首或列表项；id 字符集与 ProductEvent.EVENT_ID_PATTERN 一致：{@code \p{Alnum}} ≡ {@code [A-Za-z0-9]}，
+   * {@code [\p{Alnum}._:/#-]} ≡ {@code [A-Za-z0-9._:#/-]}）。S8786：\s 与 {0,199} 用占有量词（回溯不可产生新匹配）；
+   * S5869：(?i) 下 A-Z 与 a-z 视为相交，改用单元素 {@code \p{Alnum}} 消除重复。
+   */
   private static final Pattern EVENT_REF =
       Pattern.compile(
-          "(?im)^\\s*(?:[-*]\\s*)?event\\s*[:：=]?\\s*([A-Za-z0-9][A-Za-z0-9._:#/-]{0,199})"
-              + "(?![A-Za-z0-9._:#/-])");
+          "(?im)^\\s*+(?:[-*]\\s*+)?event\\s*+[:：=]?\\s*+(\\p{Alnum}[\\p{Alnum}._:/#-]{0,199}+)"
+              + "(?![\\p{Alnum}._:/#-])");
 
   /** 矛盾来源块标题（事件引用只在块内解析，避免正文里 "event loop" 之类误命中）。 */
   private static final String CITATION_HEADER = "矛盾来源";
 
   private static final Pattern REVIEW_MD_REF =
       Pattern.compile(
-          "(?i)REVIEW\\.md\\s*(?:§|#)?\\s*(known incidents|product context|sniff tests)"
-              + "(?:\\s*[:：]\\s*([^\\n]*))?");
+          "(?i)REVIEW\\.md\\s*+[§#]?\\s*+(known incidents|product context|sniff tests)"
+              + "(?:\\s*+[:：]\\s*+([^\\n]*))?");
 
   private ContextCitation() {}
 
