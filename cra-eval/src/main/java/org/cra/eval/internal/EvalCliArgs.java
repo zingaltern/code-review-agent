@@ -173,7 +173,8 @@ public final class EvalCliArgs {
       case "report" -> ReportArgsParser.parse(options, env);
       case "badcase" -> BadcaseArgsParser.parse(options, env);
       default ->
-          throw new CraConfigException("未知子命令: " + options.subcommand() + "；" + EvalUsage.text());
+          throw new CraConfigException(
+              "未知子命令: " + options.subcommand() + "；" + EvalUsage.USAGE_TEXT);
     };
   }
 }

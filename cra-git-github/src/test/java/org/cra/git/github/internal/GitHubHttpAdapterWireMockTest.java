@@ -365,6 +365,27 @@ class GitHubHttpAdapterWireMockTest {
   }
 
   @Test
+  void listPullRequestsSkipsEntryWithoutHeadShaInsteadOfFailingWholeList() {
+    // 修复前：head.sha 缺失 → asText("") → PullRequestRef 构造 IAE → 整轮列表中止；
+    // 修复后：warn + 跳过该条，不截断后续条目（对齐 GitLab 适配器语义）
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":8,\"state\":\"closed\",\"head\":{},"
+                        + "\"base\":{\"sha\":\"b8\"},"
+                        + "\"updated_at\":\"2026-10-25T00:00:00Z\"},"
+                        + "{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},\"updated_at\":\"2026-10-24T00:00:00Z\"}]")));
+    List<PullRequestRef> pulls =
+        adapter.listPullRequests(REPO, Instant.parse("2026-10-18T00:00:00Z"));
+    assertThat(pulls).hasSize(1);
+    assertThat(pulls.get(0).number()).isEqualTo(7);
+    assertThat(pulls.get(0).headSha()).isEqualTo("h1");
+  }
+
+  @Test
   void fetchDispositionSignalsReadsBotRepliesAndSummaryReactions() {
     wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
     wm.stubFor(

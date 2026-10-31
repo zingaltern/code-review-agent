@@ -8,9 +8,9 @@ public final class AgentsAssembly {
   private AgentsAssembly() {}
 
   /**
-   * 创建 M2 评审班组（T2.2/T2.3）：BugHunter 四视角（派发序 = dataflow → boundary → concurrency → resource，
-   * 视角路由按深度档位由编排器执行，02§4.3）+ 四专角色（Security/Test/Convention/Perf，03§3）+ CrossChecker（M4f-lite，
-   * 启用与档位联动由编排器判定——装配齐备 ≠ 触发，05§5 agents.crosschecker.enabled 默认 false）。
+   * 创建评审班组（M2 四专角色 + M4f-lite CrossChecker，T2.2/T2.3）：BugHunter 四视角（派发序 = dataflow → boundary →
+   * concurrency → resource， 视角路由按深度档位由编排器执行，02§4.3）+ 四专角色（Security/Test/Convention/Perf，03§3）+
+   * CrossChecker（M4f-lite， 启用与档位联动由编排器判定——装配齐备 ≠ 触发，05§5 agents.crosschecker.enabled 默认 false）。
    *
    * @return ReviewCrew
    */

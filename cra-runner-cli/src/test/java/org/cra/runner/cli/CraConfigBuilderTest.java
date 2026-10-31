@@ -53,6 +53,7 @@ class CraConfigBuilderTest {
         .llmModelLight("model-light")
         .fallbackChain("strong,standard")
         .rpm("standard=11")
+        .llmMaxConcurrency(6)
         .crossCheckerEnabled(true)
         .crossCheckerModes("sniff")
         .crossCheckerHistoryWeeks(5)
@@ -86,6 +87,21 @@ class CraConfigBuilderTest {
     assertThat(defaults.semanticContext()).isEqualTo(SemanticContextConfig.defaults());
     assertThat(defaults.includeTestFiles()).isFalse();
     assertThat(defaults.agentBudgets()).isEqualTo(AgentBudgetOverrides.none());
+    assertThat(defaults.llmMaxConcurrency())
+        .isEqualTo(org.cra.llm.api.LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+  }
+
+  @Test
+  void llmMaxConcurrencyIsValidatedInCompactConstructor() {
+    // 唯一校验点：Builder/位置参数/回填任一入口都不得绕过 1..64（0 = 信号量永久阻塞）
+    assertThatThrownBy(() -> CraConfig.builder().llmMaxConcurrency(0).build())
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_LLM_MAX_CONCURRENCY 必须在 1..64");
+    assertThatThrownBy(() -> CraConfig.builder().llmMaxConcurrency(65).build())
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_LLM_MAX_CONCURRENCY 必须在 1..64");
+    assertThat(CraConfig.builder().llmMaxConcurrency(1).build().llmMaxConcurrency()).isEqualTo(1);
+    assertThat(CraConfig.builder().llmMaxConcurrency(64).build().llmMaxConcurrency()).isEqualTo(64);
   }
 
   @Test
@@ -125,7 +141,7 @@ class CraConfigBuilderTest {
         .hasMessageContaining("platform 非法");
   }
 
-  /** 逐项断言（含全部 42 个组件；字符串互异，避免"接错但值相同"漏检）。 */
+  /** 逐项断言（含全部 43 个组件；字符串互异，避免"接错但值相同"漏检）。 */
   private static void assertDistinctComponents(CraConfig c) {
     assertThat(c.repoOwner()).isEqualTo("owner");
     assertThat(c.repoName()).isEqualTo("name");
@@ -157,6 +173,7 @@ class CraConfigBuilderTest {
     assertThat(c.llmModelLight()).isEqualTo("model-light");
     assertThat(c.fallbackChain()).isEqualTo("strong,standard");
     assertThat(c.rpm()).isEqualTo("standard=11");
+    assertThat(c.llmMaxConcurrency()).isEqualTo(6);
     assertThat(c.crossCheckerEnabled()).isTrue();
     assertThat(c.crossCheckerModes()).isEqualTo("sniff");
     assertThat(c.crossCheckerHistoryWeeks()).isEqualTo(5);

@@ -7,9 +7,8 @@ import org.cra.agents.internal.TemplateLoader;
 import org.junit.jupiter.api.Test;
 
 /**
- * M2 骨架占位模板冒烟测试（04§4.2 balanced-review / 04§4 目录树 refute-oriented / 03§4.4 judge）：
- * 模板可装载、占位符齐全、UNTRUSTED 定界与反锚定约束在位、版本哈希稳定。 消费者（VerifierAgent T2.4 / JudgeAgent
- * T2.6）由验证线落地，本测试保证模板先于实现可用。
+ * 模板冒烟测试（04§4.2 balanced-review / 04§4 目录树 refute-oriented / 03§4.4 judge）： 模板可装载、占位符齐全、UNTRUSTED
+ * 定界与反锚定约束在位、版本哈希稳定。balanced-review/arbitrate 已接定义； refute-oriented 保留 M3 占位（当前无生产 Definition 消费）。
  */
 class VerifierJudgeTemplatesTest {
 
@@ -33,7 +32,7 @@ class VerifierJudgeTemplatesTest {
 
   private static final Map<String, String> JUDGE_VARS =
       Map.of(
-          "case_reason", TemplateSupport.untrusted("仲裁原因"),
+          "case_reason", "仲裁原因",
           "untrusted_case", TemplateSupport.untrusted("finding 全文"),
           "untrusted_verifier", TemplateSupport.untrusted("verdict: CONFIRMED…"),
           "untrusted_context", TemplateSupport.untrusted("case code"),

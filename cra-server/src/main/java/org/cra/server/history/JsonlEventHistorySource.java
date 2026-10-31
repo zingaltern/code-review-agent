@@ -62,9 +62,14 @@ public final class JsonlEventHistorySource implements EventHistorySource {
     this.clock = clock == null ? Clock.systemUTC() : clock;
   }
 
+  /**
+   * 水位键 = 去查询串的位置：预签名 URL 的查询串是临时凭证（会进入 checkpoint 表并随轮换漂移），不能当身份；文件路径原样保留（`?` 是合法文件名字符）。
+   *
+   * @return 来源标识
+   */
   @Override
   public String id() {
-    return location;
+    return baseLocation();
   }
 
   @Override
@@ -157,14 +162,14 @@ public final class JsonlEventHistorySource implements EventHistorySource {
       int status = response.statusCode();
       if (status < 200 || status >= 300) {
         response.body().close();
-        throw new IOException("事件源 HTTP " + status + "（" + location + "）");
+        throw new IOException("事件源 HTTP " + status + "（" + displayLocation() + "）");
       }
       try (InputStream in = response.body()) {
         return readLimited(in);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
-      throw new IOException("事件源读取被中断（" + location + "）", e);
+      throw new IOException("事件源读取被中断（" + displayLocation() + "）", e);
     }
   }
 
@@ -176,11 +181,26 @@ public final class JsonlEventHistorySource implements EventHistorySource {
     while ((read = in.read(buffer)) >= 0) {
       total += read;
       if (total > maxBytes) {
-        throw new IOException("事件源超过读取上限 " + maxBytes + " 字节（" + location + "）；请拆分对象或调大上限");
+        throw new IOException(
+            "事件源超过读取上限 " + maxBytes + " 字节（" + displayLocation() + "）；请拆分对象或调大上限");
       }
       out.write(buffer, 0, read);
     }
     return out.toByteArray();
+  }
+
+  /** 日志/异常里的来源展示（查询串可能是预签名凭证，只留脱敏标记）。 */
+  private String displayLocation() {
+    String base = baseLocation();
+    return base.equals(location) ? location : base + "?<redacted>";
+  }
+
+  private String baseLocation() {
+    if (!location.startsWith("http://") && !location.startsWith("https://")) {
+      return location;
+    }
+    int query = location.indexOf('?');
+    return query < 0 ? location : location.substring(0, query);
   }
 
   private static String requiredText(JsonNode node, String field) {

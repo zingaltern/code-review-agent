@@ -31,7 +31,8 @@ final class PlatformArgs {
    */
   static String platform(Map<String, String> named, Map<String, String> env) {
     String raw = firstNonBlank(named.get("--platform"), env.get("CRA_GIT_PLATFORM"), GITHUB);
-    String platform = raw.strip().toLowerCase(Locale.ROOT);
+    // 兜底候选是常量 GITHUB，运行期 raw 不会为 null；守卫仅为显式化可空契约（缺省行为不变）
+    String platform = (raw == null ? GITHUB : raw).strip().toLowerCase(Locale.ROOT);
     if (!GITHUB.equals(platform) && !GITLAB.equals(platform)) {
       throw new CraConfigException("--platform / CRA_GIT_PLATFORM 非法: " + raw + "（github|gitlab）");
     }
@@ -340,5 +341,147 @@ final class PlatformArgs {
     } catch (NumberFormatException e) {
       throw new CraConfigException(key + " 必须为正整数: " + value);
     }
+  }
+
+  /**
+   * 布尔解析（R5 共享）：空/空白 = 默认值；true/false（另接受 1/0、yes/no，大小写不敏感）， 其余拒绝（fail fast，与 cra-server
+   * 环境变量绑定同语义）。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 布尔值
+   */
+  static boolean bool(String key, String value, boolean defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    String normalized = value.strip().toLowerCase(Locale.ROOT);
+    if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+      return true;
+    }
+    if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+      return false;
+    }
+    throw new CraConfigException(key + " 必须为布尔值（true|false）: " + value);
+  }
+
+  /** 策略值来源（flag 优先、env 次之）：value 为 null 表示未配置；key 是实际来源键名，错误文案按来源保留 flag/env 名。 */
+  record Sourced(String value, String key) {}
+
+  /**
+   * review 策略取值（R5 共享：CLI 参数优先、环境变量次之；空白 env 等同未设置）。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @param flag 旗标名
+   * @param envKey 环境变量键（05§5 review.* 策略组，review/sweep/server 共用）
+   * @return 原始值 + 来源键名
+   */
+  static Sourced policyValue(
+      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
+    String flagValue = named.get(flag);
+    if (flagValue != null) {
+      return new Sourced(flagValue, flag);
+    }
+    return new Sourced(blankToNull(env.get(envKey)), envKey);
+  }
+
+  /** 降级阈值对（0 &lt; first &lt; second &lt;= 1）。 */
+  record DegradeAt(double first, double second) {}
+
+  /**
+   * 降级阈值解析（R5 共享）：null/空白 = 默认值；形如 {@code 0.70,0.85}（段内空白忽略； 尾逗号按空段丢弃，与 fallback-chain/RPM
+   * 的“空段跳过”约定一致；段数 ≠2 拒绝）。与 cra-server 的 {@code ServerConfig.parseDegradeAt} 逐条同语义。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 阈值对
+   */
+  static DegradeAt degradeAt(String key, String value, DegradeAt defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    String[] parts = value.split(",");
+    if (parts.length != 2) {
+      throw new CraConfigException(key + " 形如 0.70,0.85: " + value);
+    }
+    try {
+      double first = Double.parseDouble(parts[0].strip());
+      double second = Double.parseDouble(parts[1].strip());
+      if (!Double.isFinite(first)
+          || !Double.isFinite(second)
+          || first <= 0
+          || second <= first
+          || second > 1.0) {
+        throw new NumberFormatException();
+      }
+      return new DegradeAt(first, second);
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 阈值非法（0 < first < second <= 1）: " + value);
+    }
+  }
+
+  /**
+   * nit 预算解析（R5 共享）：0 = 禁止 nit，是合法配置（04§3.1）；null/空白 = 默认值。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 非负整数
+   */
+  static int nitBudget(String key, String value, int defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为非负整数（0 = 禁止）: " + value);
+    }
+  }
+
+  /**
+   * 百分比解析（R5 共享）：0–100（0 = 关闭抽查保险丝，与 PipelineOptions/SpotCheckFuse 契约一致）。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 百分比
+   */
+  static int percent(String key, String value, int defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 0 || parsed > 100) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须在 [0,100]: " + value);
+    }
+  }
+
+  /**
+   * UNVERIFIED 发布策略解析（R5 共享）：never|labeled；null/空白 = 默认值。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return never 或 labeled
+   */
+  static String publishUnverified(String key, String value, String defaultValue) {
+    String resolved = value == null || value.isBlank() ? defaultValue : value.strip();
+    if (!"never".equals(resolved) && !"labeled".equals(resolved)) {
+      throw new CraConfigException(key + " 非法: " + resolved + "（never|labeled）");
+    }
+    return resolved;
   }
 }

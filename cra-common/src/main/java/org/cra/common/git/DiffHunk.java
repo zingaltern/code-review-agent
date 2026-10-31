@@ -17,7 +17,7 @@ import org.cra.common.finding.Side;
 public record DiffHunk(int oldStart, int oldLines, int newStart, int newLines) {
 
   private static final Pattern HUNK_HEADER =
-      Pattern.compile("^@@ -(\\d+)(?:,(\\d+))? \\+(\\d+)(?:,(\\d+))? @@.*");
+      Pattern.compile("^@@ -(\\d{1,9})(?:,(\\d{1,9}))? \\+(\\d{1,9})(?:,(\\d{1,9}))? @@.*");
 
   public DiffHunk {
     if (oldStart < 0 || oldLines < 0 || newStart < 0 || newLines < 0) {
@@ -28,7 +28,7 @@ public record DiffHunk(int oldStart, int oldLines, int newStart, int newLines) {
 
   /**
    * 从 unified diff patch 全文解析 hunk 区间（平台无关：GitHub compare 与本地 jgit DiffFormatter 产出的 patch 同构）。行首非
-   * hunk 头的行一律忽略。
+   * hunk 头的行一律忽略；行号上限 9 位（≥10 亿行的伪头按非法行忽略——patch 属不可信输入 04§3.3，超长数字串不允许炸出 NumberFormatException）。
    *
    * @param patch patch 全文（null 视为空）
    * @return hunk 区间列表（按出现序）

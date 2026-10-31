@@ -224,12 +224,12 @@ public final class TarReader {
       while (contentEnd > space + 1 && payload[contentEnd - 1] == '\n') {
         contentEnd--;
       }
-      String record =
+      String recordText =
           new String(payload, space + 1, contentEnd - (space + 1), StandardCharsets.UTF_8);
-      int eq = record.indexOf('=');
+      int eq = recordText.indexOf('=');
       if (eq > 0) {
-        String key = record.substring(0, eq);
-        String value = record.substring(eq + 1);
+        String key = recordText.substring(0, eq);
+        String value = recordText.substring(eq + 1);
         if ("path".equals(key)) {
           path = value;
         } else if ("size".equals(key)) {

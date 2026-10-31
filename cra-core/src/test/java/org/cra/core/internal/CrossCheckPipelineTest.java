@@ -226,7 +226,8 @@ class CrossCheckPipelineTest {
         .contains("\"modes\":[\"assumption\",\"sniff\"]")
         .contains("\"cross-checker\":\"cross-checker@");
 
-    // 增量实测：CrossChecker 单次输入估算（03§6 预算 ≤16k；04§2.2 文档算术 ≈14k in）
+    // 增量实测：CrossChecker 单次输入估算（03§6 预算 ≤32k，2026-10-31 翻倍；04§2.2 文档算术 ≈14k in；
+    // 断言沿用 ≤16k 作为更严的算术锚，不随默认预算放宽）
     long inputTokens = TokenMath.estimateTokens(crossCall.systemPrompt() + crossPrompt);
     System.out.println(
         "MEASURED CrossChecker input tokens (fixture) = "
@@ -372,7 +373,7 @@ class CrossCheckPipelineTest {
   @Test
   void standardScaleInputStaysWithinBudgetAndMatchesDocArithmetic() {
     // 04§2.2 增量算术复核：10 文件 × 200 行 diff + 8 周变更史 + 产品段，按 03§6 上限裁剪后
-    // CrossChecker 单次输入应落在 ≈14k（文档算术）且 ≤16k（预算行）
+    // CrossChecker 单次输入应落在 ≈14k（文档算术）且 ≤16k（更严锚；预算行 32k，2026-10-31 翻倍）
     java.util.List<org.cra.common.git.DiffFile> files = new java.util.ArrayList<>();
     for (int i = 0; i < 10; i++) {
       StringBuilder patch = new StringBuilder("@@ -1,1 +1,200 @@\n");

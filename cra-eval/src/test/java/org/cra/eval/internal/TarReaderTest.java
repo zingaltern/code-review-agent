@@ -230,9 +230,9 @@ class TarReaderTest {
     while (String.valueOf(length).length() + bodyBytes.length != length) {
       length = String.valueOf(length).length() + bodyBytes.length;
     }
-    byte[] record = (length + body).getBytes(StandardCharsets.UTF_8);
-    assertThat(record).hasSize(length);
-    return record;
+    byte[] recordBytes = (length + body).getBytes(StandardCharsets.UTF_8);
+    assertThat(recordBytes).hasSize(length);
+    return recordBytes;
   }
 
   private static byte[] paxRecords(String[]... pairs) {

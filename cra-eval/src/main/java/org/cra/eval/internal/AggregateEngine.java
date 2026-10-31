@@ -230,12 +230,16 @@ public final class AggregateEngine {
         FixtureMeta.SET_CLEAN.equals(meta.set())
             ? obs.findings().size()
             : Math.max(0, obs.findings().size() - matched);
-    String note =
-        !obs.completed()
-            ? obs.failureReason()
-            : baitHits > 0
-                ? "bait 命中 " + baitHits
-                : !verdict.clean() ? "invariant: " + verdict.violations().get(0) : "";
+    String note;
+    if (!obs.completed()) {
+      note = obs.failureReason();
+    } else if (baitHits > 0) {
+      note = "bait 命中 " + baitHits;
+    } else if (!verdict.clean()) {
+      note = "invariant: " + verdict.violations().get(0);
+    } else {
+      note = "";
+    }
     List<String> findingsBrief =
         obs.findings().stream()
             .map(

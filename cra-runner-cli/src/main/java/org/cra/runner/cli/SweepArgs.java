@@ -6,6 +6,7 @@ import java.util.Set;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
 import org.cra.core.api.PipelineOptions;
+import org.cra.llm.api.LlmParsing;
 
 /**
  * `cra sweep` 参数解析（M4d 夜间存量评审，05§3/§2.5）。
@@ -64,7 +65,35 @@ final class SweepArgs {
             8);
     String modes = PlatformArgs.crosscheckerModes(scan.named(), env);
     String temperature = temperature(scan.named(), env);
+    // CRA_LLM_MAX_CONCURRENCY 与 review 同源（CI 配置面，只走环境变量）
+    int maxConcurrency =
+        LlmParsing.parseMaxConcurrency(
+            PlatformArgs.blankToNull(env.get("CRA_LLM_MAX_CONCURRENCY")),
+            "CRA_LLM_MAX_CONCURRENCY");
+    // 05§5 review.* 策略组（review/sweep/server 共用同一 CRA_REVIEW_* 环境变量；sweep 面向 CI，不新增 flag）
     PipelineOptions defaults = PipelineOptions.defaults();
+    PlatformArgs.DegradeAt degradeAt =
+        PlatformArgs.degradeAt(
+            "CRA_REVIEW_DEGRADE_AT",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_DEGRADE_AT")),
+            new PlatformArgs.DegradeAt(defaults.degradeAtFirst(), defaults.degradeAtSecond()));
+    int largeDiffLines =
+        PlatformArgs.positiveInt(
+            "CRA_REVIEW_LARGE_DIFF_LINES",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_LARGE_DIFF_LINES")),
+            defaults.largeDiffLines());
+    int hardCapLines =
+        PlatformArgs.positiveInt(
+            "CRA_REVIEW_HARD_CAP_LINES",
+            PlatformArgs.blankToNull(env.get("CRA_REVIEW_HARD_CAP_LINES")),
+            defaults.hardCapLines());
+    if (hardCapLines <= largeDiffLines) {
+      throw new CraConfigException(
+          "CRA_REVIEW_HARD_CAP_LINES 必须大于 CRA_REVIEW_LARGE_DIFF_LINES: "
+              + hardCapLines
+              + " <= "
+              + largeDiffLines);
+    }
     CraConfig config =
         CraConfig.builder()
             .repoOwner(ownerRepo.owner())
@@ -84,14 +113,26 @@ final class SweepArgs {
             .llmModel(llm.model())
             .runRoot(scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT))
             .workspace(scan.named().getOrDefault("--workspace", "."))
-            .largeDiffLines(defaults.largeDiffLines())
-            .hardCapLines(defaults.hardCapLines())
-            .nitBudget(defaults.nitBudgetDefault())
+            .largeDiffLines(largeDiffLines)
+            .hardCapLines(hardCapLines)
+            .nitBudget(
+                PlatformArgs.nitBudget(
+                    "CRA_REVIEW_NIT_BUDGET",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_NIT_BUDGET")),
+                    defaults.nitBudgetDefault()))
             .runTotalTokens(defaults.runTotalTokens())
-            .degradeAtFirst(defaults.degradeAtFirst())
-            .degradeAtSecond(defaults.degradeAtSecond())
-            .publishUnverified(defaults.publishUnverified())
-            .spotCheckPercent(defaults.importantRefutedSpotCheckPercent())
+            .degradeAtFirst(degradeAt.first())
+            .degradeAtSecond(degradeAt.second())
+            .publishUnverified(
+                PlatformArgs.publishUnverified(
+                    "CRA_REVIEW_PUBLISH_UNVERIFIED",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_PUBLISH_UNVERIFIED")),
+                    defaults.publishUnverified()))
+            .spotCheckPercent(
+                PlatformArgs.percent(
+                    "CRA_REVIEW_SPOT_CHECK_PERCENT",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_SPOT_CHECK_PERCENT")),
+                    defaults.importantRefutedSpotCheckPercent()))
             .local(false)
             .execCommand(CliArgs.DEFAULT_EXEC)
             .ledgerDb(CraConfig.DEFAULT_LEDGER_DB)
@@ -104,6 +145,7 @@ final class SweepArgs {
             .fallbackChain(
                 PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN))
             .rpm(PlatformArgs.envOr(env, "CRA_LLM_RPM", ""))
+            .llmMaxConcurrency(maxConcurrency)
             .crossCheckerEnabled(scan.crossChecker())
             .crossCheckerModes(modes)
             .crossCheckerHistoryWeeks(historyWeeks)
@@ -116,7 +158,10 @@ final class SweepArgs {
             .semanticContext(SemanticContextConfig.defaults())
             // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
             .includeTestFiles(
-                Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_REVIEW_TESTS", "false")))
+                PlatformArgs.bool(
+                    "CRA_REVIEW_TESTS",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_TESTS")),
+                    defaults.includeTestFiles()))
             .agentBudgets(CliArgs.agentBudgets(scan.named(), env))
             .build();
     return new Parsed(config, since, maxPrs);
@@ -130,23 +175,27 @@ final class SweepArgs {
     boolean dryRun = false;
     boolean crossChecker =
         Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
-    for (int i = 0; i < args.length; i++) {
+    int i = 0;
+    while (i < args.length) {
       String arg = args[i];
       PlatformArgs.TriState dryRunFlag = PlatformArgs.matchTriState(arg, "--dry-run");
       if (dryRunFlag != null) {
         dryRun = dryRunFlag.value();
+        i++;
         continue;
       }
       PlatformArgs.TriState crossCheckerFlag = PlatformArgs.matchTriState(arg, "--crosschecker");
       if (crossCheckerFlag != null) {
         crossChecker = crossCheckerFlag.value();
+        i++;
         continue;
       }
       if (VALUE_FLAGS.contains(arg)) {
         if (i + 1 >= args.length) {
           throw new CraConfigException("参数缺值: " + arg);
         }
-        named.put(arg, args[++i]);
+        named.put(arg, args[i + 1]);
+        i += 2;
         continue;
       }
       int eq = arg.indexOf('=');

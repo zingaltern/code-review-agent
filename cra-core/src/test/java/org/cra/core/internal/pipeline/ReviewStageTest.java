@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -200,8 +201,7 @@ class ReviewStageTest {
   void standardDepthDispatchesTwoPerspectivesPerChunk() {
     ReviewStageScriptedGateway gateway =
         new ReviewStageScriptedGateway(LlmResponse.ok(FINDINGS_JSON, 10, 10, 1, "m"));
-    ReviewStage.StageOutcome outcome =
-        runStage(stubCrew(), gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
+    runStage(stubCrew(), gateway, Depth.STANDARD, PipelineOptions.defaults(), 1);
 
     assertThat(gateway.callers())
         .containsExactlyInAnyOrder("bug-hunter/dataflow", "bug-hunter/boundary");
@@ -549,6 +549,44 @@ class ReviewStageTest {
         List.of(),
         List.of(),
         List.of());
+  }
+
+  @Test
+  void stageOutcomeDefensiveCopiesKeepSnapshotSemantics() {
+    List<CandidateFinding> findings = new ArrayList<>();
+    findings.add(finding("f_a", "src/Foo.java", 3, FindingCategory.BUG, Severity.NIT));
+    List<String> degradations = new ArrayList<>(List.of("d1"));
+    Map<String, String> templateVersions = new LinkedHashMap<>();
+    templateVersions.put("b", "1");
+    templateVersions.put("a", "2");
+
+    ReviewStage.StageOutcome outcome =
+        new ReviewStage.StageOutcome(
+            findings,
+            1,
+            2,
+            false,
+            null,
+            List.of(),
+            degradations,
+            List.of(),
+            List.of(),
+            false,
+            false,
+            templateVersions);
+
+    // 构造后修改原集合不得影响 record（09§6 不外泄可变引用）
+    findings.clear();
+    degradations.add("d2");
+    templateVersions.put("a", "9");
+
+    assertThat(outcome.findings()).hasSize(1);
+    assertThat(outcome.degradations()).containsExactly("d1");
+    assertThat(outcome.templateVersions()).containsEntry("a", "2");
+    assertThat(outcome.findings()).isUnmodifiable();
+    assertThat(outcome.templateVersions()).isUnmodifiable();
+    // templateVersions 保序：trace template_versions 事件序可观察（不能用 Map.copyOf，会丢插入序）
+    assertThat(outcome.templateVersions().keySet()).containsExactly("b", "a");
   }
 
   private static CandidateFinding finding(

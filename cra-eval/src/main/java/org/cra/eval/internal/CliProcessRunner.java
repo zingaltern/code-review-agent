@@ -24,11 +24,11 @@ public final class CliProcessRunner {
      * @param workDir 工作目录
      * @param stdoutLog stdout 落盘路径
      * @param stderrLog stderr 落盘路径
-     * @return 退出码（超时抛异常）
+     * @return 退出码（超时抛 {@link org.cra.common.exception.CraIntegrationException}）
      */
     int invoke(
         List<String> args, Map<String, String> env, Path workDir, Path stdoutLog, Path stderrLog)
-        throws Exception;
+        throws IOException, InterruptedException;
   }
 
   /** 默认 invoker：java -jar 子进程（超时取系统属性/默认 900s）。 */

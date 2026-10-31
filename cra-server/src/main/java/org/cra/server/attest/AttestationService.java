@@ -95,6 +95,9 @@ public final class AttestationService {
     }
     String commit = text(root, "commit");
     String tier = text(root, "tier");
+    // 信封是行式文本：commit/tier 含换行会破坏字段边界（Envelope 不变量抛 IAE → 500），入口转 400
+    requireSingleLine(commit, "commit");
+    requireSingleLine(tier, "tier");
     if (requireKnownCommit) {
       if (commit.isEmpty()) {
         throw new AttestationRejectedException(409, "报告缺 commit 绑定，拒绝签发");
@@ -122,7 +125,7 @@ public final class AttestationService {
             tier,
             issuedAt.toString(),
             attestationId);
-    attestationStore.record(
+    attestationStore.recordIssued(
         new AttestationRecord(
             attestationId,
             reportSha256,
@@ -146,5 +149,11 @@ public final class AttestationService {
   private static String text(JsonNode root, String field) {
     JsonNode value = root.get(field);
     return value == null || value.isNull() ? "" : value.asText("").strip();
+  }
+
+  private static void requireSingleLine(String value, String field) {
+    if (value.indexOf('\n') >= 0 || value.indexOf('\r') >= 0) {
+      throw new AttestationRejectedException(400, "报告字段 " + field + " 不能含换行");
+    }
   }
 }

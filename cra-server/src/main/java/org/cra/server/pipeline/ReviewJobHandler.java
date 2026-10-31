@@ -36,13 +36,15 @@ public final class ReviewJobHandler implements ReviewQueue.JobHandler {
       ReviewResult result = executor.execute(job);
       if (result.status() == RunStatus.FAILED) {
         deliveryStore.markFailed(job.deliveryId(), result.runId() + " " + result.summaryLine());
-        LOG.warn(
-            "review FAILED: delivery={} repo={} pr={} run={} summary={}",
-            job.deliveryId(),
-            job.repoKey(),
-            job.prNumber(),
-            result.runId(),
-            result.summaryLine());
+        if (LOG.isWarnEnabled()) {
+          LOG.warn(
+              "review FAILED: delivery={} repo={} pr={} run={} summary={}",
+              job.deliveryId(),
+              job.repoKey(),
+              job.prNumber(),
+              result.runId(),
+              result.summaryLine());
+        }
         return;
       }
       deliveryStore.markCompleted(

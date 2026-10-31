@@ -2,6 +2,7 @@ package org.cra.common.git;
 
 import java.util.List;
 import java.util.Objects;
+import org.cra.common.finding.Side;
 
 /**
  * 变更集内单个文件（compare API files[] 条目，02§2 步骤 2）。
@@ -31,7 +32,7 @@ public record DiffFile(
    * @param line 1 基行号
    * @return true 若任一 hunk 命中
    */
-  public boolean containsLine(org.cra.common.finding.Side side, int line) {
+  public boolean containsLine(Side side, int line) {
     return hunks.stream().anyMatch(h -> h.containsLine(side, line));
   }
 }

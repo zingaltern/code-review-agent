@@ -1,5 +1,8 @@
 package org.cra.context.api;
 
+import org.cra.context.internal.DefaultContextAssembler;
+import org.cra.context.internal.DefaultReviewPolicyParser;
+
 /** cra-context 装配工厂（10§4：组合根与 cra-core 只经本工厂触达 internal 实现）。 */
 public final class ContextAssembly {
 
@@ -11,7 +14,7 @@ public final class ContextAssembly {
    * @return ContextAssembler
    */
   public static ContextAssembler createContextAssembler() {
-    return new org.cra.context.internal.DefaultContextAssembler();
+    return new DefaultContextAssembler();
   }
 
   /**
@@ -20,6 +23,6 @@ public final class ContextAssembly {
    * @return ReviewPolicyParser
    */
   public static ReviewPolicyParser createReviewPolicyParser() {
-    return new org.cra.context.internal.DefaultReviewPolicyParser();
+    return new DefaultReviewPolicyParser();
   }
 }

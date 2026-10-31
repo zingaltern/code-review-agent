@@ -17,9 +17,11 @@ import org.cra.core.api.CoreAssembly;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.core.api.SignoffOptions;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmGateway;
 import org.cra.server.config.ServerConfig;
 import org.cra.server.queue.ReviewJob;
@@ -48,8 +50,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
   private final PipelineOptions pipelineOptions;
   private final CrossCheckerOptions crossCheckerOptions;
   private final EventHistoryQuery eventHistoryQuery;
-  private final org.cra.core.api.SemanticContextOptions semanticContextOptions;
-  private final org.cra.git.api.SymbolIndex symbolIndex;
+  private final SemanticContextOptions semanticContextOptions;
+  private final SymbolIndex symbolIndex;
   private final Path runRoot;
   private final Depth depth;
   private final boolean dryRun;
@@ -81,8 +83,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryQuery eventHistoryQuery,
-      org.cra.core.api.SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex,
       ServerConfig config) {
     this.dataSource = dataSource;
     this.adapter = adapter;
@@ -115,36 +117,33 @@ public final class CoreReviewExecutor implements ReviewExecutor {
             depth,
             dryRun,
             false);
-    LOG.info(
-        "review 开始: delivery={} repo={} pr={} head={} depth={}",
-        job.deliveryId(),
-        job.repoKey(),
-        job.prNumber(),
-        job.headSha(),
-        depth.name().toLowerCase(Locale.ROOT));
+    if (LOG.isInfoEnabled()) {
+      LOG.info(
+          "review 开始: delivery={} repo={} pr={} head={} depth={}",
+          job.deliveryId(),
+          job.repoKey(),
+          job.prNumber(),
+          job.headSha(),
+          depth.name().toLowerCase(Locale.ROOT));
+    }
     ReviewResult result = orchestrator.run(request);
-    LOG.info(
-        "review 结束: delivery={} repo={} pr={} run={} status={} findings={}",
-        job.deliveryId(),
-        job.repoKey(),
-        job.prNumber(),
-        result.runId(),
-        result.status(),
-        result.stats().findingsPublished());
+    if (LOG.isInfoEnabled()) {
+      LOG.info(
+          "review 结束: delivery={} repo={} pr={} run={} status={} findings={}",
+          job.deliveryId(),
+          job.repoKey(),
+          job.prNumber(),
+          result.runId(),
+          result.status(),
+          result.stats().findingsPublished());
+    }
     return result;
   }
 
-  /**
-   * 已缓存的仓库数（诊断用）。
-   *
-   * @return 仓库数
-   */
-  public int cachedRepositories() {
-    return orchestrators.size();
-  }
-
   private Orchestrator newOrchestrator(ReviewJob job) {
-    LOG.info("为仓库创建 orchestrator: repo={}（PG 账本实例按仓库绑定）", job.repoKey());
+    if (LOG.isInfoEnabled()) {
+      LOG.info("为仓库创建 orchestrator: repo={}（PG 账本实例按仓库绑定）", job.repoKey());
+    }
     return CoreAssembly.createOrchestrator(
         adapter,
         StoreAssembly.createPostgresLedger(job.repoOwner(), job.repoName(), dataSource),

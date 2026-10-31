@@ -8,10 +8,10 @@ public interface DeliveryStore {
   /**
    * 抢占 delivery（INSERT ... ON CONFLICT DO NOTHING）。
    *
-   * @param record 待登记记录
+   * @param delivery 待登记记录
    * @return true = 首次接收；false = 重复 delivery
    */
-  boolean claim(DeliveryRecord record);
+  boolean claim(DeliveryRecord delivery);
 
   /**
    * 查询 delivery。
@@ -46,7 +46,7 @@ public interface DeliveryStore {
   void markFailed(String deliveryId, String detail);
 
   /**
-   * 释放接收占位（队列满背压时调用，使 GitHub 重投可再次 claim）。
+   * 释放接收占位（队列满背压时调用，使平台重投可再次 claim）。
    *
    * @param deliveryId delivery id
    */

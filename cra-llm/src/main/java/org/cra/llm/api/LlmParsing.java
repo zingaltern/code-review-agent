@@ -5,12 +5,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import org.cra.common.exception.CraConfigException;
@@ -36,7 +39,7 @@ public final class LlmParsing {
    */
   public static String normalizeGitLabApiBase(String raw, String fallback) {
     String value = raw == null || raw.isBlank() ? fallback : raw.strip();
-    String base = value.replaceAll("/+$", "");
+    String base = value.replaceAll("/++$", "");
     if (base.endsWith("/api/v4")) {
       return base;
     }
@@ -55,7 +58,7 @@ public final class LlmParsing {
    * @return 档位列表
    */
   public static List<ModelTier> parseFallbackChain(String value, String errorPrefix) {
-    List<ModelTier> chain = new java.util.ArrayList<>();
+    List<ModelTier> chain = new ArrayList<>();
     if (value == null || value.isBlank()) {
       return chain;
     }
@@ -87,7 +90,7 @@ public final class LlmParsing {
     if (value == null || value.isBlank()) {
       return defaults;
     }
-    Map<ModelTier, Integer> rpm = new java.util.EnumMap<>(ModelTier.class);
+    Map<ModelTier, Integer> rpm = new EnumMap<>(ModelTier.class);
     for (String part : value.split(",")) {
       String entry = part.strip();
       if (entry.isEmpty()) {
@@ -133,6 +136,30 @@ public final class LlmParsing {
       return t;
     } catch (NumberFormatException e) {
       throw new CraConfigException(errorPrefix + " 非法（0.0–2.0）: " + value);
+    }
+  }
+
+  /**
+   * LLM 并发信号量上限解析（05§5 {@code max-concurrency} / {@code CRA_LLM_MAX_CONCURRENCY}；空 = 默认 8）。 有效并发 =
+   * min(配置值, cra-core 线程池宽度)——超过池宽的配置不会提升实际并发（09§6、02§4.5）。
+   *
+   * @param value 原始值（可为 null/空白）
+   * @param errorPrefix 错误文案前缀（调用方 key 名）
+   * @return 1..{@link LlmGatewayConfig#MAX_ALLOWED_CONCURRENCY} 的整数
+   */
+  public static int parseMaxConcurrency(String value, String errorPrefix) {
+    if (value == null || value.isBlank()) {
+      return LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 1 || parsed > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(
+          errorPrefix + " 必须在 1.." + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY + ": " + value);
     }
   }
 
@@ -224,7 +251,7 @@ public final class LlmParsing {
    */
   public static Map<String, String> opencodeExtraHeaders(String baseUrl) {
     if (baseUrl != null && baseUrl.contains("opencode.ai")) {
-      return Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());
+      return Map.of("x-opencode-session", UUID.randomUUID().toString());
     }
     return Map.of();
   }
@@ -241,8 +268,8 @@ public final class LlmParsing {
   }
 
   /**
-   * 三档路由配置装配（T2.9 形态；05§5）：standard 端点为基座，strong/light 缺省继承 standard（同 base-url
-   * 同密钥，仅模型名可异），超时/并发/重试取 02§4.5 组装默认，opencode 适配（附加头 + reasoning=none）按 base-url 自动施加。
+   * 三档路由配置装配（T2.9 形态；05§5）：standard 端点为基座，strong/light 缺省继承 standard（同 base-url 同密钥，仅模型名可异），超时/重试取
+   * 02§4.5 组装默认，opencode 适配（附加头 + reasoning=none）按 base-url 自动施加。
    *
    * @param baseUrl LLM 端点根地址（standard 档 base-url）
    * @param apiKey LLM 密钥
@@ -263,6 +290,43 @@ public final class LlmParsing {
       List<ModelTier> fallbackChain,
       Map<ModelTier, Integer> rpm,
       Double temperature) {
+    return threeTierConfig(
+        baseUrl,
+        apiKey,
+        standardModel,
+        strongModel,
+        lightModel,
+        fallbackChain,
+        rpm,
+        temperature,
+        LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+  }
+
+  /**
+   * 三档路由配置装配（并发可配置形态；05§5 {@code CRA_LLM_MAX_CONCURRENCY}）。其余参数语义同上；有效并发 = min(maxConcurrency,
+   * cra-core 线程池宽度)（09§6）。
+   *
+   * @param baseUrl LLM 端点根地址（standard 档 base-url）
+   * @param apiKey LLM 密钥
+   * @param standardModel standard 档模型名（须非空）
+   * @param strongModel strong 档模型名（null/空白 = 继承 standard）
+   * @param lightModel light 档模型名（null/空白 = 继承 standard）
+   * @param fallbackChain 降级链（档位须已配置端点）
+   * @param rpm per-model RPM 表
+   * @param temperature 采样温度（null = 不传）
+   * @param maxConcurrency 并发信号量上限（1..{@link LlmGatewayConfig#MAX_ALLOWED_CONCURRENCY}）
+   * @return 网关配置
+   */
+  public static LlmGatewayConfig threeTierConfig(
+      String baseUrl,
+      String apiKey,
+      String standardModel,
+      String strongModel,
+      String lightModel,
+      List<ModelTier> fallbackChain,
+      Map<ModelTier, Integer> rpm,
+      Double temperature,
+      int maxConcurrency) {
     LlmGatewayConfig.ModelEndpoint standard =
         new LlmGatewayConfig.ModelEndpoint(standardModel, baseUrl, apiKey);
     return new LlmGatewayConfig(
@@ -274,7 +338,7 @@ public final class LlmParsing {
                 modelOrInherit(lightModel, standardModel), baseUrl, apiKey)),
         fallbackChain,
         rpm,
-        LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY,
+        maxConcurrency,
         LlmGatewayConfig.DEFAULT_MAX_RETRIES,
         30_000,
         120_000,

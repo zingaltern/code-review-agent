@@ -1,7 +1,6 @@
 package org.cra.core.internal.pipeline;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.finding.FindingCategory;
@@ -62,10 +61,5 @@ public final class ConvergenceGuard {
   public static boolean securityOrImportant(CandidateFinding finding) {
     return finding.category() == FindingCategory.SECURITY
         || finding.severityProposed() == Severity.IMPORTANT;
-  }
-
-  /** finding 类别小写（账本标记与 trace 口径）。 */
-  public static String categoryLower(CandidateFinding finding) {
-    return finding.category().name().toLowerCase(Locale.ROOT);
   }
 }

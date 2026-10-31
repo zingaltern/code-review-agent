@@ -39,7 +39,7 @@ final class GitHubHttpTransport {
   private final LongConsumer sleeper;
 
   GitHubHttpTransport(String apiBase, String token, HttpClient http, LongConsumer sleeper) {
-    this.apiBase = apiBase.replaceAll("/+$", "");
+    this.apiBase = apiBase.replaceAll("/++$", "");
     this.token = token;
     this.http = http;
     this.sleeper = sleeper;

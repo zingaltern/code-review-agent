@@ -1,5 +1,6 @@
 package org.cra.server.history;
 
+import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -79,7 +80,8 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     try {
       previous = retry("读取水位", () -> store.checkpoint(source.id()), warnings);
     } catch (CollectFailure e) {
-      // 水位不可读不阻断采集：按请求窗口执行，水位推进在写侧再试
+      // 水位不可读不阻断采集：按请求窗口执行，并把降级写进 warnings（note 如实带出，09§4）
+      warnings.add("水位不可读，按请求窗口采集: " + e.getMessage());
       previous = Optional.empty();
     }
     Instant effectiveSince = requested;
@@ -200,10 +202,7 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     for (int attemptNo = 1; attemptNo <= settings.maxAttempts(); attemptNo++) {
       try {
         return attempt.run();
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new CollectFailure(operation + " 被中断", e);
-      } catch (Exception e) {
+      } catch (IOException | RuntimeException e) {
         last = e;
         if (attemptNo < settings.maxAttempts()) {
           warnings.add(
@@ -244,9 +243,9 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
      * 执行。
      *
      * @return 结果
-     * @throws Exception 任意失败（由重试器收敛）
+     * @throws IOException 来源读取失败（重试动作的受检异常仅此一种，由重试器收敛）
      */
-    T run() throws Exception;
+    T run() throws IOException;
   }
 
   /** 重试耗尽/中断。 */

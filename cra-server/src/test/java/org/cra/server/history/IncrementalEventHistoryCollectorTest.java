@@ -26,7 +26,7 @@ class IncrementalEventHistoryCollectorTest {
   private static final Instant NOW = Instant.parse("2026-10-27T12:00:00Z");
 
   private static final EventCollectionSettings SETTINGS =
-      new EventCollectionSettings(30, 24, 3, 0, 100);
+      new EventCollectionSettings(24, 3, 0, 100);
 
   @Test
   void collectsAndSecondRunIsIdempotent() {
@@ -146,6 +146,28 @@ class IncrementalEventHistoryCollectorTest {
   }
 
   @Test
+  void checkpointFailureIsDeclaredButDoesNotBlockCollection() {
+    // 水位不可读不阻断采集，但降级必须进 note（09§4：降级并写入状态，不静默当无水位）
+    EventHistoryStore failingCheckpointStore =
+        new InMemoryStore() {
+          @Override
+          public Optional<Instant> checkpoint(String sourceId) {
+            throw new IllegalStateException("水位表不可读");
+          }
+        };
+    ListSource source =
+        new ListSource(List.of(event("INC-42", "incident", NOW.minusSeconds(3600))));
+    IncrementalEventHistoryCollector collector = collector(source, failingCheckpointStore);
+
+    EventHistoryCollector.CollectionResult result =
+        collector.collect(NOW.minusSeconds(7 * 24 * 3600));
+
+    assertThat(result.executed()).isTrue();
+    assertThat(result.inserted()).isEqualTo(1);
+    assertThat(result.note()).contains("水位不可读");
+  }
+
+  @Test
   void parseFailuresDoNotAdvanceWatermark() {
     InMemoryStore store = new InMemoryStore();
     ListSource source =
@@ -174,7 +196,7 @@ class IncrementalEventHistoryCollectorTest {
                 event("C-3", "incident", NOW.minusSeconds(3600))));
     IncrementalEventHistoryCollector collector =
         new IncrementalEventHistoryCollector(
-            source, store, new EventCollectionSettings(30, 24, 1, 0, 2), millis -> {});
+            source, store, new EventCollectionSettings(24, 1, 0, 2), millis -> {});
     EventHistoryCollector.CollectionResult result =
         collector.collect(NOW.minusSeconds(7 * 24 * 3600));
 

@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -20,6 +21,7 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.git.FileContent;
 import org.cra.context.api.ContextAssembler;
 import org.cra.core.internal.AgentRunner;
+import org.cra.core.internal.CorePools;
 import org.cra.core.internal.TaskHandle;
 import org.cra.core.internal.TraceWriter;
 
@@ -43,7 +45,7 @@ final class ReviewAgentDispatcher {
     this.agentRunner = agentRunner;
     this.contextAssembler = contextAssembler;
     // 09§6：进程级共享池（常驻 server 按仓库缓存 pipeline，实例自建池会线性泄漏线程）
-    this.pool = org.cra.core.internal.CorePools.reviewPool();
+    this.pool = CorePools.reviewPool();
   }
 
   /** 单代理派发结果。 */
@@ -59,35 +61,6 @@ final class ReviewAgentDispatcher {
       List<String> degradations,
       List<String> contextNotes,
       List<String> trimDecisions) {}
-
-  /** 按 chunk 派发（BugHunter 视角 / Security / Perf；上下文预算 = 该角色输入预算）。 */
-  TaskHandle<DispatchOutcome> submitChunk(
-      SubAgent<ReviewAgentInput> agent,
-      ChunkPlanner.Chunk chunk,
-      Map<String, FileContent> headFiles,
-      DepthPlan depthPlan,
-      boolean simplified,
-      String extraSection,
-      String prTitle,
-      String commitMessages,
-      String policySection,
-      String runId,
-      TraceWriter trace) {
-    return submitChunk(
-        agent,
-        chunk,
-        headFiles,
-        depthPlan,
-        simplified,
-        extraSection,
-        prTitle,
-        commitMessages,
-        policySection,
-        runId,
-        trace,
-        CrossFileSlices.empty(),
-        "");
-  }
 
   /**
    * 按 chunk 派发（含 L2 跨文件切片；ADR-0014：仅 BH-dataflow / Security 注入，切片 token 从 L1 预算扣除）。
@@ -289,11 +262,7 @@ final class ReviewAgentDispatcher {
               scope.key()
                   + "-"
                   + Integer.toHexString(
-                      scope.files().stream()
-                          .map(org.cra.common.git.DiffFile::path)
-                          .sorted()
-                          .toList()
-                          .hashCode()));
+                      scope.files().stream().map(DiffFile::path).sorted().toList().hashCode()));
       trace.emit(
           "agent_start",
           Map.of(
@@ -332,7 +301,7 @@ final class ReviewAgentDispatcher {
               "chunk", scope.key(),
               "findings", findings.size(),
               "findings_brief", findingsBrief,
-              "termination", run.termination().name().toLowerCase(java.util.Locale.ROOT),
+              "termination", run.termination().name().toLowerCase(Locale.ROOT),
               "tokens", Map.of("in", run.tokensIn(), "out", run.tokensOut()),
               "latency_ms", run.latencyMs()));
       List<String> outcomeNotes = new ArrayList<>(prepared.coverageNotes());

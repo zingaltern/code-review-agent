@@ -92,7 +92,9 @@ final class BadcaseFixtureWriter {
         new FixtureMeta.ReviewRequestSpec(Math.max(run.pr(), 1), owner, name),
         List.of(),
         new FixtureMeta.Annotation(
-            "draft", inputs.annotator(), java.time.LocalDate.now().toString()),
+            "draft",
+            inputs.annotator(),
+            java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString()),
         new FixtureMeta.Recheck("pending", "", ""),
         note);
   }

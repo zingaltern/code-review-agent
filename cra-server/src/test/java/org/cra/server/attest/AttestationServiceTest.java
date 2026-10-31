@@ -20,8 +20,8 @@ class AttestationServiceTest {
     private final List<AttestationRecord> records = new ArrayList<>();
 
     @Override
-    public void record(AttestationRecord record) {
-      records.add(record);
+    public void recordIssued(AttestationRecord attestation) {
+      records.add(attestation);
     }
   }
 
@@ -112,6 +112,22 @@ class AttestationServiceTest {
     assertThatThrownBy(() -> strict.attest(notJson, "owner/repo", "api-token"))
         .isInstanceOf(AttestationRejectedException.class)
         .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(400));
+  }
+
+  @Test
+  void rejectsNewlineInSignedFieldsWith400() {
+    // 信封是行式文本：字段含换行会破坏边界并由 Envelope 抛 IAE（500），入口须转 400
+    AttestationService permissive =
+        new AttestationService(KEY, "key-v1", false, (repo, commit) -> false, new CapturingStore());
+    byte[] newlineCommit =
+        "{\"commit\":\"abc\\n1234\",\"tier\":\"l2\"}".getBytes(StandardCharsets.UTF_8);
+    byte[] newlineTier =
+        "{\"commit\":\"abc1234\",\"tier\":\"l2\\r\\nx\"}".getBytes(StandardCharsets.UTF_8);
+    for (byte[] report : List.of(newlineCommit, newlineTier)) {
+      assertThatThrownBy(() -> permissive.attest(report, "owner/repo", "api-token"))
+          .isInstanceOf(AttestationRejectedException.class)
+          .satisfies(e -> assertThat(((AttestationRejectedException) e).status()).isEqualTo(400));
+    }
   }
 
   @Test

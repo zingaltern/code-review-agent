@@ -5,10 +5,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
 import org.cra.core.api.SemanticContextOptions;
+import org.cra.llm.api.LlmGatewayConfig;
 import org.cra.llm.api.LlmParsing;
 import org.cra.llm.api.ModelTier;
 import org.springframework.core.env.Environment;
@@ -22,7 +24,7 @@ import org.springframework.scheduling.support.CronExpression;
  *
  * @param webhookSecret webhook 密钥（GitHub：X-Hub-Signature-256 HMAC；GitLab：X-Gitlab-Token secret
  *     token）
- * @param platform Git 平台（`github`|`gitlab`；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0013）
+ * @param platform Git 平台（{@code github|gitlab}；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0013）
  * @param gitlabBaseUrl GitLab API 根（含 /api/v4；CRA_GITLAB_BASE_URL）
  * @param gitlabToken GitLab access token（CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE；gitlab 模式必填）
  * @param gitlabBotUsername `/user` 不可读时的 bot 身份回退（CRA_GITLAB_BOT_USERNAME，ADR-0011 决策 3）
@@ -47,6 +49,8 @@ import org.springframework.scheduling.support.CronExpression;
  * @param llmTemperature 采样温度（空 = 不传；建议 0.2，05§5）
  * @param llmFallbackChain 降级链（逗号分隔档位）
  * @param llmRpm per-model RPM（形如 standard=60,strong=30,light=60；空 = 默认）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param crossCheckerEnabled CrossChecker 总开关（默认 false，05§5）
  * @param crossCheckerModes CrossChecker 模式串（assumption,sniff）
  * @param crossCheckerHistoryWeeks 变更史回溯周数
@@ -59,7 +63,19 @@ import org.springframework.scheduling.support.CronExpression;
  * @param eventHistoryRetryBackoffMillis 重试退避基数（毫秒）
  * @param eventHistoryMaxBytes 事件源单次读取字节上限
  * @param eventHistoryMaxEvents 单次入库事件上限
- * @param runTotalTokens run 级 token 预算（02§4.4，默认 800k）
+ * @param runTotalTokens run 级 token 预算（02§4.4，默认 1.6M）
+ * @param reviewLargeDiffLines 大 diff 降档线（review.large-diff-lines / CRA_REVIEW_LARGE_DIFF_LINES，默认
+ *     PipelineOptions 基准值 4000）
+ * @param reviewHardCapLines 硬上限（review.hard-cap-lines / CRA_REVIEW_HARD_CAP_LINES，默认 16000；须 &gt;
+ *     large）
+ * @param reviewNitBudget nit 预算默认（review.nit-budget-default / CRA_REVIEW_NIT_BUDGET，默认 3，&gt;=0）
+ * @param reviewDegradeAtFirst 第一降档阈值（agents.budget.degrade-at[0] / CRA_REVIEW_DEGRADE_AT，默认 0.70）
+ * @param reviewDegradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
+ * @param reviewSpotCheckPercent important/security 级 REFUTED
+ *     抽查保险丝百分比（CRA_REVIEW_SPOT_CHECK_PERCENT， 默认 20，0..100）
+ * @param reviewPublishUnverified UNVERIFIED 发布策略（review.publish-unverified /
+ *     CRA_REVIEW_PUBLISH_UNVERIFIED：never|labeled，默认 never）
+ * @param reviewIncludeTestFiles 测试文件是否进入评审范围（02§4.4 / CRA_REVIEW_TESTS，默认 false）
  * @param semanticContextEnabled 语义上下文（L2 跨文件切片）开关（M4e，ADR-0014；CRA_SEMANTIC_CONTEXT_ENABLED，默认
  *     false——关闭不动基线行为）
  * @param semanticContextMaxFiles 索引扫描 Java 文件数上限（CRA_SEMANTIC_CONTEXT_MAX_FILES，默认 2000）
@@ -94,6 +110,7 @@ public record ServerConfig(
     String llmTemperature,
     String llmFallbackChain,
     String llmRpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -107,11 +124,19 @@ public record ServerConfig(
     long eventHistoryMaxBytes,
     int eventHistoryMaxEvents,
     long runTotalTokens,
+    int reviewLargeDiffLines,
+    int reviewHardCapLines,
+    int reviewNitBudget,
+    double reviewDegradeAtFirst,
+    double reviewDegradeAtSecond,
+    int reviewSpotCheckPercent,
+    String reviewPublishUnverified,
+    boolean reviewIncludeTestFiles,
     boolean semanticContextEnabled,
     int semanticContextMaxFiles,
     long semanticContextMaxFileBytes,
     long semanticContextSliceTokens,
-    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
+    AgentBudgetOverrides agentBudgets) {
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
@@ -149,6 +174,42 @@ public record ServerConfig(
     if (runTotalTokens <= 0) {
       throw new CraConfigException("CRA_SERVER_RUN_TOTAL_TOKENS 必须为正: " + runTotalTokens);
     }
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
+    }
+    if (reviewLargeDiffLines <= 0 || reviewHardCapLines <= reviewLargeDiffLines) {
+      throw new CraConfigException(
+          "CRA_REVIEW_LARGE_DIFF_LINES / CRA_REVIEW_HARD_CAP_LINES 非法（必须为正且 hard cap > large）: "
+              + reviewLargeDiffLines
+              + "/"
+              + reviewHardCapLines);
+    }
+    if (reviewNitBudget < 0) {
+      throw new CraConfigException("CRA_REVIEW_NIT_BUDGET 必须为非负整数: " + reviewNitBudget);
+    }
+    if (reviewDegradeAtFirst <= 0
+        || reviewDegradeAtSecond <= reviewDegradeAtFirst
+        || reviewDegradeAtSecond > 1.0) {
+      throw new CraConfigException(
+          "CRA_REVIEW_DEGRADE_AT 阈值非法（0 < first < second <= 1）: "
+              + reviewDegradeAtFirst
+              + ","
+              + reviewDegradeAtSecond);
+    }
+    if (reviewSpotCheckPercent < 0 || reviewSpotCheckPercent > 100) {
+      throw new CraConfigException(
+          "CRA_REVIEW_SPOT_CHECK_PERCENT 必须在 [0,100]: " + reviewSpotCheckPercent);
+    }
+    reviewPublishUnverified =
+        reviewPublishUnverified == null ? "" : reviewPublishUnverified.strip();
+    if (!"never".equals(reviewPublishUnverified) && !"labeled".equals(reviewPublishUnverified)) {
+      throw new CraConfigException(
+          "CRA_REVIEW_PUBLISH_UNVERIFIED 非法: " + reviewPublishUnverified + "（never|labeled）");
+    }
     if (eventHistoryLookbackDays <= 0 || eventHistoryLookbackDays > 365) {
       throw new CraConfigException(
           "CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS 必须在 1..365: " + eventHistoryLookbackDays);
@@ -181,8 +242,7 @@ public record ServerConfig(
     if (eventHistoryCron == null || eventHistoryCron.isBlank()) {
       throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_CRON 不能为空");
     }
-    agentBudgets =
-        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
+    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
     eventHistoryCron = eventHistoryCron.strip();
     try {
       CronExpression.parse(eventHistoryCron);
@@ -199,13 +259,20 @@ public record ServerConfig(
    * @return 服务配置
    */
   public static ServerConfig from(Environment env) {
+    // 未设置/空白 = 默认 github（CI 的空 input 是 ""，不是 null）
+    String platform = firstNonBlank(env.getProperty("CRA_SERVER_PLATFORM"), "github");
+    PipelineOptions defaults = PipelineOptions.defaults();
+    DegradeThresholds degradeAt =
+        parseDegradeAt(
+            env.getProperty("CRA_REVIEW_DEGRADE_AT"),
+            defaults.degradeAtFirst(),
+            defaults.degradeAtSecond());
     return new ServerConfig(
         env.getProperty("CRA_SERVER_WEBHOOK_SECRET", ""),
-        env.getProperty("CRA_SERVER_PLATFORM", "github"),
+        platform,
         env.getProperty("CRA_GITLAB_BASE_URL", "https://gitlab.com/api/v4"),
-        firstNonBlank(
-            env.getProperty("CRA_GITLAB_TOKEN"),
-            LlmParsing.readGitLabTokenFile(env.getProperty("CRA_GITLAB_TOKEN_FILE"))),
+        // 未选 GitLab 平台时不读取任何 GitLab token 输入（ADR-0013 决策 1/3）
+        "gitlab".equals(platform) ? resolveGitLabToken(env) : null,
         blankToNull(env.getProperty("CRA_GITLAB_BOT_USERNAME")),
         env.getProperty("CRA_SERVER_API_TOKEN", ""),
         env.getProperty("CRA_SERVER_SIGNING_KEY", ""),
@@ -228,6 +295,7 @@ public record ServerConfig(
         blankToNull(env.getProperty("CRA_LLM_TEMPERATURE")),
         env.getProperty("CRA_LLM_FALLBACK_CHAIN", "standard,light"),
         env.getProperty("CRA_LLM_RPM", ""),
+        intValue(env, "CRA_LLM_MAX_CONCURRENCY", LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY),
         bool(env, "CRA_CROSSCHECKER_ENABLED", false),
         env.getProperty("CRA_CROSSCHECKER_MODES", "assumption,sniff"),
         intValue(env, "CRA_CROSSCHECKER_HISTORY_WEEKS", 8),
@@ -241,6 +309,15 @@ public record ServerConfig(
         longValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_BYTES", 67_108_864L),
         intValue(env, "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS", 5_000),
         longValue(env, "CRA_SERVER_RUN_TOTAL_TOKENS", PipelineOptions.DEFAULT_RUN_TOTAL_TOKENS),
+        intValue(env, "CRA_REVIEW_LARGE_DIFF_LINES", defaults.largeDiffLines()),
+        intValue(env, "CRA_REVIEW_HARD_CAP_LINES", defaults.hardCapLines()),
+        intValue(env, "CRA_REVIEW_NIT_BUDGET", defaults.nitBudgetDefault()),
+        degradeAt.first(),
+        degradeAt.second(),
+        intValue(env, "CRA_REVIEW_SPOT_CHECK_PERCENT", defaults.importantRefutedSpotCheckPercent()),
+        firstNonBlank(
+            env.getProperty("CRA_REVIEW_PUBLISH_UNVERIFIED"), defaults.publishUnverified()),
+        bool(env, "CRA_REVIEW_TESTS", defaults.includeTestFiles()),
         bool(env, "CRA_SEMANTIC_CONTEXT_ENABLED", false),
         intValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILES", 2_000),
         longValue(env, "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", 262_144L),
@@ -252,18 +329,17 @@ public record ServerConfig(
   /**
    * 单代理预算覆盖（05§5 {@code agents.budget.<role>.*}；环境变量形如 {@code
    * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}）。非法值失败于启动期（fail fast）。键构建公共体见 {@link
-   * LlmParsing#agentBudgetValues}（R4：与 CLI 同语义收敛）。
+   * LlmParsing#agentBudgetValues}（与 CLI 同语义）。
    *
    * @param env Spring Environment
    * @return 覆盖（无配置时为空覆盖）
    */
-  static org.cra.agents.api.AgentBudgetOverrides agentBudgetOverrides(Environment env) {
+  static AgentBudgetOverrides agentBudgetOverrides(Environment env) {
     Map<String, String> values =
         LlmParsing.agentBudgetValues(
-            org.cra.agents.api.AgentBudgetOverrides.CONFIGURABLE_ROLES,
-            (flag, envKey) -> env.getProperty(envKey));
+            AgentBudgetOverrides.CONFIGURABLE_ROLES, (flag, envKey) -> env.getProperty(envKey));
     try {
-      return org.cra.agents.api.AgentBudgetOverrides.fromConfig(values);
+      return AgentBudgetOverrides.fromConfig(values);
     } catch (IllegalArgumentException e) {
       throw new CraConfigException("agents.budget 非法: " + e.getMessage());
     }
@@ -329,10 +405,59 @@ public record ServerConfig(
     return LlmParsing.parseTemperature(llmTemperature, "CRA_LLM_TEMPERATURE");
   }
 
+  /**
+   * 降级阈值（0 &lt; first &lt; second &lt;= 1；未配置/空白取 PipelineOptions 基准值）。 与 CLI 的 {@code
+   * PlatformArgs.degradeAt} 逐条同语义（空白=默认、恰两段、区间校验）；尾逗号视为空段忽略（与 fallback-chain/RPM
+   * 的“空段跳过”约定一致），中间空段/多余段按段数拒绝。 server 侧只在 env 装配期出现，错误前缀保留 CRA_REVIEW_DEGRADE_AT key 名。
+   */
+  private record DegradeThresholds(double first, double second) {}
+
+  private static DegradeThresholds parseDegradeAt(
+      String value, double defaultFirst, double defaultSecond) {
+    if (value == null || value.isBlank()) {
+      return new DegradeThresholds(defaultFirst, defaultSecond);
+    }
+    // split(",") 默认丢弃尾部空段：\"0.70,0.85,\" 与 \"0.70,0.85\" 等价；\",0.70,0.85\" / \"0.70,,0.85\" 段数 >2
+    // 拒绝
+    String[] parts = value.split(",");
+    if (parts.length != 2) {
+      throw new CraConfigException("CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85: " + value);
+    }
+    try {
+      double first = Double.parseDouble(parts[0].strip());
+      double second = Double.parseDouble(parts[1].strip());
+      if (!Double.isFinite(first)
+          || !Double.isFinite(second)
+          || first <= 0
+          || second <= first
+          || second > 1.0) {
+        throw new NumberFormatException();
+      }
+      return new DegradeThresholds(first, second);
+    } catch (NumberFormatException e) {
+      throw new CraConfigException("CRA_REVIEW_DEGRADE_AT 阈值非法（0 < first < second <= 1）: " + value);
+    }
+  }
+
   private static void requireText(String value, String name) {
     if (value == null || value.isBlank()) {
       throw new CraConfigException(name + " 未设置（fail closed：服务不在缺失密钥时启动）");
     }
+  }
+
+  /**
+   * GitLab token 解析（ADR-0013 决策 3：{@code CRA_GITLAB_TOKEN} 优先，其次 {@code
+   * CRA_GITLAB_TOKEN_FILE}；文件读取公共体见 {@link LlmParsing#readGitLabTokenFile}）。
+   *
+   * @param env Spring Environment
+   * @return token；均未配置为 null
+   */
+  private static String resolveGitLabToken(Environment env) {
+    String token = blankToNull(env.getProperty("CRA_GITLAB_TOKEN"));
+    if (token != null) {
+      return token;
+    }
+    return LlmParsing.readGitLabTokenFile(blankToNull(env.getProperty("CRA_GITLAB_TOKEN_FILE")));
   }
 
   private static String firstNonBlank(String first, String second) {

@@ -37,7 +37,6 @@ import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostReviewCommand;
 import org.cra.common.git.PrReviewResult;
-import org.cra.common.git.RepoRef;
 import org.cra.common.run.Depth;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
@@ -59,7 +58,6 @@ import org.mockito.ArgumentCaptor;
  */
 class ReviewPipelineTest {
 
-  private static final RepoRef REPO = new RepoRef("o", "r");
   private static final String HEAD = "abc1234000000000000000000000000000000000";
   private static final String BASE = "def5678000000000000000000000000000000000";
   private static final String FILE = "src/Foo.java";
@@ -638,18 +636,6 @@ class ReviewPipelineTest {
   }
 
   // ---------- M1：T1.3–T1.7（07§2 验收 4 与配套机制） ----------
-
-  private static String findingsAtLines(String category) {
-    StringBuilder sb = new StringBuilder("{\"findings\":[");
-    for (int i = 1; i <= 6; i++) {
-      if (i > 1) {
-        sb.append(",");
-      }
-      sb.append(findingJson("问题" + i, i, category));
-    }
-    sb.append("]}");
-    return sb.toString();
-  }
 
   private static String bigPatch(int lines) {
     StringBuilder sb = new StringBuilder("@@ -1," + lines + " +" + lines + " @@\n");

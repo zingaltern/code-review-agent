@@ -39,7 +39,8 @@ class TemplateLoaderTest {
         .isThrownBy(
             () ->
                 loader.render(
-                    "prompts/reviewer/bug-hunter/boundary.md", Map.of("untrusted_pr_meta", "x")));
+                    "prompts/reviewer/bug-hunter/boundary.md", Map.of("untrusted_pr_meta", "x")))
+        .withMessageContaining("缺变量");
   }
 
   @Test
@@ -58,16 +59,17 @@ class TemplateLoaderTest {
 
   @Test
   void contentBracesDoNotConfusePlaceholders() {
-    // 不可信内容含 {word} 不得被误当占位符（双花括号语法的存在理由）
+    // 不可信内容含 {word}/{{var}}/$1/反斜杠不得被误当占位符或替换元字符（双花括号语法 + quoteReplacement 的存在理由）
+    String tricky = "return {if} {x} $1 \\ {{x}} from map";
     String out =
         loader.render(
             "prompts/reviewer/bug-hunter/boundary.md",
             Map.of(
-                "untrusted_pr_meta", "return {if} {x} from map",
+                "untrusted_pr_meta", tricky,
                 "review_policy_section", "",
                 "untrusted_diff", "code {a} {{b}",
                 "untrusted_l1_context", "ctx {c}",
                 "scoped_paths_note", ""));
-    assertThat(out).contains("return {if} {x} from map").contains("code {a} {{b}");
+    assertThat(out).contains(tricky).contains("code {a} {{b}");
   }
 }

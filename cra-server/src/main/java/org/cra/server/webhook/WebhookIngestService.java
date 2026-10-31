@@ -8,9 +8,9 @@ import org.cra.server.queue.ReviewQueue;
 import org.springframework.stereotype.Service;
 
 /**
- * webhook 入站编排：幂等登记 → 入队（背压即释放占位，让 GitHub 重投可再次 claim）→ 202。
+ * webhook 入站编排：幂等登记 → 入队（背压即释放占位，让平台重投可再次 claim）→ 202。
  *
- * <p>顺序不可交换：先 claim 再入队，保证同 delivery 并发两次只有一次入队；队列满时释放占位，HTTP 回 503，GitHub 重投同一 delivery 时重新
+ * <p>顺序不可交换：先 claim 再入队，保证同一 delivery 并发两次只有一次入队；队列满时释放占位，HTTP 回 503，平台重投同一 delivery 时重新
  * claim（02§5）。
  */
 @Service
@@ -46,7 +46,7 @@ public final class WebhookIngestService {
    */
   public Outcome ingest(PullRequestEvent event) {
     Instant now = Instant.now();
-    DeliveryRecord record =
+    DeliveryRecord delivery =
         new DeliveryRecord(
             event.deliveryId(),
             event.repoKey(),
@@ -58,11 +58,9 @@ public final class WebhookIngestService {
             null,
             now,
             now);
-    if (!deliveryStore.claim(record)) {
-      // 成功 delivery 的重投 = duplicate；失败 delivery 的重投允许重试（LLM 不可得等可恢复故障）
-      if (!deliveryStore.resetFailed(event.deliveryId())) {
-        return Outcome.DUPLICATE;
-      }
+    // 成功 delivery 的重投 = duplicate；失败 delivery 的重投允许重试（LLM 不可得等可恢复故障）
+    if (!deliveryStore.claim(delivery) && !deliveryStore.resetFailed(event.deliveryId())) {
+      return Outcome.DUPLICATE;
     }
     ReviewJob job =
         new ReviewJob(
@@ -82,7 +80,7 @@ public final class WebhookIngestService {
     if (submit == ReviewQueue.SubmitResult.ACCEPTED) {
       return Outcome.ACCEPTED;
     }
-    // 未入队（满/停机）→ 释放占位；GitHub 依据 503 重投，重投时必须能再次 claim
+    // 未入队（满/停机）→ 释放占位；平台依据 503 重投，重投时必须能再次 claim
     deliveryStore.release(event.deliveryId());
     return Outcome.BACKPRESSURE;
   }

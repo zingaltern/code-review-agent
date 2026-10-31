@@ -5,7 +5,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import org.cra.agents.api.AgentBrief;
@@ -13,6 +16,7 @@ import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
 import org.cra.common.context.ReviewPolicy;
 import org.cra.common.finding.CandidateFinding;
+import org.cra.common.finding.FindingCategory;
 import org.cra.common.git.DiffResult;
 import org.cra.common.git.FileContent;
 import org.cra.core.internal.pipeline.AntiAnchorValidator;
@@ -185,7 +189,7 @@ final class VerificationWave {
     List<TaskHandle<BatchOutcome>> futures = new ArrayList<>();
     // 并发批任务（工作线程）写、主线程在 future 汇合后读——COW 保证汇合前的并发追加不抛
     // ConcurrentModificationException；失败隔离语义见 02§4.2（批内异常收敛为降级，不炸 run）
-    List<String> degradations = new java.util.concurrent.CopyOnWriteArrayList<>();
+    List<String> degradations = new CopyOnWriteArrayList<>();
     for (Map.Entry<String, List<FindingAggregator.Scored>> entry : byFile.entrySet()) {
       String batchFile = entry.getKey();
       // M4e（ADR-0014）：本文件批次的 L2 跨文件切片（关闭/不可得时为空串）
@@ -226,7 +230,7 @@ final class VerificationWave {
         tokensIn += outcome.tokensIn();
         tokensOut += outcome.tokensOut();
         budget.record(outcome.tokensIn(), outcome.tokensOut());
-      } catch (java.util.concurrent.TimeoutException e) {
+      } catch (TimeoutException e) {
         boolean started = task.started();
         task.cancel();
         degradations.add(
@@ -235,7 +239,7 @@ final class VerificationWave {
         futures.forEach(TaskHandle::cancel);
         Thread.currentThread().interrupt();
         throw new IllegalStateException("验证波被中断", e);
-      } catch (java.util.concurrent.ExecutionException e) {
+      } catch (ExecutionException e) {
         Throwable cause = e.getCause() == null ? e : e.getCause();
         degradations.add(Degradations.verifierBatchFailed(cause.getClass().getSimpleName()));
       }
@@ -277,7 +281,6 @@ final class VerificationWave {
               "budget"));
       return new BatchOutcome(allUnavailable(batch), 0, 0, Map.of());
     }
-    CitedEvidenceResolver resolver = citedResolver;
     CallSiteIndex callSiteIndex = resolveCallSiteIndex(file, batch);
     VerificationBatchInput input =
         VerificationBatchAssembler.buildBatch(
@@ -287,7 +290,7 @@ final class VerificationWave {
             headFiles,
             reviewDiff,
             verifier.budget(),
-            resolver,
+            citedResolver,
             testFileIndex == null ? List.of() : testFileIndex,
             repo,
             callSiteIndex,
@@ -508,9 +511,7 @@ final class VerificationWave {
     if (callSiteIndexer == null) {
       return null;
     }
-    boolean hasBug =
-        batch.stream()
-            .anyMatch(s -> s.finding().category() == org.cra.common.finding.FindingCategory.BUG);
+    boolean hasBug = batch.stream().anyMatch(s -> s.finding().category() == FindingCategory.BUG);
     if (!hasBug) {
       return null;
     }
@@ -558,7 +559,10 @@ final class VerificationWave {
         original.refutation());
   }
 
-  /** 缩小上下文重试形态：只保留各锚行窗口（±60 行），丢弃全文与切片（02§4.2）。 */
+  /**
+   * 缩小上下文重试形态（02§4.2）：整体丢弃 codeContext（所在文件全文 + 切片），替换为提示文案——候选条目自带锚行与证据，
+   * 其余字段（引用证据/策略/分层契约）原样保留。不做窗口裁剪：截断检测在批次级，逐锚行窗口需逐条原文，成本与收益不匹配。
+   */
   private VerificationBatchInput reduceContext(VerificationBatchInput input) {
     return new VerificationBatchInput(
         input.file(),

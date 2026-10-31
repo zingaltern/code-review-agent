@@ -1,5 +1,6 @@
 package org.cra.core.internal.pipeline;
 
+import java.util.concurrent.atomic.AtomicLong;
 import org.cra.core.api.PipelineOptions;
 
 /**
@@ -22,7 +23,8 @@ public final class RunBudgetTracker {
   }
 
   private final PipelineOptions options;
-  private volatile long usedTokens;
+  // record() 在编排主线程、phase() 在验证池线程读（§6 跨线程可见）：复合加非原子，volatile 裸 long 会静默丢更新
+  private final AtomicLong usedTokens = new AtomicLong();
 
   public RunBudgetTracker(PipelineOptions options) {
     this.options = options;
@@ -35,7 +37,7 @@ public final class RunBudgetTracker {
    * @param tokensOut 输出 token
    */
   public void record(long tokensIn, long tokensOut) {
-    usedTokens += tokensIn + tokensOut;
+    usedTokens.addAndGet(tokensIn + tokensOut);
   }
 
   /**
@@ -44,7 +46,7 @@ public final class RunBudgetTracker {
    * @return 比例 [0, ∞)
    */
   public double ratio() {
-    return (double) usedTokens / options.runTotalTokens();
+    return (double) usedTokens.get() / options.runTotalTokens();
   }
 
   /**
@@ -64,14 +66,5 @@ public final class RunBudgetTracker {
       return Phase.DEGRADE;
     }
     return Phase.NORMAL;
-  }
-
-  /**
-   * 已消耗 token。
-   *
-   * @return 输入+输出合计
-   */
-  public long usedTokens() {
-    return usedTokens;
   }
 }

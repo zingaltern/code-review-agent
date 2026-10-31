@@ -1,5 +1,6 @@
 package org.cra.core.internal;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -37,7 +38,7 @@ final class FindingJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
       return new ParseResult(List.of(), List.of("root: 非合法 JSON: " + e.getOriginalMessage()));
     }
     JsonNode array = root.path("findings");

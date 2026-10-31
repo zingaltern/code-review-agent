@@ -126,6 +126,33 @@ class ServerConfigPlatformTest {
         .hasMessageContaining("CRA_LLM_FALLBACK_CHAIN 档位非法: ultra");
   }
 
+  @Test
+  void githubModeDoesNotReadGitlabTokenFile() {
+    // ADR-0013 决策 1/3：未选中的平台不读取 token；token 文件不可读不得影响 GitHub 模式启动
+    MockEnvironment env = baseEnv();
+    env.setProperty("CRA_GITLAB_TOKEN_FILE", tempDir.resolve("missing").toString());
+    ServerConfig config = ServerConfig.from(env);
+    assertThat(config.platform()).isEqualTo("github");
+    assertThat(config.gitlabToken()).isNull();
+  }
+
+  @Test
+  void gitlabTokenWinsOverUnreadableTokenFile() {
+    // CRA_GITLAB_TOKEN 优先，其次才读文件（Java 实参惰性求值：不能因为文件不可读而失败）
+    MockEnvironment env = baseEnv();
+    env.setProperty("CRA_SERVER_PLATFORM", "gitlab");
+    env.setProperty("CRA_GITLAB_TOKEN", "glpat-env");
+    env.setProperty("CRA_GITLAB_TOKEN_FILE", tempDir.resolve("missing").toString());
+    assertThat(ServerConfig.from(env).gitlabToken()).isEqualTo("glpat-env");
+  }
+
+  @Test
+  void blankPlatformDefaultsToGithub() {
+    MockEnvironment env = baseEnv();
+    env.setProperty("CRA_SERVER_PLATFORM", "");
+    assertThat(ServerConfig.from(env).platform()).isEqualTo("github");
+  }
+
   private static MockEnvironment baseEnv() {
     MockEnvironment env = new MockEnvironment();
     env.setProperty("CRA_SERVER_WEBHOOK_SECRET", "wh-secret");

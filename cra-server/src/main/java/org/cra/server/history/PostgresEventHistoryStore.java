@@ -1,15 +1,18 @@
 package org.cra.server.history;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -18,8 +21,11 @@ import javax.sql.DataSource;
 import org.cra.common.event.EventHistoryStore;
 import org.cra.common.event.EventQuery;
 import org.cra.common.event.ProductEvent;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 /**
  * PostgreSQL 事件史存储（M4f-full，ADR-0012；05§1.6 的 {@code product_event} + 水位表）。
@@ -27,9 +33,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * <p>幂等键 {@code (repo, event_id)}：重复入库按覆盖语义更新内容，绝不产生第二行；批内同键以后出现者为准。检索端口同时服务
  * CrossChecker（路径/commit/关键词/时间）与验证层的 {@code event <id>} 引用解析。
  *
- * <p>仓库名统一小写存储与查询（平台仓库名大小写不敏感）；commit 前缀互配（7 位短 sha 与 40 位完整 sha 都能命中）。
+ * <p>仓库名统一小写（{@link ProductEvent}/{@link EventQuery} 的构造器已归一，存储层不再二次改写）；commit 前缀互配（7 位短 sha 与 40
+ * 位完整 sha 都能命中）。
  */
 public final class PostgresEventHistoryStore implements EventHistoryStore {
+
+  private static final Logger LOG = LoggerFactory.getLogger(PostgresEventHistoryStore.class);
 
   /** 单条 SQL 的 IN 列表分片上限（避免超长语句/参数上限）。 */
   private static final int IN_CHUNK = 500;
@@ -52,12 +61,14 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private final JdbcTemplate jdbc;
+  private final NamedParameterJdbcTemplate namedJdbc;
 
   /**
    * @param dataSource PG 连接池（与 M4b 账本共用）
    */
   public PostgresEventHistoryStore(DataSource dataSource) {
     this.jdbc = new JdbcTemplate(dataSource);
+    this.namedJdbc = new NamedParameterJdbcTemplate(jdbc);
   }
 
   @Override
@@ -101,8 +112,8 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
   }
 
   @Override
-  public Optional<java.time.Instant> checkpoint(String sourceId) {
-    List<java.time.Instant> rows =
+  public Optional<Instant> checkpoint(String sourceId) {
+    List<Instant> rows =
         jdbc.query(
             "SELECT watermark FROM event_collection_checkpoint WHERE source_id = ?",
             (rs, rowNum) -> rs.getTimestamp(1).toInstant(),
@@ -111,7 +122,7 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
   }
 
   @Override
-  public void saveCheckpoint(String sourceId, java.time.Instant watermark) {
+  public void saveCheckpoint(String sourceId, Instant watermark) {
     jdbc.update(
         "INSERT INTO event_collection_checkpoint (source_id, watermark, updated_at)"
             + " VALUES (?, ?, now())"
@@ -159,7 +170,7 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
         jdbc.query(
             "SELECT " + COLUMNS + " FROM product_event WHERE repo = ? AND event_id = ?",
             (rs, rowNum) -> mapRow(rs),
-            repo.strip().toLowerCase(java.util.Locale.ROOT),
+            repo.strip().toLowerCase(Locale.ROOT),
             eventId);
     return rows.isEmpty() ? Optional.empty() : Optional.of(rows.get(0));
   }
@@ -174,9 +185,8 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       if (i > 0) {
         sql.append(" OR ");
       }
-      sql.append(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(commit_refs) AS c(v)"
-              + " WHERE lower(c.v) LIKE lower(?) || '%' OR lower(?) LIKE lower(c.v) || '%')");
+      sql.append("EXISTS (SELECT 1 FROM jsonb_array_elements_text(commit_refs) AS c(v)");
+      sql.append(" WHERE lower(c.v) LIKE lower(?) || '%' OR lower(?) LIKE lower(c.v) || '%')");
       args.add(commitRefs.get(i));
       args.add(commitRefs.get(i));
     }
@@ -192,9 +202,9 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       if (i > 0) {
         sql.append(" OR ");
       }
-      sql.append(
-          "EXISTS (SELECT 1 FROM jsonb_array_elements_text(paths) AS p(v)"
-              + " WHERE ? = p.v OR ? LIKE p.v || '/%')");
+      // 目录前缀按路径段边界匹配（ADR-0012 §2.2）：不用 LIKE——事件路径中的 `_`/`%` 会被当通配符误命中
+      sql.append("EXISTS (SELECT 1 FROM jsonb_array_elements_text(paths) AS p(v)");
+      sql.append(" WHERE ? = p.v OR substr(?, 1, char_length(p.v) + 1) = p.v || '/')");
       args.add(paths.get(i));
       args.add(paths.get(i));
     }
@@ -231,24 +241,20 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       List<String> ids = entry.getValue();
       for (int start = 0; start < ids.size(); start += IN_CHUNK) {
         List<String> chunk = ids.subList(start, Math.min(start + IN_CHUNK, ids.size()));
-        String placeholders = String.join(",", Collections.nCopies(chunk.size(), "?"));
-        List<Object> args = new ArrayList<>();
-        args.add(entry.getKey());
-        args.addAll(chunk);
+        // SQL 文本无动态拼接：IN 列表占位由 NamedParameterJdbcTemplate 按集合大小展开，
+        // 仓库名与事件 id 全部走绑定参数，用户输入不直达 SQL 文本
         List<String> existing =
-            jdbc.queryForList(
-                "SELECT event_id FROM product_event WHERE repo = ? AND event_id IN ("
-                    + placeholders
-                    + ")",
-                String.class,
-                args.toArray());
+            namedJdbc.queryForList(
+                "SELECT event_id FROM product_event WHERE repo = :repo AND event_id IN (:ids)",
+                Map.of("repo", entry.getKey(), "ids", chunk),
+                String.class);
         existing.forEach(id -> found.add(entry.getKey() + "\u0000" + id));
       }
     }
     return found;
   }
 
-  private static ProductEvent mapRow(java.sql.ResultSet rs) throws SQLException {
+  private static ProductEvent mapRow(ResultSet rs) throws SQLException {
     return new ProductEvent(
         rs.getString("event_id"),
         rs.getString("repo"),
@@ -267,7 +273,7 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
   private static String json(List<String> values) {
     try {
       return MAPPER.writeValueAsString(values == null ? List.of() : values);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
       throw new IllegalArgumentException("事件字段序列化失败", e);
     }
   }
@@ -278,7 +284,9 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
     }
     try {
       return MAPPER.readValue(raw, new TypeReference<List<String>>() {});
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
+      // 本类写入的始终是 JSON 数组；解析失败说明行被外部改坏——降级为空并留下告警，不静默假装无关联
+      LOG.warn("事件字段 JSON 解析失败，按空列表降级: {}", e.getMessage());
       return List.of();
     }
   }
