@@ -57,8 +57,8 @@ final class VerificationBatchAssembler {
 
   private static final int CITED_EVENT_MAX = 5;
 
-  /** Judge 涉事文件单文件 token 上限（03§6：≤40k/案件，3 文件内分配；2026-10-31 预算翻倍）。 */
-  private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
+  /** Judge 涉事文件单文件 token 上限（03§6：≤40k/案件，3 文件内分配；2026-10-31 预算翻倍 4k→8k，3×8k ≤ 40k）。 */
+  private static final long JUDGE_FILE_TOKEN_CAP = 8_000;
 
   private static final int JUDGE_MAX_FILES = 3;
 
