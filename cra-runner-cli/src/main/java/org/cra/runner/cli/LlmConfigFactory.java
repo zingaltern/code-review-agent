@@ -30,7 +30,8 @@ final class LlmConfigFactory {
         config.llmModelLight(),
         parseFallbackChain(config.fallbackChain()),
         parseRpm(config.rpm()),
-        LlmParsing.parseTemperature(config.llmTemperature(), "CRA_LLM_TEMPERATURE"));
+        LlmParsing.parseTemperature(config.llmTemperature(), "CRA_LLM_TEMPERATURE"),
+        config.llmMaxConcurrency());
   }
 
   /** 降级链解析（05§5 fallback-chain；CLI 侧 key 名前缀，公共体见 {@link LlmParsing#parseFallbackChain}）。 */

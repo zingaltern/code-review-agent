@@ -205,7 +205,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void testEvidenceListIsBoundedForLargePullRequests() {
-    // 02§4.4：测试清单必须口语有界——数百个测试文件不得吃穿 TestReviewer 的 16k 输入预算
+    // 02§4.4：测试清单必须有界——数百个测试文件不得吃穿 TestReviewer 的 32k 输入预算（2026-10-31 翻倍）
     List<DiffFile> files = new ArrayList<>();
     for (int i = 0; i < 70; i++) {
       files.add(file("src/test/java/demo/Case" + i + "Test.java"));
@@ -248,7 +248,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void largeDiffAndHardCapBoundariesFollowRelaxedDefaults() {
-    // AI Coding 放宽档（ADR-0015 §2.2 修订）：4000/16000 为边界值，严格大于才降档
+    // AI Coding 放宽档（ADR-0015 §2.2 修订）：4000/16000 为边界值，严格大于才降档（行数口径未随 token 预算翻倍）
     assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_000, OPTIONS).windowLines()).isEqualTo(30);
     assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_000, OPTIONS).conditionalFullText()).isTrue();
     assertThat(DepthPolicy.resolve(Depth.STANDARD, 4_001, OPTIONS).windowLines()).isEqualTo(15);
@@ -259,7 +259,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void budgetDefaultsRaiseOnlyBudgetsNotLadderThresholds() {
-    assertThat(OPTIONS.runTotalTokens()).isEqualTo(800_000L);
+    assertThat(OPTIONS.runTotalTokens()).isEqualTo(1_600_000L);
     assertThat(OPTIONS.largeDiffLines()).isEqualTo(4_000);
     assertThat(OPTIONS.hardCapLines()).isEqualTo(16_000);
     // 门禁/降档阈值不动：70% / 85%

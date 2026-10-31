@@ -4,12 +4,13 @@ import java.util.Locale;
 import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
+import org.cra.llm.api.LlmGatewayConfig;
 
 /**
  * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量）。GitHub token 可经 `--token`/`GITHUB_TOKEN` 提供；LLM 与
  * GitLab 密钥只从环境变量/文件读（05§3/§6）。组装期校验：缺项/非法值即 CraConfigException → 退出码 2。
  *
- * <p>构造入口是 {@link #builder()}：42 个组件的 record 位置参数散落在调用点既无法审阅，新增字段也无处收敛（JLS 8.10.4 要求 canonical
+ * <p>构造入口是 {@link #builder()}：43 个组件的 record 位置参数散落在调用点既无法审阅，新增字段也无处收敛（JLS 8.10.4 要求 canonical
  * 构造器可见性不低于 record 本身，故无法声明为 private——约定改为位置参数只出现在 {@link Builder#build()}）。默认值住在 Builder
  * 字段初值；空值归一与校验仍在紧凑构造器（唯一校验点，不因入口变化而搬家）。
  *
@@ -31,7 +32,7 @@ import org.cra.common.run.ReviewMode;
  * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 4000；原 2000，#64 放宽）
  * @param hardCapLines 硬上限（review.hard-cap-lines，默认 16000；原 8000，#64 放宽）
  * @param nitBudget nit 预算默认（review.nit-budget-default，默认 3；REVIEW.md 显式配置优先）
- * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 800k；原 500k，#64 放宽）
+ * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 1.6M；2026-10-31 翻倍（原 800k））
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
  * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
@@ -45,6 +46,8 @@ import org.cra.common.run.ReviewMode;
  * @param llmModelLight light 档模型名（--model-light / CRA_LLM_MODEL_LIGHT；缺省继承 standard）
  * @param fallbackChain 降级链（--fallback-chain / CRA_LLM_FALLBACK_CHAIN，默认 standard,light；05§5）
  * @param rpm per-model RPM（--rpm / CRA_LLM_RPM，形如 standard=60,strong=30,light=60；默认 60/30/60）
+ * @param llmMaxConcurrency LLM 并发信号量上限（CRA_LLM_MAX_CONCURRENCY，默认 8，1..64；有效并发 = min(配置值,
+ *     线程池宽度)，09§6）
  * @param llmTemperature 采样温度（--llm-temperature / CRA_LLM_TEMPERATURE；空 = 不传沿用 provider 默认）
  * @param crossCheckerEnabled CrossChecker 总开关（05§5 agents.crosschecker.enabled；--crosschecker /
  *     CRA_CROSSCHECKER_ENABLED，默认 false——关闭不动 Standard 基线算术，04§2.2）
@@ -91,6 +94,7 @@ public record CraConfig(
     String llmModelLight,
     String fallbackChain,
     String rpm,
+    int llmMaxConcurrency,
     boolean crossCheckerEnabled,
     String crossCheckerModes,
     int crossCheckerHistoryWeeks,
@@ -126,6 +130,15 @@ public record CraConfig(
             : platform.strip().toLowerCase(Locale.ROOT);
     if (!"github".equals(platform) && !"gitlab".equals(platform)) {
       throw new CraConfigException("platform 非法: " + platform + "（github|gitlab）");
+    }
+    // 校验必须落在紧凑构造器（唯一校验点）：Builder/位置参数/回填/tests 任一入口都不得绕过 1..64
+    // （0 = 信号量永久阻塞；>64 无意义——实际并发受线程池宽度约束，09§6）
+    if (llmMaxConcurrency < 1 || llmMaxConcurrency > LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY) {
+      throw new CraConfigException(
+          "CRA_LLM_MAX_CONCURRENCY 必须在 1.."
+              + LlmGatewayConfig.MAX_ALLOWED_CONCURRENCY
+              + ": "
+              + llmMaxConcurrency);
     }
     gitlab = gitlab == null ? GitLabSettings.none() : gitlab;
   }
@@ -207,6 +220,7 @@ public record CraConfig(
     private String llmModelLight;
     private String fallbackChain;
     private String rpm;
+    private int llmMaxConcurrency = LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY;
     private boolean crossCheckerEnabled;
     private String crossCheckerModes = "assumption,sniff";
     private int crossCheckerHistoryWeeks = 8;
@@ -254,6 +268,7 @@ public record CraConfig(
       this.llmModelLight = source.llmModelLight();
       this.fallbackChain = source.fallbackChain();
       this.rpm = source.rpm();
+      this.llmMaxConcurrency = source.llmMaxConcurrency();
       this.crossCheckerEnabled = source.crossCheckerEnabled();
       this.crossCheckerModes = source.crossCheckerModes();
       this.crossCheckerHistoryWeeks = source.crossCheckerHistoryWeeks();
@@ -418,6 +433,11 @@ public record CraConfig(
       return this;
     }
 
+    public Builder llmMaxConcurrency(int value) {
+      this.llmMaxConcurrency = value;
+      return this;
+    }
+
     public Builder crossCheckerEnabled(boolean value) {
       this.crossCheckerEnabled = value;
       return this;
@@ -515,6 +535,7 @@ public record CraConfig(
           llmModelLight,
           fallbackChain,
           rpm,
+          llmMaxConcurrency,
           crossCheckerEnabled,
           crossCheckerModes,
           crossCheckerHistoryWeeks,

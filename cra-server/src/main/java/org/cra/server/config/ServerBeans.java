@@ -112,7 +112,8 @@ public class ServerBeans {
             config.llmModelLight(),
             config.parsedFallbackChain(),
             config.parsedRpm(LlmGatewayConfig.defaultRpm()),
-            config.parsedTemperature()));
+            config.parsedTemperature(),
+            config.llmMaxConcurrency()));
   }
 
   /**
@@ -158,25 +159,24 @@ public class ServerBeans {
   }
 
   /**
-   * 编排参数（05§5 默认值 + 服务端 run 预算）：阈值/预算默认值单源于 {@link PipelineOptions#defaults()}，服务端只覆写 run 级预算。
+   * 编排参数（05§5 review.* / agents.budget.*；默认值单源于 {@link PipelineOptions#defaults()}，服务端全部经
+   * CRA_REVIEW_* / CRA_SERVER_RUN_TOTAL_TOKENS 覆写）。
    *
    * @param config 服务配置
    * @return PipelineOptions
    */
   @Bean
   public PipelineOptions pipelineOptions(ServerConfig config) {
-    PipelineOptions defaults = PipelineOptions.defaults();
     return new PipelineOptions(
         config.runTotalTokens(),
-        defaults.degradeAtFirst(),
-        defaults.degradeAtSecond(),
-        PipelineOptions.DEFAULT_LARGE_DIFF_LINES,
-        PipelineOptions.DEFAULT_HARD_CAP_LINES,
-        defaults.nitBudgetDefault(),
-        defaults.publishUnverified(),
-        PipelineOptions.DEFAULT_SPOTCHECK_PERCENT,
-        // 02§4.4：测试文件默认不进入评审范围（服务端暂无独立开关，与 CLI 默认一致）
-        PipelineOptions.DEFAULT_INCLUDE_TEST_FILES);
+        config.reviewDegradeAtFirst(),
+        config.reviewDegradeAtSecond(),
+        config.reviewLargeDiffLines(),
+        config.reviewHardCapLines(),
+        config.reviewNitBudget(),
+        config.reviewPublishUnverified(),
+        config.reviewSpotCheckPercent(),
+        config.reviewIncludeTestFiles());
   }
 
   /**

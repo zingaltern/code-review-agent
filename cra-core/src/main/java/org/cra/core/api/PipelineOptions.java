@@ -5,7 +5,7 @@ import java.util.Objects;
 /**
  * M1 编排参数（05§5 review.* 与 agents.budget 的运行时形态；由组合根从 CLI/环境装配）。
  *
- * @param runTotalTokens run 级总预算 token（agents.budget.run-total-tokens，默认 800k，02§4.4）
+ * @param runTotalTokens run 级总预算 token（agents.budget.run-total-tokens，默认 1.6M，02§4.4）
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70：砍 light 角色与 1 视角——M1 单角色映射为剩余
  *     chunk 简化上下文）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85：候选按 severity 排序只取 top-10）
@@ -63,8 +63,8 @@ public record PipelineOptions(
         DEFAULT_INCLUDE_TEST_FILES);
   }
 
-  /** run 级预算默认（02§4.4：800k；AI Coding 时代大改动放宽档，原 500k）。 */
-  public static final long DEFAULT_RUN_TOTAL_TOKENS = 800_000;
+  /** run 级预算默认（02§4.4：1.6M；2026-10-31 预算翻倍，原 800k；更早为 500k）。 */
+  public static final long DEFAULT_RUN_TOTAL_TOKENS = 1_600_000;
 
   /** 大 diff 降档线默认（02§4.4：4000 行；原 2000）。 */
   public static final int DEFAULT_LARGE_DIFF_LINES = 4_000;

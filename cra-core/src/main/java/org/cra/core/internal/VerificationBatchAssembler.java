@@ -58,12 +58,12 @@ final class VerificationBatchAssembler {
 
   private static final int CITED_EVENT_MAX = 5;
 
-  /** Judge 涉事文件单文件 token 上限（03§6：≤20k/案件，3 文件内分配）。 */
-  private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
+  /** Judge 涉事文件单文件 token 上限（03§6：≤40k/案件，3 文件内分配；2026-10-31 预算翻倍 4k→8k，3×8k ≤ 40k）。 */
+  private static final long JUDGE_FILE_TOKEN_CAP = 8_000;
 
   private static final int JUDGE_MAX_FILES = 3;
 
-  /** Judge 案件调用点索引渲染上限（ADR-0015：20k 案件预算内的预留）。 */
+  /** Judge 案件调用点索引渲染上限（ADR-0015：40k 案件预算内的预留）。 */
   private static final long JUDGE_CALL_SITE_TOKEN_CAP = 500;
 
   private VerificationBatchAssembler() {}
@@ -194,7 +194,7 @@ final class VerificationBatchAssembler {
     // 预留必须覆盖最终 brief 的全部非代码段（含被引证据、策略、测试清单与系统提示余量），
     // 否则 context 类批次会在 AgentRunner 发送前被输入硬限杀掉 → UNVERIFIED 不发布。
     // 索引（≤1000）与切片（≤6000 默认）是"可裁剪"预留：合计不超过 预算 − 固定段 − 最小代码上下文，
-    // 保证 verifier 16k 下不越界（ADR-0015 §2.2 修订、04§2.2）。
+    // 保证 verifier 32k 下不越界（ADR-0015 §2.2 修订、04§2.2；2026-10-31 预算翻倍）。
     // 分层核对契约：仅调用点索引可用时注入（可信指令段，不进 UNTRUSTED 定界；04§2.6）
     String layerContract =
         callSiteIndex != null && callSiteIndex.available()
