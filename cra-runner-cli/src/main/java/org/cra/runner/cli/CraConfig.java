@@ -1,10 +1,13 @@
 package org.cra.runner.cli;
 
+import java.util.Locale;
+import org.cra.agents.api.AgentBudgetOverrides;
+import org.cra.common.exception.CraConfigException;
 import org.cra.common.run.ReviewMode;
 
 /**
- * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量，密钥只从环境变量读， 05§6）。组装期校验：缺项/非法值即 CraConfigException →
- * 退出码 2（05§3）。
+ * CLI 运行配置（05§5 部署级配置的 M2 子集；值来源 = 命令行参数 + 环境变量）。GitHub token 可经 `--token`/`GITHUB_TOKEN` 提供；LLM 与
+ * GitLab 密钥只从环境变量/文件读（05§3/§6）。组装期校验：缺项/非法值即 CraConfigException → 退出码 2。
  *
  * @param repoOwner 仓库属主（本地模式可为 null，由 remote origin 推导后经 {@link #withResolvedLocal} 回填）
  * @param repoName 仓库名（同上）
@@ -14,17 +17,17 @@ import org.cra.common.run.ReviewMode;
  * @param depth 深度档位
  * @param dryRun dry-run（全程零写，05§6；本地模式默认 true，05§3）
  * @param securityBlock --security-block：存在 security finding 时退出码 3（05§3）
- * @param githubToken GitHub token（GITHUB_TOKEN 或 --token；本地模式不需要）
+ * @param githubToken GitHub token（GITHUB_TOKEN 或 --token；本地与 GitLab 模式为 null）
  * @param githubApi GitHub API 根（默认 https://api.github.com）
  * @param llmApiKey LLM 密钥（CRA_LLM_API_KEY；本地模式缺省 = 跳过评审并如实声明）
  * @param llmBaseUrl LLM 端点（CRA_LLM_BASE_URL）
  * @param llmModel 模型名（CRA_LLM_MODEL = standard 档，05§5）
  * @param runRoot trace/brief 落盘根（默认 .cra/runs，05§4 artifact 路径）
  * @param workspace 本地工作区根（jgit blame 用；CI = checkout 目录，默认当前目录；05§2.1）
- * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 2000）
- * @param hardCapLines 硬上限（review.hard-cap-lines，默认 8000）
+ * @param largeDiffLines 大 diff 降档线（review.large-diff-lines，默认 4000）
+ * @param hardCapLines 硬上限（review.hard-cap-lines，默认 16000）
  * @param nitBudget nit 预算默认（review.nit-budget-default，默认 3；REVIEW.md 显式配置优先）
- * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 500k）
+ * @param runTotalTokens run 级预算（agents.budget.run-total-tokens，默认 800k）
  * @param degradeAtFirst 第一降档阈值（agents.budget.degrade-at[0]，默认 0.70）
  * @param degradeAtSecond 第二降档阈值（agents.budget.degrade-at[1]，默认 0.85）
  * @param publishUnverified UNVERIFIED 发布策略（review.publish-unverified：never|labeled；M2 起 labeled 为带
@@ -95,20 +98,27 @@ public record CraConfig(
     GitLabSettings gitlab,
     SemanticContextConfig semanticContext,
     boolean includeTestFiles,
-    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
+    AgentBudgetOverrides agentBudgets) {
+
+  /** 本地 trace/brief 落盘根默认（05§4 artifact 路径）。 */
+  public static final String DEFAULT_RUN_ROOT = ".cra/runs";
+
+  /** 本地 SQLite 账本文件默认（02§5 本地形态）。 */
+  public static final String DEFAULT_LEDGER_DB = "~/.cra/ledger.db";
+
+  /** LLM 降级链默认（05§5）。 */
+  public static final String DEFAULT_FALLBACK_CHAIN = "standard,light";
 
   public CraConfig {
     signoff = signoff == null ? SignoffConfig.defaults() : signoff;
     semanticContext = semanticContext == null ? SemanticContextConfig.defaults() : semanticContext;
-    agentBudgets =
-        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
+    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
     platform =
         platform == null || platform.isBlank()
             ? "github"
-            : platform.strip().toLowerCase(java.util.Locale.ROOT);
+            : platform.strip().toLowerCase(Locale.ROOT);
     if (!"github".equals(platform) && !"gitlab".equals(platform)) {
-      throw new org.cra.common.exception.CraConfigException(
-          "platform 非法: " + platform + "（github|gitlab）");
+      throw new CraConfigException("platform 非法: " + platform + "（github|gitlab）");
     }
     gitlab = gitlab == null ? GitLabSettings.none() : gitlab;
   }
@@ -233,7 +243,7 @@ public record CraConfig(
         GitLabSettings.none(),
         SemanticContextConfig.defaults(),
         false,
-        org.cra.agents.api.AgentBudgetOverrides.none());
+        AgentBudgetOverrides.none());
   }
 
   /** push 基线解析默认回溯步数（05§2.4）。 */
@@ -346,7 +356,7 @@ public record CraConfig(
         GitLabSettings.none(),
         SemanticContextConfig.defaults(),
         false,
-        org.cra.agents.api.AgentBudgetOverrides.none());
+        AgentBudgetOverrides.none());
   }
 
   /** 本地身份/区间解析回填（remote origin 推导与 base/head sha 解析完成后调用）。 */

@@ -159,6 +159,50 @@ class CliArgsTest {
   }
 
   @Test
+  void blankSemanticContextEnvFallsBackToDefaults() {
+    // GitHub Actions 空 input 会以 "" 注入 env：空白环境变量等同未设置，不得因 parseInt("") 拒绝启动
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_SEMANTIC_CONTEXT_MAX_FILES", "");
+    env.put("CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", "  ");
+    env.put("CRA_SEMANTIC_CONTEXT_SLICE_TOKENS", "");
+    CraConfig config = CliArgs.parse(baseArgs(), env);
+    assertThat(config.semanticContext().enabled()).isFalse();
+    assertThat(config.semanticContext().maxFiles()).isEqualTo(2_000);
+    assertThat(config.semanticContext().maxFileBytes()).isEqualTo(262_144L);
+    assertThat(config.semanticContext().sliceTokens()).isEqualTo(6_000L);
+  }
+
+  @Test
+  void spotCheckPercentAcceptsZeroAndHundred() {
+    // 0 = 关闭抽查保险丝，100 = 全量抽查（PipelineOptions/SpotCheckFuse 契约允许 [0,100]）
+    assertThat(
+            CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "0"), ENV).spotCheckPercent())
+        .isZero();
+    assertThat(
+            CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "100"), ENV)
+                .spotCheckPercent())
+        .isEqualTo(100);
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "101"), ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("[0,100]");
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "-1"), ENV))
+        .isInstanceOf(CraConfigException.class);
+  }
+
+  @Test
+  void localModeIgnoresGitlabTokenFile() {
+    // 05§3：本地形态与平台无关——残留 CRA_GITLAB_TOKEN_FILE 不得拖垮本地启动
+    Map<String, String> env = Map.of("CRA_GITLAB_TOKEN_FILE", "/no/such/token-file");
+    CraConfig config =
+        CliArgs.parse(
+            new String[] {"--local", "--platform", "gitlab", "--gitlab-project", "g/p"}, env);
+    assertThat(config.local()).isTrue();
+    assertThat(config.isGitlab()).isTrue();
+    assertThat(config.gitlab().token()).isNull();
+    assertThat(config.githubToken()).isNull();
+  }
+
+  @Test
   void localModeExplicitOverrides() {
     CraConfig config =
         CliArgs.parse(

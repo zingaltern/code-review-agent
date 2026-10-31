@@ -5,13 +5,16 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.cra.common.exception.CraException;
 import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
+import org.cra.common.run.ReviewMode;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
+import org.cra.common.text.Texts;
 import org.cra.core.api.Orchestrator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,7 +38,7 @@ final class SweepCommand {
 
   private static final Logger LOG = LoggerFactory.getLogger(SweepCommand.class);
 
-  /** 汇总 issue 标签（平台无该标签时忽略，不影响幂等——幂等靠标题+正文首行）。 */
+  /** 汇总 issue 标签（平台无该标签时忽略；幂等只看汇总正文首行，05§2.5）。 */
   private static final List<String> NIGHTLY_LABELS = List.of("cra-nightly");
 
   /**
@@ -54,7 +57,7 @@ final class SweepCommand {
       List<PullRequestRef> pulls = allPulls.stream().limit(parsed.maxPrs()).toList();
       int truncated = Math.max(0, allPulls.size() - pulls.size());
       LOG.info(
-          "cra sweep start: repo={}/{} since={} window={} selected={} truncated={} max-prs={} dry-run={}",
+          "cra sweep start: repo={}/{} since={} windowPrs={} selected={} truncated={} max-prs={} dry-run={}",
           repo.owner(),
           repo.repo(),
           parsed.since(),
@@ -68,7 +71,7 @@ final class SweepCommand {
         return 0;
       }
       List<PrRun> runs = runAll(config, pulls);
-      int failed = (int) runs.stream().filter(r -> r.failed()).count();
+      int failed = (int) runs.stream().filter(PrRun::failed).count();
       int reviewed = (int) runs.stream().filter(r -> !r.failed() && r.reviewed()).count();
       boolean rollupOk = true;
       if (!config.dryRun() && reviewed > 0) {
@@ -98,12 +101,9 @@ final class SweepCommand {
       context.refresh();
       Orchestrator orchestrator = context.getBean(Orchestrator.class);
       for (PullRequestRef pr : pulls) {
-        if (pr.headSha() == null || pr.headSha().isBlank()) {
-          runs.add(PrRun.skipped(pr, "平台未返回 head sha"));
-          continue;
-        }
         if (pr.baseSha() == null || pr.baseSha().isBlank()) {
           // 旧数据源/平台不提供 base：不猜 diff 基线，如实跳过（05§2.5）
+          LOG.warn("cra sweep pr #{} skipped: 平台未返回 base sha", pr.number());
           runs.add(PrRun.skipped(pr, "平台未返回 base sha"));
           continue;
         }
@@ -117,7 +117,7 @@ final class SweepCommand {
                 ReviewCommand.toDepth(config.depth()),
                 config.dryRun(),
                 false,
-                org.cra.common.run.ReviewMode.ISSUE);
+                ReviewMode.ISSUE);
         try {
           ReviewResult result = orchestrator.run(request);
           runs.add(PrRun.of(pr, result));
@@ -129,8 +129,9 @@ final class SweepCommand {
               result.stats().findingsPublished());
         } catch (RuntimeException e) {
           // 单 PR 故障隔离：不中断整轮夜间评审，如实进汇总并以非零退出码收尾
-          runs.add(PrRun.failed(pr, String.valueOf(e.getMessage())));
-          LOG.error("cra sweep pr #{} failed: {}", pr.number(), e.getMessage());
+          String reason = failureReason(e);
+          runs.add(PrRun.failed(pr, reason));
+          LOG.error("cra sweep pr #{} failed: {}", pr.number(), reason, e);
         }
       }
     }
@@ -199,23 +200,22 @@ final class SweepCommand {
         .append("/")
         .append(tokensOut)
         .append("\n\n");
-    body.append("预算与截断声明：每 PR 预算 run-total-tokens=500k；截断抑制 ")
-        .append(suppressed)
-        .append(" 条；降级事件 ")
-        .append(degradations.isEmpty() ? "无" : String.join("、", degradations))
-        .append("\n\n");
+    body.append(budgetDeclaration(parsed.config().runTotalTokens(), suppressed, degradations));
     body.append("幂等：同一 head commit 已有 DONE 标记的 PR 在后续夜间跑中跳过（05§1.3）。\n");
     try {
-      components
-          .adapter()
-          .postIssueReview(
-              new PostIssueCommand(
-                  repo.owner(), repo.repo(), title, body.toString(), NIGHTLY_LABELS));
-      LOG.info("cra sweep rollup published: {}", title);
+      Optional<Long> issue =
+          components
+              .adapter()
+              .postIssueReview(
+                  new PostIssueCommand(
+                      repo.owner(), repo.repo(), title, body.toString(), NIGHTLY_LABELS));
+      issue.ifPresentOrElse(
+          number -> LOG.info("cra sweep rollup published: {} (#{})", title, number),
+          () -> LOG.warn("cra sweep rollup published without issue number: {}", title));
       return true;
     } catch (RuntimeException e) {
       // 汇总发布失败不回滚已发布的逐 PR issue（账本已完整）；如实记录并由退出码 2 收尾
-      LOG.error("cra sweep rollup publish failed: {}", e.getMessage());
+      LOG.error("cra sweep rollup publish failed: {}", title, e);
       return false;
     }
   }
@@ -241,13 +241,38 @@ final class SweepCommand {
         + " 个。";
   }
 
+  /** 预算/截断/降级声明（数值取本次运行实际配置，不写死文档默认值）。 */
+  static String budgetDeclaration(long runTotalTokens, int suppressed, List<String> degradations) {
+    return "预算与截断声明：每 PR 预算 run-total-tokens="
+        + runTotalTokens
+        + "；截断抑制 "
+        + suppressed
+        + " 条；降级事件 "
+        + (degradations.isEmpty() ? "无" : String.join("、", degradations))
+        + "\n\n";
+  }
+
+  private static String failureReason(RuntimeException e) {
+    String message = e.getMessage();
+    String type = e.getClass().getSimpleName();
+    return message == null || message.isBlank() ? type : type + ": " + message;
+  }
+
   private static String shortSha(String sha) {
-    return sha == null || sha.length() <= 7 ? String.valueOf(sha) : sha.substring(0, 7);
+    return Texts.shortSha(sha, 7, "?");
   }
 
   /** 单 PR 运行记录（结果 / 跳过 / 失败三态，汇总 issue 的数据面）。 */
   private record PrRun(
       PullRequestRef pr, ReviewResult result, String skipReason, String failureReason) {
+
+    PrRun {
+      int states =
+          (result != null ? 1 : 0) + (skipReason != null ? 1 : 0) + (failureReason != null ? 1 : 0);
+      if (states != 1) {
+        throw new IllegalArgumentException("PrRun 必须恰好一种结果状态（result/skip/failure）");
+      }
+    }
 
     static PrRun of(PullRequestRef pr, ReviewResult result) {
       return new PrRun(pr, result, null, null);
