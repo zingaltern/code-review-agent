@@ -56,11 +56,11 @@ public final class Main {
     try {
       if (args.length > 0 && "sweep".equals(args[0])) {
         // M4d 夜间存量评审（05§3）：`cra sweep --repo owner/name --since 30d --max-prs 10`
-        return new SweepCommand()
+        return new SweepCommandRunner()
             .execute(SweepArgs.parse(Arrays.copyOfRange(args, 1, args.length), System.getenv()));
       }
       CraConfig config = CliArgs.parse(args, System.getenv());
-      return new ReviewCommand().execute(config);
+      return new ReviewCommandRunner().execute(config);
     } catch (CraConfigException e) {
       LOG.error(
           "参数/配置错误: {}；用法: cra review [--local|--push] [--platform github|gitlab] --repo owner/name "

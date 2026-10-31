@@ -95,66 +95,75 @@ final class SweepArgs {
               + largeDiffLines);
     }
     CraConfig config =
-        new CraConfig(
-            ownerRepo.owner(),
-            ownerRepo.name(),
-            0,
-            "",
-            "",
-            depth,
-            scan.dryRun(),
-            false,
+        CraConfig.builder()
+            .repoOwner(ownerRepo.owner())
+            .repoName(ownerRepo.name())
+            .prNumber(0)
+            .baseSha("")
+            .headSha("")
+            .depth(depth)
+            .dryRun(scan.dryRun())
+            .securityBlock(false)
             // GitLab 模式下 token 只属于 GitLabSettings（与 CliArgs 同一密钥隔离不变量，ADR-0013）
-            gitlab ? null : token,
-            scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE),
-            llm.apiKey(),
-            llm.baseUrl(),
-            llm.model(),
-            scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT),
-            scan.named().getOrDefault("--workspace", "."),
-            largeDiffLines,
-            hardCapLines,
-            PlatformArgs.nitBudget(
-                "CRA_REVIEW_NIT_BUDGET",
-                PlatformArgs.blankToNull(env.get("CRA_REVIEW_NIT_BUDGET")),
-                defaults.nitBudgetDefault()),
-            defaults.runTotalTokens(),
-            degradeAt.first(),
-            degradeAt.second(),
-            PlatformArgs.publishUnverified(
-                "CRA_REVIEW_PUBLISH_UNVERIFIED",
-                PlatformArgs.blankToNull(env.get("CRA_REVIEW_PUBLISH_UNVERIFIED")),
-                defaults.publishUnverified()),
-            PlatformArgs.percent(
-                "CRA_REVIEW_SPOT_CHECK_PERCENT",
-                PlatformArgs.blankToNull(env.get("CRA_REVIEW_SPOT_CHECK_PERCENT")),
-                defaults.importantRefutedSpotCheckPercent()),
-            false,
-            CliArgs.DEFAULT_EXEC,
-            CraConfig.DEFAULT_LEDGER_DB,
-            PlatformArgs.blankToNull(
-                scan.named().getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))),
-            PlatformArgs.blankToNull(
-                scan.named().getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
-            PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN),
-            PlatformArgs.envOr(env, "CRA_LLM_RPM", ""),
-            maxConcurrency,
-            scan.crossChecker(),
-            modes,
-            historyWeeks,
-            temperature,
-            CraConfig.DEFAULT_PUSH_LOOKBACK,
-            ReviewMode.ISSUE,
-            SignoffConfig.defaults(),
-            platform,
-            gitlab ? PlatformArgs.gitlabSettings(scan.named(), env) : GitLabSettings.none(),
-            SemanticContextConfig.defaults(),
+            .githubToken(gitlab ? null : token)
+            .githubApi(
+                scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE))
+            .llmApiKey(llm.apiKey())
+            .llmBaseUrl(llm.baseUrl())
+            .llmModel(llm.model())
+            .runRoot(scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT))
+            .workspace(scan.named().getOrDefault("--workspace", "."))
+            .largeDiffLines(largeDiffLines)
+            .hardCapLines(hardCapLines)
+            .nitBudget(
+                PlatformArgs.nitBudget(
+                    "CRA_REVIEW_NIT_BUDGET",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_NIT_BUDGET")),
+                    defaults.nitBudgetDefault()))
+            .runTotalTokens(defaults.runTotalTokens())
+            .degradeAtFirst(degradeAt.first())
+            .degradeAtSecond(degradeAt.second())
+            .publishUnverified(
+                PlatformArgs.publishUnverified(
+                    "CRA_REVIEW_PUBLISH_UNVERIFIED",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_PUBLISH_UNVERIFIED")),
+                    defaults.publishUnverified()))
+            .spotCheckPercent(
+                PlatformArgs.percent(
+                    "CRA_REVIEW_SPOT_CHECK_PERCENT",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_SPOT_CHECK_PERCENT")),
+                    defaults.importantRefutedSpotCheckPercent()))
+            .local(false)
+            .execCommand(CliArgs.DEFAULT_EXEC)
+            .ledgerDb(CraConfig.DEFAULT_LEDGER_DB)
+            .llmModelStrong(
+                PlatformArgs.blankToNull(
+                    scan.named().getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))))
+            .llmModelLight(
+                PlatformArgs.blankToNull(
+                    scan.named().getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))))
+            .fallbackChain(
+                PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN))
+            .rpm(PlatformArgs.envOr(env, "CRA_LLM_RPM", ""))
+            .llmMaxConcurrency(maxConcurrency)
+            .crossCheckerEnabled(scan.crossChecker())
+            .crossCheckerModes(modes)
+            .crossCheckerHistoryWeeks(historyWeeks)
+            .llmTemperature(temperature)
+            .pushLookback(CraConfig.DEFAULT_PUSH_LOOKBACK)
+            .reviewMode(ReviewMode.ISSUE)
+            .signoff(SignoffConfig.defaults())
+            .platform(platform)
+            .gitlab(gitlab ? PlatformArgs.gitlabSettings(scan.named(), env) : GitLabSettings.none())
+            .semanticContext(SemanticContextConfig.defaults())
             // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
-            PlatformArgs.bool(
-                "CRA_REVIEW_TESTS",
-                PlatformArgs.blankToNull(env.get("CRA_REVIEW_TESTS")),
-                defaults.includeTestFiles()),
-            CliArgs.agentBudgets(scan.named(), env));
+            .includeTestFiles(
+                PlatformArgs.bool(
+                    "CRA_REVIEW_TESTS",
+                    PlatformArgs.blankToNull(env.get("CRA_REVIEW_TESTS")),
+                    defaults.includeTestFiles()))
+            .agentBudgets(CliArgs.agentBudgets(scan.named(), env))
+            .build();
     return new Parsed(config, since, maxPrs);
   }
 

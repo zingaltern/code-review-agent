@@ -1,24 +1,8 @@
 package org.cra.runner.cli;
 
 import java.nio.file.Path;
-import org.cra.agents.api.AgentsAssembly;
-import org.cra.agents.api.JudgeCaseInput;
-import org.cra.agents.api.ReviewCrew;
-import org.cra.agents.api.SubAgent;
-import org.cra.agents.api.VerificationBatchInput;
-import org.cra.core.api.CoreAssembly;
-import org.cra.core.api.CrossCheckerOptions;
-import org.cra.core.api.Orchestrator;
-import org.cra.core.api.PipelineOptions;
-import org.cra.core.api.SemanticContextOptions;
-import org.cra.core.api.SignoffOptions;
-import org.cra.git.api.GitAssembly;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalGitAdapter;
-import org.cra.git.api.LocalRepoContext;
-import org.cra.git.api.SymbolIndex;
-import org.cra.llm.api.LlmAssembly;
-import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
 import org.cra.store.api.StoreAssembly;
 import org.springframework.context.annotation.Bean;
@@ -28,15 +12,17 @@ import org.springframework.context.annotation.Primary;
 /**
  * 本地 pre-PR 模式组合根（02§5 本地形态；T2.10）：账本 = SQLite（--ledger-db，默认 ~/.cra/ledger.db）、 diff 数据面 = 本地
  * jgit（LocalGitAdapter，由命令层打开后注入）、无任何 GitHub 依赖（不建 GitHub bean）。 Spring 仅 DI/配置（R6/R7）。
+ *
+ * <p>与 CI 形态共用的 11 个 bean 在 {@link AbstractAppConfig}；本类只声明形态差异（本地 adapter 的 {@code @Primary} 与
+ * SQLite 账本）。
  */
 @Configuration
-class LocalAppConfig {
+class LocalAppConfig extends AbstractAppConfig {
 
-  private final CraConfig config;
   private final LocalGitAdapter localGit;
 
   LocalAppConfig(CraConfig config, LocalGitAdapter localGit) {
-    this.config = config;
+    super(config);
     this.localGit = localGit;
   }
 
@@ -52,106 +38,6 @@ class LocalAppConfig {
   ReviewLedger reviewLedger() {
     // 本地形态事实源（02§5）：完成标记/finding 指纹/模板版本落 SQLite，幂等闸跨 run 生效
     return StoreAssembly.createSqliteLedger(
-        config.repoOwner(), config.repoName(), Path.of(config.ledgerDb()));
-  }
-
-  @Bean
-  LlmGateway llmGateway() {
-    // 本地模式仅在 CRA_LLM_API_KEY 在场时被调用（命令层守卫），T2.9 三档路由配置同 CI 形态
-    return LlmAssembly.createGateway(LlmConfigFactory.create(config));
-  }
-
-  @Bean
-  ReviewCrew reviewCrew() {
-    // T2.2/T2.3：M2 评审班组（BugHunter 四视角 + 专角色）；05§5 agents.budget.<role>.* 在此施加
-    return config.agentBudgets().apply(AgentsAssembly.createReviewCrew());
-  }
-
-  @Bean
-  SubAgent<VerificationBatchInput> verifier() {
-    return config.agentBudgets().apply(AgentsAssembly.createVerifier());
-  }
-
-  @Bean
-  SubAgent<JudgeCaseInput> judge() {
-    return config.agentBudgets().apply(AgentsAssembly.createJudge());
-  }
-
-  @Bean
-  LocalRepoContext localRepoContext() {
-    return GitAssembly.createLocalRepoContext(Path.of(config.workspace()));
-  }
-
-  @Bean
-  CrossCheckerOptions crossCheckerOptions() {
-    // 05§5 agents.crosschecker：默认关闭；模式串在 CLI 解析期已校验
-    return new CrossCheckerOptions(
-        config.crossCheckerEnabled(),
-        CrossCheckerModeParser.parse(config.crossCheckerModes()),
-        config.crossCheckerHistoryWeeks());
-  }
-
-  @Bean
-  PipelineOptions pipelineOptions() {
-    return new PipelineOptions(
-        config.runTotalTokens(),
-        config.degradeAtFirst(),
-        config.degradeAtSecond(),
-        config.largeDiffLines(),
-        config.hardCapLines(),
-        config.nitBudget(),
-        config.publishUnverified(),
-        config.spotCheckPercent(),
-        config.includeTestFiles());
-  }
-
-  @Bean
-  SignoffOptions signoffOptions() {
-    // 05§5 agents.signoff（M4a）：本地形态同样生成签字建议（测试状态由实跑结果覆盖）
-    return config.signoff().toOptions();
-  }
-
-  @Bean
-  SemanticContextOptions semanticContextOptions() {
-    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片
-    return config.semanticContext().toOptions();
-  }
-
-  @Bean
-  SymbolIndex symbolIndex() {
-    // ADR-0014：jgit 树读取 + Java 词法抽取；非 git checkout 时 build 返回不可得快照（不炸 run）
-    return GitAssembly.createSymbolIndex(Path.of(config.workspace()));
-  }
-
-  @Bean
-  Orchestrator orchestrator(
-      GitPlatformAdapter adapter,
-      ReviewLedger ledger,
-      LlmGateway gateway,
-      ReviewCrew crew,
-      SubAgent<VerificationBatchInput> verifier,
-      SubAgent<JudgeCaseInput> judge,
-      PipelineOptions pipelineOptions,
-      CrossCheckerOptions crossCheckerOptions,
-      SignoffOptions signoffOptions,
-      LocalRepoContext localRepoContext,
-      SemanticContextOptions semanticContextOptions,
-      SymbolIndex symbolIndex) {
-    return CoreAssembly.createOrchestrator(
-        adapter,
-        ledger,
-        gateway,
-        crew,
-        verifier,
-        judge,
-        Path.of(config.runRoot()),
-        pipelineOptions,
-        localRepoContext,
-        crossCheckerOptions,
-        signoffOptions,
-        // 本地形态不装配事件史端口（ADR-0012 默认关闭；本地 pre-PR 不查询历史事件）
-        null,
-        semanticContextOptions,
-        symbolIndex);
+        config().repoOwner(), config().repoName(), Path.of(config().ledgerDb()));
   }
 }

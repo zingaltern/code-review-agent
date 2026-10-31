@@ -149,7 +149,7 @@ class LocalPrePrEndToEndTest {
     int code;
     try {
       CraConfig config = CliArgs.parse(args(extra), Map.of());
-      code = new ReviewCommand().execute(config);
+      code = new ReviewCommandRunner().execute(config);
     } finally {
       System.setOut(original);
     }
@@ -169,7 +169,7 @@ class LocalPrePrEndToEndTest {
     // 退出码非零（4 = 实跑构建/测试失败，05§3 定点修订）
     assertThat(executed.exitCode())
         .as("验收 8：注入挂测试的分支必须以非零码退出")
-        .isEqualTo(LocalPrePrCommand.EXIT_BUILD_FAILED);
+        .isEqualTo(LocalPrePrCommandRunner.EXIT_BUILD_FAILED);
     // 报告如实展示真实测试失败输出（摘录置顶 + 真实 [ERROR] 行 + 原始退出码）
     assertThat(executed.stdout())
         .contains("【1】构建/测试实跑")
