@@ -1,5 +1,6 @@
 package org.cra.core.internal;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
@@ -33,7 +34,7 @@ public final class JudgeJsonCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
       return new ParseResult(null, List.of("root: 非合法 JSON: " + e.getOriginalMessage()));
     }
     JsonNode judgement = root.path("judgement");
@@ -57,6 +58,6 @@ public final class JudgeJsonCodec {
     }
   }
 
-  /** 解析结果载体（与 AgentRunner.ParseOutcome 对接）。 */
+  /** 解析结果载体（与 {@link AgentRunner.FinalOutputParser.Parsed} 对接）。 */
   public record ParseResult(Judgement judgement, List<String> errors) {}
 }

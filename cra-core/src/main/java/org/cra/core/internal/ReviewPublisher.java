@@ -1,6 +1,7 @@
 package org.cra.core.internal;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -118,7 +119,7 @@ final class ReviewPublisher {
           "publish",
           Map.of(
               "mode",
-              mode.name().toLowerCase(java.util.Locale.ROOT),
+              mode.name().toLowerCase(Locale.ROOT),
               "dry_run",
               true,
               "comments",
@@ -253,7 +254,7 @@ final class ReviewPublisher {
         "publish",
         Map.of(
             "mode",
-            request.mode().name().toLowerCase(java.util.Locale.ROOT),
+            request.mode().name().toLowerCase(Locale.ROOT),
             "carrier",
             carrier,
             "comments",
