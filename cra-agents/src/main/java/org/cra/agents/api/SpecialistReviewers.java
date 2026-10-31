@@ -17,7 +17,6 @@ public final class SpecialistReviewers {
   /** TestReviewer 定义（测试缺口，category=test）。 */
   public static final class TestReviewer implements SubAgent<ReviewAgentInput> {
 
-    /** 预算（03§6 TestReviewer 行）。 */
     // v1.3.2：输出 1k→2k（与 BugHunter 对齐）——test finding 粒度同 BH，1k 仅容纳 ~2 条，
     // M3 实测 90 观测中 11 次输出预算击穿（12%）导致该角色零产出
     /** 默认输入预算（03§6 TestReviewer 行；agents.budget.test-reviewer.input-tokens 可覆盖）。 */

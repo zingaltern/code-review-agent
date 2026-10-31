@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 评测用 GitHub REST v3 stub 服务器（JDK 自带 httpserver，无新依赖）：以 fixture 的 diff.patch 与解包快照为数据面离线驱动被测
@@ -50,8 +51,11 @@ public final class EvalStubServer implements AutoCloseable {
   private final ConcurrentLinkedQueue<CapturedSummary> summaries = new ConcurrentLinkedQueue<>();
   private final AtomicLong ids = new AtomicLong(5000);
 
-  /** 快照文件清单缓存（首次 tree 请求构建；同一 run 内 listFiles 可能被多次调用）。 */
-  private volatile List<JsonNode> treeEntries;
+  /**
+   * 快照文件清单缓存（首次 tree 请求构建；同一 run 内 listFiles 可能被多次调用）。 {@link AtomicReference} 承担 volatile 语义的 DCL
+   * 快路径；缓存值本身是 {@code List.copyOf} 的不可变列表。
+   */
+  private final AtomicReference<List<JsonNode>> treeEntries = new AtomicReference<>();
 
   private EvalStubServer(
       Seed seed, HttpServer server, java.util.concurrent.ExecutorService executor) {
@@ -239,15 +243,15 @@ public final class EvalStubServer implements AutoCloseable {
   }
 
   private List<JsonNode> snapshotTree() throws IOException {
-    List<JsonNode> cached = treeEntries;
+    List<JsonNode> cached = treeEntries.get();
     if (cached != null) {
       return cached;
     }
     synchronized (this) {
-      if (treeEntries == null) {
-        treeEntries = buildTreeEntries();
+      if (treeEntries.get() == null) {
+        treeEntries.set(buildTreeEntries());
       }
-      return treeEntries;
+      return treeEntries.get();
     }
   }
 
@@ -287,7 +291,7 @@ public final class EvalStubServer implements AutoCloseable {
   private static String toPosixPath(Path relative) {
     StringBuilder out = new StringBuilder();
     for (Path segment : relative) {
-      if (out.length() > 0) {
+      if (!out.isEmpty()) {
         out.append('/');
       }
       out.append(segment);

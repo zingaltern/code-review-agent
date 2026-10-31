@@ -50,13 +50,15 @@ final class LocalPrePrCommandRunner {
       String headSha =
           rawConfig.headSha() == null ? git.headSha() : git.resolve(rawConfig.headSha());
       CraConfig config = rawConfig.withResolvedLocal(ownerName[0], ownerName[1], baseSha, headSha);
-      LOG.info(
-          "cra pre-PR start: repo={} base={}@{} head={} depth={}",
-          repoIdentity,
-          rawConfig.baseSha(),
-          shortSha(baseSha),
-          shortSha(headSha),
-          config.depth());
+      if (LOG.isInfoEnabled()) {
+        LOG.info(
+            "cra pre-PR start: repo={} base={}@{} head={} depth={}",
+            repoIdentity,
+            rawConfig.baseSha(),
+            shortSha(baseSha),
+            shortSha(headSha),
+            config.depth());
+      }
 
       BuildVerifyRunner.ExecResult exec =
           new BuildVerifyRunner(Path.of(config.runRoot()).toAbsolutePath())

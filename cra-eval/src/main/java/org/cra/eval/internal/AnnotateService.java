@@ -160,7 +160,7 @@ public final class AnnotateService {
   }
 
   private static String today() {
-    return java.time.LocalDate.now().toString();
+    return java.time.LocalDate.now(java.time.ZoneId.systemDefault()).toString();
   }
 
   // ---------- hunk 解析与关键词预填 ----------
@@ -207,7 +207,7 @@ public final class AnnotateService {
    */
   static List<String> keywords(List<String> addedLines) {
     Set<String> tokens = new LinkedHashSet<>();
-    Pattern ident = Pattern.compile("[A-Za-z_][A-Za-z0-9_]{3,}");
+    Pattern ident = Pattern.compile("[A-Za-z_]\\w{3,}");
     for (String line : addedLines) {
       Matcher m = ident.matcher(line);
       while (m.find() && tokens.size() < 5) {

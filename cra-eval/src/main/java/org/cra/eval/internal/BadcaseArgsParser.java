@@ -33,7 +33,7 @@ final class BadcaseArgsParser {
     Map<String, String> named = options.named();
     List<String> positional = options.positional();
     if (positional.isEmpty() || !"add".equals(positional.get(0))) {
-      throw new CraConfigException("badcase 子命令当前只支持 add；" + EvalUsage.text());
+      throw new CraConfigException("badcase 子命令当前只支持 add；" + EvalUsage.USAGE_TEXT);
     }
     if (positional.size() < 3) {
       throw new CraConfigException(

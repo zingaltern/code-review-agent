@@ -335,7 +335,7 @@ class SourceScanRulesTest {
   }
 
   private static boolean isLogOnlyBody(List<String> code, int catchLine, int endLine) {
-    // catch (…) { 仅一条 log 语句 } 的行内形态
+    // 行内形态：catch 头与仅一条 log 语句同行，行尾即闭括号
     String inline = code.get(catchLine);
     int brace = inline.indexOf('{');
     if (brace >= 0 && inline.trim().endsWith("}")) {
@@ -468,7 +468,7 @@ class SourceScanRulesTest {
         current.append(c);
       }
     }
-    if (current.length() > 0) {
+    if (!current.isEmpty()) {
       parts.add(current.toString());
     }
     return parts;

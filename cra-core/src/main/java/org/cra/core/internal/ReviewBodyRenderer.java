@@ -120,12 +120,15 @@ final class ReviewBodyRenderer {
         && preExisting.isEmpty()) {
       if (ordered.isEmpty() && skippedDuplicate == 0) {
         // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
-        body.append(
-            noReviewableChanges
-                ? "本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n"
-                : unverifiedUnpublished > 0
-                    ? "本次无已确认发现；" + unverifiedUnpublished + " 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n"
-                    : "本次未发现问题（评审返回空结果）。\n\n");
+        if (noReviewableChanges) {
+          body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
+        } else if (unverifiedUnpublished > 0) {
+          body.append("本次无已确认发现；")
+              .append(unverifiedUnpublished)
+              .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
+        } else {
+          body.append("本次未发现问题（评审返回空结果）。\n\n");
+        }
       } else {
         body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
       }
@@ -256,14 +259,17 @@ final class ReviewBodyRenderer {
       boolean noReviewableChanges) {
     if (ordered.isEmpty()) {
       // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
-      body.append(
-          noReviewableChanges
-              ? "本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n"
-              : unverifiedUnpublished > 0
-                  ? "本次无已确认发现；" + unverifiedUnpublished + " 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n"
-                  : skippedDuplicate > 0
-                      ? "本次无新发现（候选均被指纹去重抑制 " + skippedDuplicate + " 条）。\n\n"
-                      : "本次未发现问题（评审返回空结果）。\n\n");
+      if (noReviewableChanges) {
+        body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
+      } else if (unverifiedUnpublished > 0) {
+        body.append("本次无已确认发现；")
+            .append(unverifiedUnpublished)
+            .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
+      } else if (skippedDuplicate > 0) {
+        body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
+      } else {
+        body.append("本次未发现问题（评审返回空结果）。\n\n");
+      }
       return;
     }
     body.append("### 发现详情\n\n");

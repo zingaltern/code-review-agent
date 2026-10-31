@@ -31,7 +31,8 @@ final class PlatformArgs {
    */
   static String platform(Map<String, String> named, Map<String, String> env) {
     String raw = firstNonBlank(named.get("--platform"), env.get("CRA_GIT_PLATFORM"), GITHUB);
-    String platform = raw.strip().toLowerCase(Locale.ROOT);
+    // 兜底候选是常量 GITHUB，运行期 raw 不会为 null；守卫仅为显式化可空契约（缺省行为不变）
+    String platform = (raw == null ? GITHUB : raw).strip().toLowerCase(Locale.ROOT);
     if (!GITHUB.equals(platform) && !GITLAB.equals(platform)) {
       throw new CraConfigException("--platform / CRA_GIT_PLATFORM 非法: " + raw + "（github|gitlab）");
     }

@@ -275,7 +275,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     // 收尾失败不回滚完成标记）
     ObjectNode payload = MAPPER.createObjectNode();
     payload.put("body", body);
-    String path = "/repos/" + repo.owner() + "/" + repo.repo() + "/issues/comments/" + commentId;
+    String path = "/repos/%s/%s/issues/comments/%d".formatted(repo.owner(), repo.repo(), commentId);
     HttpRequest request =
         transport
             .request(path)

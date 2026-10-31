@@ -188,7 +188,7 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
       List<String> out = new ArrayList<>();
       try (RevWalk walk = new RevWalk(repository)) {
         RevCommit commit = walk.parseCommit(headId);
-        while (commit != null && out.size() < limit) {
+        while (out.size() < limit) {
           out.add(commit.getName());
           if (commit.getParentCount() == 0) {
             break;

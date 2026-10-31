@@ -5,8 +5,8 @@ final class EvalUsage {
 
   private EvalUsage() {}
 
-  static String text() {
-    return """
+  static final String USAGE_TEXT =
+      """
         用法:
           cra-eval run --dataset <dir> [--set all|bad|clean|l2|adversarial|adv-injection|adv-hallucination|adv-refusal|adv-context]
               [--k N] [--depth quick|standard|deep] [--cli-jar PATH] [--work-dir DIR] [--json PATH]
@@ -27,5 +27,4 @@ final class EvalUsage {
               --dataset <dir> [--to-set bad|clean] [--case-id ID] [--annotator NAME] [--reason TEXT]
               [--diff-file PATH] [--snapshot-dir DIR] [--artifact-root DIR] [--token TOKEN]
               [--api-base URL] [--file PATH] [--line N]""";
-  }
 }

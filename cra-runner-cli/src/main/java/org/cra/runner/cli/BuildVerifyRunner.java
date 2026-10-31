@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,11 +48,19 @@ final class BuildVerifyRunner {
 
   private static final Logger LOG = LoggerFactory.getLogger(BuildVerifyRunner.class);
 
+  /** 日志文件写/刷/关互斥锁（读线程写行与主线程刷/关共用一把锁；不锁方法参数引用）。 */
+  private static final Object LOG_LOCK = new Object();
+
   private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
 
-  /** 子进程敏感环境变量剥离：被测仓库的测试/插件不得读取父进程的密钥（05§6）。 */
+  /**
+   * 子进程敏感环境变量剥离：被测仓库的测试/插件不得读取父进程的密钥（05§6）。
+   *
+   * <p>与 {@code matches(".*(...).*")} 等价的 contains 语义（{@code Matcher.find()} 逐位前移，无嵌套量词回溯）； {@code
+   * apikey} 已被 {@code api[_-]?key} 完全覆盖，删除冗余备选。
+   */
   private static final Pattern SENSITIVE_ENV =
-      Pattern.compile("(?i).*(token|secret|api[_-]?key|apikey|password|passwd|credential).*");
+      Pattern.compile("(?i)(token|secret|api[_-]?key|password|passwd|credential)");
 
   private static final Pattern TIMEOUT_PROP = Pattern.compile("\\d{1,6}");
 
@@ -113,7 +122,8 @@ final class BuildVerifyRunner {
     OutputCapture capture = new OutputCapture(maxCapturedChars);
     AtomicBoolean logFailed = new AtomicBoolean();
     AtomicBoolean readFailed = new AtomicBoolean();
-    Path logFile = runRoot.resolve("build-" + LocalDateTime.now().format(TS) + ".log");
+    Path logFile =
+        runRoot.resolve("build-" + LocalDateTime.now(ZoneId.systemDefault()).format(TS) + ".log");
     BufferedWriter logWriter = openLog(logFile, command);
     if (logWriter == null) {
       logFile = null;
@@ -233,7 +243,7 @@ final class BuildVerifyRunner {
 
   private static void writeLogLine(BufferedWriter writer, String line, AtomicBoolean failed) {
     try {
-      synchronized (writer) {
+      synchronized (LOG_LOCK) {
         writer.write(line);
         writer.newLine();
       }
@@ -244,7 +254,7 @@ final class BuildVerifyRunner {
 
   private static void flushLog(BufferedWriter writer, AtomicBoolean failed) {
     try {
-      synchronized (writer) {
+      synchronized (LOG_LOCK) {
         writer.flush();
       }
     } catch (IOException e) {
@@ -257,7 +267,7 @@ final class BuildVerifyRunner {
       return;
     }
     try {
-      synchronized (writer) {
+      synchronized (LOG_LOCK) {
         writer.close();
       }
     } catch (IOException e) {
@@ -283,7 +293,7 @@ final class BuildVerifyRunner {
   }
 
   private static void sanitizeEnvironment(Map<String, String> env) {
-    env.keySet().removeIf(key -> SENSITIVE_ENV.matcher(key).matches());
+    env.keySet().removeIf(key -> SENSITIVE_ENV.matcher(key).find());
   }
 
   static long timeoutSeconds() {

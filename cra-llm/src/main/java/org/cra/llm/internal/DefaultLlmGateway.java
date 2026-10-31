@@ -122,7 +122,7 @@ public final class DefaultLlmGateway implements LlmGateway {
       ModelTier tier,
       List<String> attemptFailures)
       throws InterruptedException {
-    String url = endpoint.baseUrl().replaceAll("/+$", "") + "/chat/completions";
+    String url = endpoint.baseUrl().replaceAll("/++$", "") + "/chat/completions";
     String body =
         OpenAiCodec.encodeRequest(
             endpoint.model(), request, config.temperature(), config.reasoningEffort());
@@ -132,12 +132,7 @@ public final class DefaultLlmGateway implements LlmGateway {
         sleeper.sleep(backoff.delayForAttempt(attempt));
       }
       LlmTransport.TransportResponse response;
-      boolean acquired;
-      try {
-        acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
-      } catch (InterruptedException e) {
-        throw e;
-      }
+      boolean acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!acquired) {
         // 未触达模型：不消耗 RPM 槽（02§4.5 per-model RPM 按实际请求计）
         String failure = tierName(tier) + ": concurrency queue timeout";

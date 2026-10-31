@@ -74,6 +74,9 @@ final class WeeklyReportBuilder {
     }
     int explicit = fixed + wrong + intentional;
     int mainDenominator = explicit + ignored;
+    EvalReport.ProportionMetric precisionMetric =
+        proportion((long) fixed + intentional, mainDenominator);
+    EvalReport.ProportionMetric falsePositiveMetric = proportion(wrong, mainDenominator);
     WeeklyReport.Disposition disposition =
         new WeeklyReport.Disposition(
             fixed,
@@ -83,19 +86,20 @@ final class WeeklyReportBuilder {
             pending,
             explicit,
             mainDenominator,
-            proportion(fixed + intentional, mainDenominator),
-            proportion(wrong, mainDenominator),
-            proportion(fixed + intentional, explicit),
+            precisionMetric,
+            falsePositiveMetric,
+            proportion((long) fixed + intentional, explicit),
             proportion(wrong, explicit),
             mainDenominator >= DISPOSITION_SAMPLE_GATE,
             DISPOSITION_SAMPLE_GATE,
             PRECISION_TARGET,
             FALSE_POSITIVE_LIMIT,
+            // 门禁判定复用上方 proportion（除零防护在 proportion 内：分母 ≤0 置 null）；样本 <30 按口径不判定
             mainDenominator >= DISPOSITION_SAMPLE_GATE
-                ? (double) (fixed + intentional) / mainDenominator >= PRECISION_TARGET
+                ? precisionMetric != null && precisionMetric.rate() >= PRECISION_TARGET
                 : null,
             mainDenominator >= DISPOSITION_SAMPLE_GATE
-                ? (double) wrong / mainDenominator <= FALSE_POSITIVE_LIMIT
+                ? falsePositiveMetric != null && falsePositiveMetric.rate() <= FALSE_POSITIVE_LIMIT
                 : null);
 
     List<WindowData.RunFacts> runs = window.runs().stream().filter(r -> !r.dryRun()).toList();
@@ -330,7 +334,7 @@ final class WeeklyReportBuilder {
       refusalVerdict = "拒真池无可用判定，不下结论";
     } else {
       refusalVerdict =
-          (refusalMet ? "推翻率 " : "推翻率 ")
+          "推翻率 "
               + percent(refusal.overturnRate())
               + (refusalMet ? " ≥ 10% → 条件满足" : " < 10% → 条件不满足");
     }

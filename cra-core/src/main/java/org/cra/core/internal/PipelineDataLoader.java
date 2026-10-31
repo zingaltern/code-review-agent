@@ -237,7 +237,6 @@ final class PipelineDataLoader {
         clock);
   }
 
-  /** REVIEW.md 一律从 base SHA 读取（04§3.2 规则 1）；读取失败（404）视为未配置；解析容错降级最小默认策略 + 警告（规则 4）。 */
   /**
    * 全量 Java 文件路径索引（ADR-0015：调用点索引的扫描域）：head 侧一次 listFiles。
    *

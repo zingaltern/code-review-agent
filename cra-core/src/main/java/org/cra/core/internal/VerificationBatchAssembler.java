@@ -629,7 +629,7 @@ final class VerificationBatchAssembler {
         .filter(path -> !path.equals(finding.file()))
         .sorted()
         .filter(verifierVerdictText::contains)
-        .limit(JUDGE_MAX_FILES - 1)
+        .limit((long) JUDGE_MAX_FILES - 1)
         .forEach(files::add);
     StringBuilder sb = new StringBuilder();
     for (String path : files) {
@@ -643,7 +643,7 @@ final class VerificationBatchAssembler {
           .append(capLines(content.text(), JUDGE_FILE_TOKEN_CAP))
           .append('\n');
     }
-    return sb.length() == 0 ? "" : sb.toString();
+    return sb.isEmpty() ? "" : sb.toString();
   }
 
   // ---------- 工具 ----------

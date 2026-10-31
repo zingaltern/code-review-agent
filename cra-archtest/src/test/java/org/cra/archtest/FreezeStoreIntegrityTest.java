@@ -1,5 +1,7 @@
 package org.cra.archtest;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,23 +37,20 @@ class FreezeStoreIntegrityTest {
         continue;
       }
       Matcher m = ISSUE_LINE.matcher(line);
-      if (!m.find()) {
-        throw new AssertionError(
-            String.format(
-                "freeze store 第 %d 行缺 {issue: …, expires: …} 注记（10§7 第 2 条）：%s", i + 1, line));
-      }
+      assertTrue(
+          m.find(),
+          String.format(
+              "freeze store 第 %d 行缺 {issue: …, expires: …} 注记（10§7 第 2 条）：%s", i + 1, line));
       LocalDate expires;
       try {
         expires = LocalDate.parse(m.group("date"));
       } catch (DateTimeParseException e) {
         throw new AssertionError(String.format("freeze store 第 %d 行 expires 日期非法：%s", i + 1, line));
       }
-      if (!expires.isAfter(LocalDate.now())) {
-        throw new AssertionError(
-            String.format(
-                "freeze store 第 %d 行豁免已到期（%s），违规未消除即红（10§7 第 3 条 30 天复审）：%s",
-                i + 1, expires, line));
-      }
+      assertTrue(
+          expires.isAfter(LocalDate.now()),
+          String.format(
+              "freeze store 第 %d 行豁免已到期（%s），违规未消除即红（10§7 第 3 条 30 天复审）：%s", i + 1, expires, line));
     }
   }
 }

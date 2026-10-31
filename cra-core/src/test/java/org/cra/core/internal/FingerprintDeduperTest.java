@@ -48,7 +48,6 @@ class FingerprintDeduperTest {
   void tenLinesInsertedDirectlyAboveStillSuppressed() {
     // 漂移 1：紧邻锚行上方插 10 行——锚行内容不变；exact 因上下文含插入行而失配（完整指纹含 ±2 上下文），
     // 滑窗以锚行内容哈希命中（02§4.1：上方插行不改变行内容）
-    List<String> inserted = List.of("i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8", "i9", "i10");
     List<String> newLines =
         List.of(
             "a", "b", "i1", "i2", "i3", "i4", "i5", "i6", "i7", "i8", "i9", "i10", ANCHOR, "d",

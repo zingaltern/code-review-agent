@@ -38,7 +38,7 @@ final class BadcaseIdentifiers {
   }
 
   static String sanitize(String raw) {
-    String value = raw.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("^-+|-+$", "");
+    String value = raw.replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("(?:^-+)|(?:-+$)", "");
     if (value.isBlank()) {
       throw new CraConfigException("无法生成合法 case_id（原始值: " + raw + "），请用 --case-id 指定");
     }

@@ -62,12 +62,14 @@ public final class VerifyCommand {
 
     EvalReport report = Json.read(reportPath, EvalReport.class, "评测报告");
     EvalReport.Gate stored = report.gate();
-    GateTier tier =
-        args.tier() != null && !args.tier().isBlank()
-            ? GateTier.parse(args.tier(), report.k(), report.depth())
-            : stored != null && stored.tier() != null
-                ? GateTier.parse(stored.tier(), report.k(), report.depth())
-                : GateTier.resolve(report.k(), report.depth());
+    GateTier tier;
+    if (args.tier() != null && !args.tier().isBlank()) {
+      tier = GateTier.parse(args.tier(), report.k(), report.depth());
+    } else if (stored != null && stored.tier() != null) {
+      tier = GateTier.parse(stored.tier(), report.k(), report.depth());
+    } else {
+      tier = GateTier.resolve(report.k(), report.depth());
+    }
     // 按**当前**阈值重算：报告是数据产物、门禁是策略——阈值变更后旧报告不得凭陈旧 gate 通过
     EvalReport.Gate gate = GateEvaluator.evaluate(report, GatePolicy.of(tier), false);
     lines.add(

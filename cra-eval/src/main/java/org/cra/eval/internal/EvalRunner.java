@@ -18,9 +18,14 @@ import org.cra.eval.api.FixtureMeta;
  */
 public final class EvalRunner {
 
-  /** Summary"位置非法（降级进 Summary）"列表行（fallback 观测来源）。 */
+  /**
+   * Summary"位置非法（降级进 Summary）"列表行（fallback 观测来源）。 两个内容组用"负前瞻门控 + 占有量词"消回溯（S8786）：组内容与 后续分隔符（`** — `
+   * 与 `:数字`：）经前瞻互斥，最左最短命中与惰性 {@code .+?} 版本逐字符一致。
+   */
   private static final Pattern FALLBACK_LINE =
-      Pattern.compile("^- \\*\\*(.+?)\\*\\* — `(.+?):(\\d+)`：", Pattern.MULTILINE);
+      Pattern.compile(
+          "^- \\*\\*([^\\n](?:(?!\\*\\* — `)[^\\n])*+)\\*\\* — `([^\\n](?::(?!\\d+`：)|[^:\\n])*+):(\\d++)`：",
+          Pattern.MULTILINE);
 
   private final CliProcessRunner.CliInvoker invoker;
 

@@ -47,12 +47,14 @@ public final class PromotionEngine {
       VerdictJsonCodec.VerifierVerdict verdict, CandidateFinding finding, boolean spotCheckHit) {
     return switch (verdict) {
       case CONFIRMED -> new Promotion(Decision.PUBLISH, "verifier-confirmed");
-      case REFUTED ->
-          ConvergenceGuard.securityOrImportant(finding)
-              ? (spotCheckHit
-                  ? new Promotion(Decision.JUDGE, "refuted-spotcheck")
-                  : new Promotion(Decision.REJECT, "refuted"))
-              : new Promotion(Decision.REJECT, "refuted-nit");
+      case REFUTED -> {
+        if (!ConvergenceGuard.securityOrImportant(finding)) {
+          yield new Promotion(Decision.REJECT, "refuted-nit");
+        }
+        yield spotCheckHit
+            ? new Promotion(Decision.JUDGE, "refuted-spotcheck")
+            : new Promotion(Decision.REJECT, "refuted");
+      }
       case INSUFFICIENT_EVIDENCE -> new Promotion(Decision.JUDGE, "insufficient-arbitration");
       case UNAVAILABLE -> new Promotion(Decision.UNVERIFIED, "verification-unavailable");
     };

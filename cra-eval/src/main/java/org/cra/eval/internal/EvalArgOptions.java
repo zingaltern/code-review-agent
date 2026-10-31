@@ -18,15 +18,17 @@ record EvalArgOptions(String subcommand, Map<String, String> named, List<String>
 
   static EvalArgOptions parse(String[] args) {
     if (args.length == 0) {
-      throw new CraConfigException(EvalUsage.text());
+      throw new CraConfigException(EvalUsage.USAGE_TEXT);
     }
     Map<String, String> named = new HashMap<>();
     List<String> positional = new ArrayList<>();
-    for (int i = 1; i < args.length; i++) {
+    int i = 1;
+    while (i < args.length) {
       String arg = args[i];
       if (arg.startsWith("--")) {
         if (BOOLEAN_FLAGS.contains(arg)) {
           named.put(arg, "true");
+          i++;
           continue;
         }
         if (i + 1 >= args.length) {
@@ -36,9 +38,11 @@ record EvalArgOptions(String subcommand, Map<String, String> named, List<String>
           // 下一个 token 是旗标：本旗标缺值（不把 --flag 吞成值，避免后续旗标丢失与误导性拒绝）
           throw new CraConfigException("参数缺值: " + arg + "（下一个 token 看起来是旗标: " + args[i + 1] + "）");
         }
-        named.put(arg, args[++i]);
+        named.put(arg, args[i + 1]);
+        i += 2;
       } else {
         positional.add(arg);
+        i++;
       }
     }
     return new EvalArgOptions(args[0], named, positional);
