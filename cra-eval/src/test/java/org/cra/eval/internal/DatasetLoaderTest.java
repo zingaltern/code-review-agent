@@ -51,7 +51,8 @@ class DatasetLoaderTest {
         caseDir.resolve("expected_findings.json"),
         "{\"format_version\":1,\"expected\":[]}",
         StandardCharsets.UTF_8);
-    assertThatThrownBy(() -> DatasetLoader.load(caseDir, tmp.resolve("cache")))
+    Path cache = tmp.resolve("cache");
+    assertThatThrownBy(() -> DatasetLoader.load(caseDir, cache))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("repo_snapshot.tgz 不入 git")
         .hasMessageContaining("README");
@@ -73,7 +74,8 @@ class DatasetLoaderTest {
         caseDir.resolve("expected_findings.json"),
         "{\"format_version\":1,\"expected\":[]}",
         StandardCharsets.UTF_8);
-    assertThatThrownBy(() -> DatasetLoader.load(caseDir, tmp.resolve("cache")))
+    Path cache = tmp.resolve("cache");
+    assertThatThrownBy(() -> DatasetLoader.load(caseDir, cache))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("sha256 不一致");
   }

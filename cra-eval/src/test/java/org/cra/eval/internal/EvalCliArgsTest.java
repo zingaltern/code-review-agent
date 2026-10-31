@@ -53,7 +53,7 @@ class EvalCliArgsTest {
         .isTrue();
     // 缺省时 runner 会注入占位值，run 如实失败于 LLM 步骤
     Map<String, String> env = CliProcessRunner.llmEnv(Map.of());
-    assertThat(env.get("CRA_LLM_API_KEY")).isEqualTo("cra-eval-no-key");
+    assertThat(env).containsEntry("CRA_LLM_API_KEY", "cra-eval-no-key");
     assertThat(args).isNotNull();
   }
 
@@ -278,13 +278,11 @@ class EvalCliArgsTest {
     assertThat(args.repo()).isEqualTo("owner/repo");
     assertThat(args.signature()).isEqualTo(Path.of("l2.json.sig"));
     assertThat(args.signingKeyEnv()).isEqualTo("MY_KEY");
-    assertThatThrownBy(
-            () ->
-                EvalCliArgs.parse(
-                    new String[] {
-                      "verify", "--report", "x", "--sha256", "a".repeat(64), "--repo", "owner/repo"
-                    },
-                    Map.of()))
+    String[] missingRepo = {
+      "verify", "--report", "x", "--sha256", "a".repeat(64), "--repo", "owner/repo"
+    };
+    Map<String, String> env = Map.of();
+    assertThatThrownBy(() -> EvalCliArgs.parse(missingRepo, env))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--repo");
   }
@@ -325,20 +323,15 @@ class EvalCliArgsTest {
 
   @Test
   void verifyAndGateRejectUnknownFlagAndPositional() {
-    assertThatThrownBy(
-            () ->
-                EvalCliArgs.parse(
-                    new String[] {
-                      "verify", "--report", "x", "--sha256", "a".repeat(64), "--reprot", "y"
-                    },
-                    Map.of()))
+    String[] misspelledFlag = {
+      "verify", "--report", "x", "--sha256", "a".repeat(64), "--reprot", "y"
+    };
+    Map<String, String> env = Map.of();
+    assertThatThrownBy(() -> EvalCliArgs.parse(misspelledFlag, env))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("--reprot");
-    assertThatThrownBy(
-            () ->
-                EvalCliArgs.parse(
-                    new String[] {"verify", "--report", "x", "--sha256", "a".repeat(64), "stray"},
-                    Map.of()))
+    String[] strayPositional = {"verify", "--report", "x", "--sha256", "a".repeat(64), "stray"};
+    assertThatThrownBy(() -> EvalCliArgs.parse(strayPositional, env))
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("stray");
     assertThatThrownBy(
