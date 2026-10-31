@@ -1,5 +1,7 @@
 package org.cra.runner.cli;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -7,6 +9,8 @@ import java.util.Map;
 import java.util.Set;
 import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
+import org.cra.common.run.ReviewMode;
+import org.cra.common.signoff.TestsStatus;
 import org.cra.core.api.PipelineOptions;
 import org.cra.llm.api.LlmParsing;
 
@@ -24,7 +28,10 @@ final class CliArgs {
   static final String DEFAULT_EXEC = "mvn -B -ntp verify";
 
   /** 单代理预算覆盖 flag（05§5 agents.budget.&lt;role&gt;.*；由角色表生成，避免 16 处手写）。 */
-  private static final java.util.Set<String> BUDGET_FLAGS = budgetFlags();
+  private static final Set<String> BUDGET_FLAGS = budgetFlags();
+
+  /** 带值参数（flag 后紧跟一个值；与 {@link #TRI_STATE_FLAGS} 的布尔旗标互斥）。 */
+  private static final Set<String> VALUE_FLAGS = valueFlags();
 
   /**
    * tri-state 旗标描述符（R5：15 个 case 标签收敛为 5 行表）。三种形式：{@code --flag} / {@code --flag=true} / {@code
@@ -69,10 +76,118 @@ final class CliArgs {
    * @return 运行配置
    */
   static CraConfig parse(String[] args, Map<String, String> env) {
-    // java -jar cra-runner-cli.jar review --repo …（05§3/05§4）：可选 review 子命令前缀
-    if (args.length > 0 && "review".equals(args[0])) {
-      args = java.util.Arrays.copyOfRange(args, 1, args.length);
-    }
+    Scan scan = scan(stripReviewPrefix(args));
+    String platform = PlatformArgs.platform(scan.named(), env);
+    boolean gitlab = PlatformArgs.GITLAB.equals(platform);
+    Target target = resolveTarget(scan, env, gitlab);
+    PlatformArgs.LlmEnvTriple llm = PlatformArgs.llmEnvTriple(env, !scan.local());
+    Limits limits = parseLimits(scan.named());
+    Advanced advanced = parseAdvanced(scan, env);
+    SignoffConfig signoff = parseSignoff(scan, env);
+    LlmTuning tuning = parseLlmTuning(scan.named(), env);
+    return new CraConfig(
+        target.ownerRepo() == null ? null : target.ownerRepo().owner(),
+        target.ownerRepo() == null ? null : target.ownerRepo().name(),
+        target.prNumber(),
+        target.base(),
+        target.head(),
+        target.depth(),
+        dryRun(scan),
+        scan.securityBlock(),
+        // GitLab 模式下 token 只属于 GitLabSettings：带上 githubToken 会让 push 基线解析把 PAT 发给 GitHub
+        gitlab ? null : target.token(),
+        scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE),
+        llm.apiKey(),
+        llm.baseUrl(),
+        llm.model(),
+        scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT),
+        scan.named().getOrDefault("--workspace", "."),
+        limits.largeDiffLines(),
+        limits.hardCapLines(),
+        limits.nitBudget(),
+        limits.runTotalTokens(),
+        limits.degradeFirst(),
+        limits.degradeSecond(),
+        limits.publishUnverified(),
+        limits.spotCheckPercent(),
+        scan.local(),
+        scan.named().getOrDefault("--exec", DEFAULT_EXEC),
+        expandUserHome(scan.named().getOrDefault("--ledger-db", CraConfig.DEFAULT_LEDGER_DB)),
+        tuning.strongModel(),
+        tuning.lightModel(),
+        tuning.fallbackChain(),
+        tuning.rpm(),
+        advanced.crossCheckerEnabled(),
+        advanced.crossCheckerModes(),
+        advanced.historyWeeks(),
+        tuning.temperature(),
+        advanced.pushLookback(),
+        scan.push() ? ReviewMode.COMMIT : ReviewMode.PULL_REQUEST,
+        signoff,
+        platform,
+        // 本地形态与平台无关（05§3）：不读取 GitLab token/文件，避免残留 CRA_GITLAB_TOKEN_FILE 拖垮本地启动
+        gitlab && !scan.local()
+            ? PlatformArgs.gitlabSettings(scan.named(), env)
+            : GitLabSettings.none(),
+        advanced.semanticContext(),
+        advanced.includeTestFiles(),
+        agentBudgets(scan.named(), env));
+  }
+
+  /** 参数扫描结果（named 值参数 + tri-state 取值 + 三个布尔开关）。 */
+  private record Scan(
+      Map<String, String> named,
+      Map<String, Boolean> triValues,
+      Set<String> triSeen,
+      boolean securityBlock,
+      boolean local,
+      boolean push) {}
+
+  /** 仓库/PR/区间/token 解析结果（本地与 CI 形态的差异收敛于此）。 */
+  private record Target(
+      PlatformArgs.OwnerRepo ownerRepo,
+      int prNumber,
+      String base,
+      String head,
+      String depth,
+      String token) {}
+
+  /** 预算/阈值配置（05§5 review.* 与 agents.budget.*）。 */
+  private record Limits(
+      int largeDiffLines,
+      int hardCapLines,
+      int nitBudget,
+      long runTotalTokens,
+      double degradeFirst,
+      double degradeSecond,
+      String publishUnverified,
+      int spotCheckPercent) {}
+
+  /** CrossChecker / 语义上下文 / 测试范围 / push 回溯配置。 */
+  private record Advanced(
+      boolean crossCheckerEnabled,
+      String crossCheckerModes,
+      int historyWeeks,
+      SemanticContextConfig semanticContext,
+      int pushLookback,
+      boolean includeTestFiles) {}
+
+  /** LLM 档位与采样配置（05§5 models.* / fallback-chain / per-model-rpm）。 */
+  private record LlmTuning(
+      String strongModel,
+      String lightModel,
+      String fallbackChain,
+      String rpm,
+      String temperature) {}
+
+  /** 可选 review 子命令前缀（05§3/05§4：java -jar cra-runner-cli.jar review …）。 */
+  private static String[] stripReviewPrefix(String[] args) {
+    return args.length > 0 && "review".equals(args[0])
+        ? Arrays.copyOfRange(args, 1, args.length)
+        : args;
+  }
+
+  private static Scan scan(String[] args) {
     Map<String, String> named = new HashMap<>();
     Map<String, Boolean> triValues = new HashMap<>();
     Set<String> triSeen = new HashSet<>();
@@ -81,7 +196,7 @@ final class CliArgs {
     boolean push = false;
     for (int i = 0; i < args.length; i++) {
       String arg = args[i];
-      if (BUDGET_FLAGS.contains(arg)) {
+      if (VALUE_FLAGS.contains(arg)) {
         if (i + 1 >= args.length) {
           throw new CraConfigException("参数缺值: " + arg);
         }
@@ -98,71 +213,34 @@ final class CliArgs {
         case "--security-block" -> securityBlock = true;
         case "--local" -> local = true;
         case "--push" -> push = true;
-        case "--repo",
-            "--pr",
-            "--base",
-            "--baseline",
-            "--lookback",
-            "--head",
-            "--depth",
-            "--token",
-            "--platform",
-            "--github-api",
-            "--gitlab-base-url",
-            "--gitlab-project",
-            "--run-root",
-            "--workspace",
-            "--large-diff-lines",
-            "--hard-cap-lines",
-            "--nit-budget",
-            "--run-total-tokens",
-            "--degrade-at",
-            "--publish-unverified",
-            "--exec",
-            "--ledger-db",
-            "--model-strong",
-            "--model-light",
-            "--llm-temperature",
-            "--fallback-chain",
-            "--rpm",
-            "--spot-check-percent",
-            "--crosschecker-modes",
-            "--crosschecker-history-weeks",
-            "--semantic-context-max-files",
-            "--semantic-context-max-file-bytes",
-            "--semantic-context-slice-tokens",
-            "--trusted-authors",
-            "--pr-author",
-            "--tests-status" -> {
-          if (i + 1 >= args.length) {
-            throw new CraConfigException("参数缺值: " + arg);
-          }
-          named.put(arg, args[++i]);
-        }
-        default -> {
-          // 未知参数回显只看旗标名：`--token=ghp_...` 这类写法不得把密钥写进结构化日志（05§6）
-          int eq = arg.indexOf('=');
-          String flag = eq > 0 ? arg.substring(0, eq) : arg;
-          throw new CraConfigException("未知参数: " + flag);
-        }
+        default -> throw unknownArg(arg);
       }
     }
-    // dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）——无 env 键的 tri-state
-    boolean dryRun =
-        (local && !triSeen.contains(DRY_RUN.flag()))
-            || triValues.getOrDefault(DRY_RUN.flag(), false);
+    return new Scan(named, triValues, triSeen, securityBlock, local, push);
+  }
 
-    // 平台选择（M4e 第二半，ADR-0013）：默认 github 保持兼容；本地 pre-PR 形态与平台无关
-    String platform = PlatformArgs.platform(named, env);
-    boolean gitlab = PlatformArgs.GITLAB.equals(platform);
+  /** 未知参数回显只看旗标名：`--token=ghp_...` 这类写法不得把密钥写进结构化日志（05§6）。 */
+  private static CraConfigException unknownArg(String arg) {
+    int eq = arg.indexOf('=');
+    String flag = eq > 0 ? arg.substring(0, eq) : arg;
+    return new CraConfigException("未知参数: " + flag);
+  }
 
-    // 仓库标识回退（R5 共享）：本地形态可缺省（remote origin 推导），CI 必填在下方 !local 块拒绝
+  /** dry-run：CI 默认 false；本地模式默认 true（05§3，显式 --dry-run=false 可关）——无 env 键的 tri-state。 */
+  private static boolean dryRun(Scan scan) {
+    return (scan.local() && !scan.triSeen().contains(DRY_RUN.flag()))
+        || scan.triValues().getOrDefault(DRY_RUN.flag(), false);
+  }
+
+  /** 仓库标识、PR/区间、深度与 token 的解析（平台选择已由调用方完成）。 */
+  private static Target resolveTarget(Scan scan, Map<String, String> env, boolean gitlab) {
+    Map<String, String> named = scan.named();
+    boolean local = scan.local();
     String repo = PlatformArgs.repoOrProject(named, env, gitlab);
-    String[] ownerRepo =
-        repo == null || repo.isBlank() ? null : PlatformArgs.splitRepo(repo, gitlab);
+    PlatformArgs.OwnerRepo ownerRepo = repo == null ? null : PlatformArgs.splitRepo(repo, gitlab);
     int pr;
     String base;
-    if (push) {
+    if (scan.push()) {
       if (local) {
         throw new CraConfigException("--push 与 --local 互斥（push 形态走平台 commit comment，05§2.4）");
       }
@@ -172,8 +250,9 @@ final class CliArgs {
       pr = 0;
       // push 基线：--base / --baseline 显式给出即用；缺省由命令执行期沿首父链查账本解析
       // （上一完成 commit；首次 = 仓库初版，05§2.4）
-      String explicitBase = blankToNull(named.get("--base"));
-      base = explicitBase != null ? explicitBase : blankToNull(named.get("--baseline"));
+      String explicitBase = PlatformArgs.blankToNull(named.get("--base"));
+      base =
+          explicitBase != null ? explicitBase : PlatformArgs.blankToNull(named.get("--baseline"));
     } else {
       String prEnv = gitlab ? env.get("CI_MERGE_REQUEST_IID") : env.get("PR_NUMBER");
       pr =
@@ -187,16 +266,16 @@ final class CliArgs {
               : "main";
     }
     // 本地模式 head 可省（= HEAD）；CI 必填
-    String head = named.get("--head");
-    if (head == null || head.isBlank()) {
+    String head = PlatformArgs.blankToNull(named.get("--head"));
+    if (head == null) {
       head =
           local
               ? null
               : required(named, "--head", gitlab ? env.get("CI_COMMIT_SHA") : env.get("HEAD_SHA"));
     }
     String depth = PlatformArgs.depthCheck(named.getOrDefault("--depth", "standard"));
-    // token 解析（R5 共享）：GitLab 拒收 --token；必填性按形态校验（本地可缺省）
-    String token = PlatformArgs.tokenOrGitlabGuard(named, env, gitlab);
+    // token 解析（R5 共享）：GitLab 拒收 --token；本地形态与平台无关，不读取任何远端 token
+    String token = local ? null : PlatformArgs.tokenOrGitlabGuard(named, env, gitlab);
     if (!local) {
       if (gitlab && (token == null || token.isBlank())) {
         throw new CraConfigException("CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件；05§6）");
@@ -212,10 +291,12 @@ final class CliArgs {
             gitlab ? "缺参数: --head（或 CI_COMMIT_SHA）" : "缺参数: --head（或 HEAD_SHA）");
       }
     }
-    // LLM env 三键（R5 共享）：本地形态可缺省（无密钥时评审段如实跳过）
-    PlatformArgs.LlmEnvTriple llm = PlatformArgs.llmEnvTriple(env, !local);
-    // 05§5 review.* 与 agents.budget（默认值即文档基准值；REVIEW.md 显式配置在 core 内优先于 nit 默认）
-    DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", "0.70,0.85"));
+    return new Target(ownerRepo, pr, base, head, depth, token);
+  }
+
+  /** 预算/阈值解析（顺序保持不变：degrade → 行数上限 → 抽查 → 发布策略）。 */
+  private static Limits parseLimits(Map<String, String> named) {
+    DegradeAt degradeAt = parseDegradeAt(named.getOrDefault("--degrade-at", DEFAULT_DEGRADE_AT));
     int largeDiffLines =
         parseIntOption(named, "--large-diff-lines", PipelineOptions.DEFAULT_LARGE_DIFF_LINES);
     int hardCapLines =
@@ -224,77 +305,14 @@ final class CliArgs {
       throw new CraConfigException(
           "--hard-cap-lines 必须大于 --large-diff-lines: " + hardCapLines + " <= " + largeDiffLines);
     }
-    int spotCheckPercent = parseIntOption(named, "--spot-check-percent", 20);
-    if (spotCheckPercent > 100) {
-      throw new CraConfigException("--spot-check-percent 必须在 [0,100]: " + spotCheckPercent);
-    }
+    int spotCheckPercent =
+        parsePercent(named, "--spot-check-percent", PipelineOptions.DEFAULT_SPOTCHECK_PERCENT);
     String publishUnverified = named.getOrDefault("--publish-unverified", "never");
     if (!"never".equals(publishUnverified) && !"labeled".equals(publishUnverified)) {
       throw new CraConfigException(
           "--publish-unverified 非法: " + publishUnverified + "（never|labeled）");
     }
-    // 05§5 agents.crosschecker 与 02§4.4 评审范围（R5 描述符表取值：flag > env > 默认）
-    boolean crossCheckerEnabled = resolveTriState(CROSSCHECKER, triSeen, triValues, env);
-    boolean includeTestFiles = resolveTriState(REVIEW_TESTS, triSeen, triValues, env);
-    String crossCheckerModes = PlatformArgs.crosscheckerModes(named, env);
-    int crossCheckerHistoryWeeks =
-        parseIntOption(
-            "--crosschecker-history-weeks",
-            named.containsKey("--crosschecker-history-weeks")
-                ? named.get("--crosschecker-history-weeks")
-                : blankToNull(env.get("CRA_CROSSCHECKER_HISTORY_WEEKS")),
-            8);
-    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后仅 standard/deep 档生效
-    SemanticContextConfig semanticContextConfig =
-        semanticContextConfig(
-            named, env, resolveTriState(SEMANTIC_CONTEXT, triSeen, triValues, env));
-    int pushLookback =
-        parseIntOption(
-            "--lookback",
-            named.containsKey("--lookback")
-                ? named.get("--lookback")
-                : blankToNull(env.get("CRA_PUSH_LOOKBACK")),
-            CraConfig.DEFAULT_PUSH_LOOKBACK);
-    // 05§5 agents.signoff（M4a）：默认开启；作者/测试状态未知时低风险 0 人签条件不满足
-    boolean signoffEnabled = resolveTriState(SIGNOFF, triSeen, triValues, env);
-    List<String> trustedAuthors =
-        parseCsv(
-            named.getOrDefault("--trusted-authors", envOr(env, "CRA_SIGNOFF_TRUSTED_AUTHORS", "")));
-    String prAuthor = blankToNull(named.get("--pr-author"));
-    if (prAuthor == null) {
-      prAuthor = blankToNull(env.get("CRA_PR_AUTHOR"));
-    }
-    if (prAuthor == null) {
-      prAuthor = blankToNull(env.get("GITHUB_ACTOR"));
-    }
-    String testsStatus =
-        named.getOrDefault("--tests-status", envOr(env, "CRA_TESTS_STATUS", "unknown"));
-    try {
-      org.cra.common.signoff.TestsStatus.parse(testsStatus);
-    } catch (IllegalArgumentException e) {
-      throw new CraConfigException("--tests-status 非法: " + testsStatus + "（passed|failed|unknown）");
-    }
-    SignoffConfig signoffConfig =
-        new SignoffConfig(
-            signoffEnabled, trustedAuthors, prAuthor == null ? "" : prAuthor, testsStatus);
-    AgentBudgetOverrides agentBudgets = agentBudgets(named, env);
-    return new CraConfig(
-        ownerRepo == null ? null : ownerRepo[0],
-        ownerRepo == null ? null : ownerRepo[1],
-        pr,
-        base,
-        head,
-        depth,
-        dryRun,
-        securityBlock,
-        // GitLab 模式下 token 只属于 GitLabSettings：带上 githubToken 会让 push 基线解析把 PAT 发给 GitHub
-        gitlab ? null : token,
-        named.getOrDefault("--github-api", "https://api.github.com"),
-        llm.apiKey(),
-        llm.baseUrl(),
-        llm.model(),
-        named.getOrDefault("--run-root", ".cra/runs"),
-        named.getOrDefault("--workspace", "."),
+    return new Limits(
         largeDiffLines,
         hardCapLines,
         parseNitBudget(named),
@@ -302,27 +320,84 @@ final class CliArgs {
         degradeAt.first(),
         degradeAt.second(),
         publishUnverified,
-        spotCheckPercent,
-        local,
-        named.getOrDefault("--exec", DEFAULT_EXEC),
-        expandUserHome(named.getOrDefault("--ledger-db", "~/.cra/ledger.db")),
-        blankToNull(named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))),
-        blankToNull(named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
-        named.getOrDefault(
-            "--fallback-chain", envOr(env, "CRA_LLM_FALLBACK_CHAIN", "standard,light")),
-        named.getOrDefault("--rpm", envOr(env, "CRA_LLM_RPM", "")),
+        spotCheckPercent);
+  }
+
+  /** CrossChecker / 语义上下文 / 测试范围 / push 回溯解析。 */
+  private static Advanced parseAdvanced(Scan scan, Map<String, String> env) {
+    Map<String, String> named = scan.named();
+    boolean crossCheckerEnabled =
+        resolveTriState(CROSSCHECKER, scan.triSeen(), scan.triValues(), env);
+    boolean includeTestFiles = resolveTriState(REVIEW_TESTS, scan.triSeen(), scan.triValues(), env);
+    String crossCheckerModes = PlatformArgs.crosscheckerModes(named, env);
+    int crossCheckerHistoryWeeks =
+        parseIntOption(
+            "--crosschecker-history-weeks",
+            optionOrEnv(
+                named, env, "--crosschecker-history-weeks", "CRA_CROSSCHECKER_HISTORY_WEEKS"),
+            8);
+    // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后仅 standard/deep 档生效
+    SemanticContextConfig semanticContextConfig =
+        semanticContextConfig(
+            named, env, resolveTriState(SEMANTIC_CONTEXT, scan.triSeen(), scan.triValues(), env));
+    int pushLookback =
+        parseIntOption(
+            "--lookback",
+            optionOrEnv(named, env, "--lookback", "CRA_PUSH_LOOKBACK"),
+            CraConfig.DEFAULT_PUSH_LOOKBACK);
+    return new Advanced(
         crossCheckerEnabled,
         crossCheckerModes,
         crossCheckerHistoryWeeks,
-        blankToNull(named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE"))),
-        pushLookback,
-        push ? org.cra.common.run.ReviewMode.COMMIT : org.cra.common.run.ReviewMode.PULL_REQUEST,
-        signoffConfig,
-        platform,
-        gitlab ? PlatformArgs.gitlabSettings(named, env) : GitLabSettings.none(),
         semanticContextConfig,
-        includeTestFiles,
-        agentBudgets);
+        pushLookback,
+        includeTestFiles);
+  }
+
+  /** 签字建议配置（05§5 agents.signoff；M4a）。 */
+  private static SignoffConfig parseSignoff(Scan scan, Map<String, String> env) {
+    Map<String, String> named = scan.named();
+    boolean signoffEnabled = resolveTriState(SIGNOFF, scan.triSeen(), scan.triValues(), env);
+    List<String> trustedAuthors =
+        parseCsv(
+            named.getOrDefault(
+                "--trusted-authors", PlatformArgs.envOr(env, "CRA_SIGNOFF_TRUSTED_AUTHORS", "")));
+    String prAuthor = PlatformArgs.blankToNull(named.get("--pr-author"));
+    if (prAuthor == null) {
+      prAuthor = PlatformArgs.blankToNull(env.get("CRA_PR_AUTHOR"));
+    }
+    if (prAuthor == null) {
+      prAuthor = PlatformArgs.blankToNull(env.get("GITHUB_ACTOR"));
+    }
+    String testsStatus =
+        named.getOrDefault(
+            "--tests-status", PlatformArgs.envOr(env, "CRA_TESTS_STATUS", "unknown"));
+    try {
+      TestsStatus.parse(testsStatus);
+    } catch (IllegalArgumentException e) {
+      throw new CraConfigException("--tests-status 非法: " + testsStatus + "（passed|failed|unknown）");
+    }
+    return new SignoffConfig(
+        signoffEnabled, trustedAuthors, prAuthor == null ? "" : prAuthor, testsStatus);
+  }
+
+  /** LLM 档位/降级链/RPM/温度解析（05§5；与 cra-server 组合根同语义，公共体在 LlmParsing）。 */
+  private static LlmTuning parseLlmTuning(Map<String, String> named, Map<String, String> env) {
+    String strongModel =
+        PlatformArgs.blankToNull(
+            named.getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG")));
+    String lightModel =
+        PlatformArgs.blankToNull(
+            named.getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT")));
+    String fallbackChain =
+        named.getOrDefault(
+            "--fallback-chain",
+            PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN));
+    String rpm = named.getOrDefault("--rpm", PlatformArgs.envOr(env, "CRA_LLM_RPM", ""));
+    String temperature =
+        PlatformArgs.blankToNull(
+            named.getOrDefault("--llm-temperature", env.get("CRA_LLM_TEMPERATURE")));
+    return new LlmTuning(strongModel, lightModel, fallbackChain, rpm, temperature);
   }
 
   /** tri-state 旗标匹配（R5 描述符表；`--flag=value` 仅表内旗标合法）。 */
@@ -345,7 +420,8 @@ final class CliArgs {
     if (seen.contains(flag.flag())) {
       return values.get(flag.flag());
     }
-    return Boolean.parseBoolean(envOr(env, flag.envKey(), Boolean.toString(flag.defaultValue())));
+    return Boolean.parseBoolean(
+        PlatformArgs.envOr(env, flag.envKey(), Boolean.toString(flag.defaultValue())));
   }
 
   /**
@@ -355,22 +431,27 @@ final class CliArgs {
   private static SemanticContextConfig semanticContextConfig(
       Map<String, String> named, Map<String, String> env, boolean enabled) {
     SemanticContextConfig defaults = SemanticContextConfig.defaults();
-    String maxFilesValue =
-        optionValue(named, env, "--semantic-context-max-files", "CRA_SEMANTIC_CONTEXT_MAX_FILES");
-    String maxFileBytesValue =
-        optionValue(
-            named, env, "--semantic-context-max-file-bytes", "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES");
-    String sliceTokensValue =
-        optionValue(
-            named, env, "--semantic-context-slice-tokens", "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS");
     int maxFiles =
-        parseIntOption("--semantic-context-max-files", maxFilesValue, defaults.maxFiles());
+        parseIntOption(
+            "--semantic-context-max-files",
+            optionValue(
+                named, env, "--semantic-context-max-files", "CRA_SEMANTIC_CONTEXT_MAX_FILES"),
+            defaults.maxFiles());
     long maxFileBytes =
         parseLongOption(
-            "--semantic-context-max-file-bytes", maxFileBytesValue, defaults.maxFileBytes());
+            "--semantic-context-max-file-bytes",
+            optionValue(
+                named,
+                env,
+                "--semantic-context-max-file-bytes",
+                "CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES"),
+            defaults.maxFileBytes());
     long sliceTokens =
         parseLongOption(
-            "--semantic-context-slice-tokens", sliceTokensValue, defaults.sliceTokens());
+            "--semantic-context-slice-tokens",
+            optionValue(
+                named, env, "--semantic-context-slice-tokens", "CRA_SEMANTIC_CONTEXT_SLICE_TOKENS"),
+            defaults.sliceTokens());
     return new SemanticContextConfig(enabled, maxFiles, maxFileBytes, sliceTokens);
   }
 
@@ -379,7 +460,7 @@ final class CliArgs {
     if (raw == null || raw.isBlank()) {
       return List.of();
     }
-    List<String> values = new java.util.ArrayList<>();
+    List<String> values = new ArrayList<>();
     for (String part : raw.split(",")) {
       if (!part.isBlank()) {
         values.add(part.strip());
@@ -388,15 +469,17 @@ final class CliArgs {
     return List.copyOf(values);
   }
 
-  /** 空白值归一为 null：GitHub Actions 的空 env 是 ""，语义等同未设置（档位缺省继承 standard）。 */
-  private static String blankToNull(String value) {
-    return value == null || value.isBlank() ? null : value;
+  /** flag 优先、环境变量次之；两者都缺省返回 null，由解析器取默认值。 */
+  private static String optionValue(
+      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
+    String value = named.get(flag);
+    return value != null ? value : PlatformArgs.blankToNull(env.get(envKey));
   }
 
-  /** 环境变量读取：空白值等同未设置（GitHub Actions 的空 input 是 ""，不是 null）。 */
-  private static String envOr(Map<String, String> env, String key, String defaultValue) {
-    String value = blankToNull(env.get(key));
-    return value == null ? defaultValue : value;
+  /** 显式 flag（含空白值）优先，否则取空白归一后的 env；两者皆缺省为 null。 */
+  private static String optionOrEnv(
+      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
+    return named.containsKey(flag) ? named.get(flag) : PlatformArgs.blankToNull(env.get(envKey));
   }
 
   private static String expandUserHome(String path) {
@@ -411,7 +494,7 @@ final class CliArgs {
       return defaultValue;
     }
     try {
-      int parsed = Integer.parseInt(value);
+      int parsed = Integer.parseInt(value.strip());
       if (parsed < 0) {
         throw new NumberFormatException();
       }
@@ -422,6 +505,14 @@ final class CliArgs {
   }
 
   private record DegradeAt(double first, double second) {}
+
+  /** 降级阈值默认串由 PipelineOptions 基准值生成，避免与运行时默认值漂移。 */
+  private static final String DEFAULT_DEGRADE_AT = defaultDegradeAt();
+
+  private static String defaultDegradeAt() {
+    PipelineOptions defaults = PipelineOptions.defaults();
+    return defaults.degradeAtFirst() + "," + defaults.degradeAtSecond();
+  }
 
   private static DegradeAt parseDegradeAt(String value) {
     String[] parts = value.split(",");
@@ -445,13 +536,13 @@ final class CliArgs {
   }
 
   private static int parseNitBudget(Map<String, String> named) {
-    // 04§3.1：0 = 禁止 nit，是合法配置
+    // 04§3.1：0 = 禁止 nit，是合法配置；缺省值与 PipelineOptions 基准一致
     String value = named.get("--nit-budget");
     if (value == null) {
-      return 3;
+      return PipelineOptions.defaults().nitBudgetDefault();
     }
     try {
-      int parsed = Integer.parseInt(value);
+      int parsed = Integer.parseInt(value.strip());
       if (parsed < 0) {
         throw new NumberFormatException();
       }
@@ -461,31 +552,33 @@ final class CliArgs {
     }
   }
 
-  private static int parseIntOption(Map<String, String> named, String key, int defaultValue) {
+  /** 百分比参数（0–100；0 = 关闭抽查保险丝，与 PipelineOptions/SpotCheckFuse 契约一致）。 */
+  private static int parsePercent(Map<String, String> named, String key, int defaultValue) {
     String value = named.get(key);
-    return parseIntOption(key, value, defaultValue);
-  }
-
-  private static int parseIntOption(String key, String value, int defaultValue) {
     if (value == null) {
       return defaultValue;
     }
     try {
-      int parsed = Integer.parseInt(value);
-      if (parsed <= 0) {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 0 || parsed > 100) {
         throw new NumberFormatException();
       }
       return parsed;
     } catch (NumberFormatException e) {
-      throw new CraConfigException(key + " 必须为正整数: " + value);
+      throw new CraConfigException(key + " 必须在 [0,100]: " + value);
     }
   }
 
-  /** flag 优先、环境变量次之（两者都缺省返回 null，由解析器取默认值）。 */
-  private static String optionValue(
-      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
-    String value = named.get(flag);
-    return value != null ? value : env.get(envKey);
+  private static int parseIntOption(Map<String, String> named, String key, int defaultValue) {
+    return parseIntOption(key, named.get(key), defaultValue);
+  }
+
+  private static int parseIntOption(String key, String value, int defaultValue) {
+    return PlatformArgs.positiveInt(key, value, defaultValue);
+  }
+
+  private static long parseLongOption(Map<String, String> named, String key, long defaultValue) {
+    return parseLongOption(key, named.get(key), defaultValue);
   }
 
   private static long parseLongOption(String key, String value, long defaultValue) {
@@ -493,23 +586,7 @@ final class CliArgs {
       return defaultValue;
     }
     try {
-      long parsed = Long.parseLong(value);
-      if (parsed <= 0) {
-        throw new NumberFormatException();
-      }
-      return parsed;
-    } catch (NumberFormatException e) {
-      throw new CraConfigException(key + " 必须为正整数: " + value);
-    }
-  }
-
-  private static long parseLongOption(Map<String, String> named, String key, long defaultValue) {
-    String value = named.get(key);
-    if (value == null) {
-      return defaultValue;
-    }
-    try {
-      long parsed = Long.parseLong(value);
+      long parsed = Long.parseLong(value.strip());
       if (parsed <= 0) {
         throw new NumberFormatException();
       }
@@ -532,7 +609,7 @@ final class CliArgs {
 
   private static int parsePr(String value) {
     try {
-      int pr = Integer.parseInt(value);
+      int pr = Integer.parseInt(value.strip());
       if (pr <= 0) {
         throw new NumberFormatException();
       }
@@ -554,7 +631,9 @@ final class CliArgs {
     Map<String, String> values =
         LlmParsing.agentBudgetValues(
             AgentBudgetOverrides.CONFIGURABLE_ROLES,
-            (flag, envKey) -> blankToNull(firstNonBlank(named.get(flag), env.get(envKey))));
+            (flag, envKey) ->
+                PlatformArgs.blankToNull(
+                    PlatformArgs.firstNonBlank(named.get(flag), env.get(envKey))));
     try {
       return AgentBudgetOverrides.fromConfig(values);
     } catch (IllegalArgumentException e) {
@@ -562,16 +641,56 @@ final class CliArgs {
     }
   }
 
-  private static java.util.Set<String> budgetFlags() {
-    java.util.Set<String> flags = new java.util.HashSet<>();
+  private static Set<String> budgetFlags() {
+    Set<String> flags = new HashSet<>();
     for (String role : AgentBudgetOverrides.CONFIGURABLE_ROLES) {
       flags.add("--" + role + "-input-tokens");
       flags.add("--" + role + "-output-tokens");
     }
-    return java.util.Set.copyOf(flags);
+    return Set.copyOf(flags);
   }
 
-  private static String firstNonBlank(String first, String second) {
-    return first != null && !first.isBlank() ? first : second;
+  private static Set<String> valueFlags() {
+    Set<String> flags =
+        new HashSet<>(
+            List.of(
+                "--repo",
+                "--pr",
+                "--base",
+                "--baseline",
+                "--lookback",
+                "--head",
+                "--depth",
+                "--token",
+                "--platform",
+                "--github-api",
+                "--gitlab-base-url",
+                "--gitlab-project",
+                "--run-root",
+                "--workspace",
+                "--large-diff-lines",
+                "--hard-cap-lines",
+                "--nit-budget",
+                "--run-total-tokens",
+                "--degrade-at",
+                "--publish-unverified",
+                "--exec",
+                "--ledger-db",
+                "--model-strong",
+                "--model-light",
+                "--llm-temperature",
+                "--fallback-chain",
+                "--rpm",
+                "--spot-check-percent",
+                "--crosschecker-modes",
+                "--crosschecker-history-weeks",
+                "--semantic-context-max-files",
+                "--semantic-context-max-file-bytes",
+                "--semantic-context-slice-tokens",
+                "--trusted-authors",
+                "--pr-author",
+                "--tests-status"));
+    flags.addAll(BUDGET_FLAGS);
+    return Set.copyOf(flags);
   }
 }

@@ -1,13 +1,22 @@
 package org.cra.runner.cli;
 
+import java.nio.file.Path;
 import org.cra.agents.api.AgentsAssembly;
 import org.cra.agents.api.JudgeCaseInput;
 import org.cra.agents.api.ReviewCrew;
 import org.cra.agents.api.SubAgent;
 import org.cra.agents.api.VerificationBatchInput;
+import org.cra.common.git.RepoRef;
 import org.cra.core.api.CoreAssembly;
+import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
+import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
+import org.cra.core.api.SignoffOptions;
+import org.cra.git.api.GitAssembly;
 import org.cra.git.api.GitPlatformAdapter;
+import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmAssembly;
 import org.cra.llm.api.LlmGateway;
 import org.cra.store.api.ReviewLedger;
@@ -47,7 +56,7 @@ class AppConfig {
     // M4c/M4d：发布形态决定账本载体（PR 评论 / commit comment / issue，05§1.3）
     return StoreAssembly.createGitHubLedger(
         components.commentSource(),
-        new org.cra.common.git.RepoRef(config.repoOwner(), config.repoName()),
+        new RepoRef(config.repoOwner(), config.repoName()),
         config.reviewMode());
   }
 
@@ -74,24 +83,23 @@ class AppConfig {
   }
 
   @Bean
-  org.cra.git.api.LocalRepoContext localRepoContext() {
+  LocalRepoContext localRepoContext() {
     // 05§2.1：jgit blame 的本地仓库上下文；目录非仓库时 localRepoRoot 为空（合法降级形态）
-    return org.cra.git.api.GitAssembly.createLocalRepoContext(
-        java.nio.file.Path.of(config.workspace()));
+    return GitAssembly.createLocalRepoContext(Path.of(config.workspace()));
   }
 
   @Bean
-  org.cra.core.api.CrossCheckerOptions crossCheckerOptions() {
+  CrossCheckerOptions crossCheckerOptions() {
     // 05§5 agents.crosschecker：默认关闭；模式串在 CLI 解析期已校验
-    return new org.cra.core.api.CrossCheckerOptions(
+    return new CrossCheckerOptions(
         config.crossCheckerEnabled(),
         CrossCheckerModeParser.parse(config.crossCheckerModes()),
         config.crossCheckerHistoryWeeks());
   }
 
   @Bean
-  org.cra.core.api.PipelineOptions pipelineOptions() {
-    return new org.cra.core.api.PipelineOptions(
+  PipelineOptions pipelineOptions() {
+    return new PipelineOptions(
         config.runTotalTokens(),
         config.degradeAtFirst(),
         config.degradeAtSecond(),
@@ -104,21 +112,21 @@ class AppConfig {
   }
 
   @Bean
-  org.cra.core.api.SignoffOptions signoffOptions() {
+  SignoffOptions signoffOptions() {
     // 05§5 agents.signoff（M4a）：开关与可信作者；路径分级规则取内置默认
     return config.signoff().toOptions();
   }
 
   @Bean
-  org.cra.core.api.SemanticContextOptions semanticContextOptions() {
+  SemanticContextOptions semanticContextOptions() {
     // 05§5 semantic_context（M4e，ADR-0014）：默认关闭；开启后 standard/deep 档注入 L2 跨文件切片
     return config.semanticContext().toOptions();
   }
 
   @Bean
-  org.cra.git.api.SymbolIndex symbolIndex() {
+  SymbolIndex symbolIndex() {
     // ADR-0014：jgit 树读取 + Java 词法抽取；非 git checkout 时 build 返回不可得快照（不炸 run）
-    return org.cra.git.api.GitAssembly.createSymbolIndex(java.nio.file.Path.of(config.workspace()));
+    return GitAssembly.createSymbolIndex(Path.of(config.workspace()));
   }
 
   @Bean
@@ -129,12 +137,12 @@ class AppConfig {
       ReviewCrew crew,
       SubAgent<VerificationBatchInput> verifier,
       SubAgent<JudgeCaseInput> judge,
-      org.cra.core.api.PipelineOptions pipelineOptions,
-      org.cra.core.api.CrossCheckerOptions crossCheckerOptions,
-      org.cra.core.api.SignoffOptions signoffOptions,
-      org.cra.git.api.LocalRepoContext localRepoContext,
-      org.cra.core.api.SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex) {
+      PipelineOptions pipelineOptions,
+      CrossCheckerOptions crossCheckerOptions,
+      SignoffOptions signoffOptions,
+      LocalRepoContext localRepoContext,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex) {
     return CoreAssembly.createOrchestrator(
         adapter,
         ledger,
@@ -142,11 +150,12 @@ class AppConfig {
         crew,
         verifier,
         judge,
-        java.nio.file.Path.of(config.runRoot()),
+        Path.of(config.runRoot()),
         pipelineOptions,
         localRepoContext,
         crossCheckerOptions,
         signoffOptions,
+        // M4f-full 事件史端口未在 CLI 组合根装配（ADR-0012 默认关闭；L2/L3 不验证事件史路径）
         null,
         semanticContextOptions,
         symbolIndex);

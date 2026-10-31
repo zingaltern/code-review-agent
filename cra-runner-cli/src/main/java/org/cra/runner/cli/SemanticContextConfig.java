@@ -1,5 +1,6 @@
 package org.cra.runner.cli;
 
+import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.SemanticContextOptions;
 
 /**
@@ -17,16 +18,13 @@ record SemanticContextConfig(boolean enabled, int maxFiles, long maxFileBytes, l
 
   SemanticContextConfig {
     if (maxFiles < 1) {
-      throw new org.cra.common.exception.CraConfigException(
-          "semantic_context.maxFiles 必须 ≥1: " + maxFiles);
+      throw new CraConfigException("semantic_context.maxFiles 必须 ≥1: " + maxFiles);
     }
     if (maxFileBytes < 1_024) {
-      throw new org.cra.common.exception.CraConfigException(
-          "semantic_context.maxFileBytes 必须 ≥1024: " + maxFileBytes);
+      throw new CraConfigException("semantic_context.maxFileBytes 必须 ≥1024: " + maxFileBytes);
     }
     if (sliceTokens < 500 || sliceTokens > 12_000) {
-      throw new org.cra.common.exception.CraConfigException(
-          "semantic_context.sliceTokens 必须在 [500,12000]: " + sliceTokens);
+      throw new CraConfigException("semantic_context.sliceTokens 必须在 [500,12000]: " + sliceTokens);
     }
   }
 

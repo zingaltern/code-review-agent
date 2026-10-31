@@ -1,7 +1,9 @@
 package org.cra.runner.cli;
 
+import java.util.Locale;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.core.api.CrossCheckerOptions;
 import org.cra.llm.api.LlmParsing;
 
 /**
@@ -15,6 +17,7 @@ final class PlatformArgs {
 
   static final String GITHUB = "github";
   static final String GITLAB = "gitlab";
+  static final String DEFAULT_GITHUB_API_BASE = "https://api.github.com";
   static final String DEFAULT_GITLAB_API_BASE = "https://gitlab.com/api/v4";
 
   private PlatformArgs() {}
@@ -28,7 +31,7 @@ final class PlatformArgs {
    */
   static String platform(Map<String, String> named, Map<String, String> env) {
     String raw = firstNonBlank(named.get("--platform"), env.get("CRA_GIT_PLATFORM"), GITHUB);
-    String platform = raw.strip().toLowerCase(java.util.Locale.ROOT);
+    String platform = raw.strip().toLowerCase(Locale.ROOT);
     if (!GITHUB.equals(platform) && !GITLAB.equals(platform)) {
       throw new CraConfigException("--platform / CRA_GIT_PLATFORM 非法: " + raw + "（github|gitlab）");
     }
@@ -78,30 +81,30 @@ final class PlatformArgs {
    * @return 仓库标识；未配置为 null
    */
   static String repoOrProject(Map<String, String> named, Map<String, String> env, boolean gitlab) {
-    String repo = named.get("--repo");
     if (gitlab) {
-      return firstNonBlank(
-          named.get("--gitlab-project"),
-          env.get("CRA_GITLAB_PROJECT"),
-          env.get("CI_PROJECT_PATH"),
-          repo);
+      return blankToNull(
+          firstNonBlank(
+              named.get("--gitlab-project"),
+              env.get("CRA_GITLAB_PROJECT"),
+              env.get("CI_PROJECT_PATH"),
+              named.get("--repo")));
     }
-    return repo == null || repo.isBlank() ? env.get("GITHUB_REPOSITORY") : repo;
+    return blankToNull(firstNonBlank(named.get("--repo"), env.get("GITHUB_REPOSITORY")));
   }
 
   /**
-   * 仓库标识解析为 `[owner, name]`，缺失即拒绝（R5 共享；CI 必填形态与 sweep 用）。
+   * 仓库标识解析为 `owner/name`，缺失即拒绝（R5 共享；CI 必填形态与 sweep 用）。
    *
    * @param named 命令行命名参数
    * @param env 环境变量
    * @param gitlab 是否 GitLab 平台
-   * @return `[owner, name]`
+   * @return `owner/name`
    * @throws CraConfigException 仓库标识缺失（文案见 {@link #missingRepoMessage}）或格式非法
    */
-  static String[] requireOwnerRepo(
+  static OwnerRepo requireOwnerRepo(
       Map<String, String> named, Map<String, String> env, boolean gitlab) {
     String repo = repoOrProject(named, env, gitlab);
-    if (repo == null || repo.isBlank()) {
+    if (repo == null) {
       throw new CraConfigException(missingRepoMessage(gitlab));
     }
     return splitRepo(repo, gitlab);
@@ -132,8 +135,7 @@ final class PlatformArgs {
       }
       return gitlabToken(env);
     }
-    String token = named.get("--token");
-    return token == null || token.isBlank() ? env.get("GITHUB_TOKEN") : token;
+    return blankToNull(firstNonBlank(named.get("--token"), env.get("GITHUB_TOKEN")));
   }
 
   /**
@@ -145,17 +147,17 @@ final class PlatformArgs {
    * @return 三键原始值（未配置项为 null）
    */
   static LlmEnvTriple llmEnvTriple(Map<String, String> env, boolean required) {
-    String apiKey = env.get("CRA_LLM_API_KEY");
-    String baseUrl = env.get("CRA_LLM_BASE_URL");
-    String model = env.get("CRA_LLM_MODEL");
+    String apiKey = blankToNull(env.get("CRA_LLM_API_KEY"));
+    String baseUrl = blankToNull(env.get("CRA_LLM_BASE_URL"));
+    String model = blankToNull(env.get("CRA_LLM_MODEL"));
     if (required) {
-      if (apiKey == null || apiKey.isBlank()) {
+      if (apiKey == null) {
         throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
       }
-      if (baseUrl == null || baseUrl.isBlank()) {
+      if (baseUrl == null) {
         throw new CraConfigException("CRA_LLM_BASE_URL 未设置");
       }
-      if (model == null || model.isBlank()) {
+      if (model == null) {
         throw new CraConfigException("CRA_LLM_MODEL 未设置");
       }
     }
@@ -196,7 +198,7 @@ final class PlatformArgs {
         continue;
       }
       try {
-        org.cra.core.api.CrossCheckerOptions.Mode.parse(part);
+        CrossCheckerOptions.Mode.parse(part);
       } catch (IllegalArgumentException e) {
         throw new CraConfigException("--crosschecker-modes 非法: " + modes + "（assumption|sniff）");
       }
@@ -234,9 +236,9 @@ final class PlatformArgs {
    *
    * @param full `owner/name` 或 `group/subgroup/project`
    * @param allowNestedGroup GitLab = true
-   * @return `[owner, name]`
+   * @return 拆分的属主与仓库名
    */
-  static String[] splitRepo(String full, boolean allowNestedGroup) {
+  static OwnerRepo splitRepo(String full, boolean allowNestedGroup) {
     int lastSlash = full.lastIndexOf('/');
     if (lastSlash <= 0 || lastSlash == full.length() - 1) {
       throw new CraConfigException(
@@ -248,8 +250,11 @@ final class PlatformArgs {
     if (!allowNestedGroup && owner.contains("/")) {
       throw new CraConfigException("--repo 形如 owner/name: " + full);
     }
-    return new String[] {owner, name};
+    return new OwnerRepo(owner, name);
   }
+
+  /** 仓库标识（owner + name；GitLab 嵌套 group 时 owner 含 `/`）。 */
+  record OwnerRepo(String owner, String name) {}
 
   /**
    * API 根归一：接受实例根或已含 `/api/v4` 的地址（公共体见 {@link LlmParsing#normalizeGitLabApiBase}）。
@@ -276,12 +281,25 @@ final class PlatformArgs {
     return LlmParsing.readGitLabTokenFile(blankToNull(env.get("CRA_GITLAB_TOKEN_FILE")));
   }
 
-  /** 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""，不是 null）。 */
+  /**
+   * 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""，不是 null），非空白值去除首尾空白。
+   *
+   * @param env 环境变量
+   * @param key 键
+   * @param defaultValue 未配置时的默认值
+   * @return 归一后的值
+   */
   static String envOr(Map<String, String> env, String key, String defaultValue) {
-    String value = env.get(key);
-    return value == null || value.isBlank() ? defaultValue : value;
+    String value = blankToNull(env.get(key));
+    return value == null ? defaultValue : value;
   }
 
+  /**
+   * 首个非空白值（不去除首尾空白，调用方按需归一）。
+   *
+   * @param values 候选值
+   * @return 首个非空白值；全空白为 null
+   */
   static String firstNonBlank(String... values) {
     for (String value : values) {
       if (value != null && !value.isBlank()) {
@@ -291,7 +309,36 @@ final class PlatformArgs {
     return null;
   }
 
+  /**
+   * 空白值归一为 null：空白 = 未设置（GitHub Actions 空 input 是 ""）；非空白值去除首尾空白。
+   *
+   * @param value 原始值
+   * @return 去空白后的值或 null
+   */
   static String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.strip();
+  }
+
+  /**
+   * 正整数解析（flag/env 共用）：null 取默认值，非正整数拒绝（退出码 2）。
+   *
+   * @param key 参数名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 解析结果
+   */
+  static int positiveInt(String key, String value, int defaultValue) {
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed <= 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为正整数: " + value);
+    }
   }
 }
