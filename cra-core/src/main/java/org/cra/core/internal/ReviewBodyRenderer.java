@@ -92,10 +92,7 @@ final class ReviewBodyRenderer {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
     appendChangeHeader(body, request);
-    if (!suspectWarning.isEmpty()) {
-      // 05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试
-      body.append("> ⚠️ ").append(suspectWarning).append("\n\n");
-    }
+    appendSuspectWarning(body, suspectWarning);
     List<FindingAggregator.Scored> important =
         ordered.stream().filter(s -> s.finding().severityProposed() == Severity.IMPORTANT).toList();
     List<FindingAggregator.Scored> nits =
@@ -118,66 +115,159 @@ final class ReviewBodyRenderer {
         && nits.isEmpty()
         && fallbacks.isEmpty()
         && preExisting.isEmpty()) {
-      if (ordered.isEmpty() && skippedDuplicate == 0) {
-        // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
-        if (noReviewableChanges) {
-          body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
-        } else if (unverifiedUnpublished > 0) {
-          body.append("本次无已确认发现；")
-              .append(unverifiedUnpublished)
-              .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
-        } else {
-          body.append("本次未发现问题（评审返回空结果）。\n\n");
-        }
-      } else {
-        body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
-      }
+      appendEmptyFindingsNote(
+          body, ordered, skippedDuplicate, unverifiedUnpublished, noReviewableChanges);
     } else {
-      if (!important.isEmpty()) {
-        body.append("### Important\n");
-        for (FindingAggregator.Scored s : important) {
-          body.append(listLine(s));
-        }
-        body.append("\n");
-      }
-      if (!nits.isEmpty()) {
-        body.append("### Nit\n");
-        for (FindingAggregator.Scored s : nits) {
-          body.append(listLine(s));
-        }
-        body.append("\n");
-      }
-      if (!preExisting.isEmpty()) {
-        body.append("### Pre-existing（jgit blame 确证变更前已存在）\n");
-        for (FindingAggregator.Scored s : preExisting) {
-          body.append(listLine(s));
-        }
-        body.append("\n");
-      }
-      if (!fallbacks.isEmpty()) {
-        body.append("### 位置非法（降级进 Summary）\n");
-        for (FindingAggregator.Scored s : fallbacks) {
-          body.append("- **")
-              .append(escape(s.finding().title()))
-              .append("** — `")
-              .append(s.finding().file())
-              .append(":")
-              .append(s.finding().line())
-              .append("`：")
-              .append(escape(s.finding().description()))
-              .append("\n");
-        }
-        body.append("\n");
-      }
+      appendListSections(body, important, nits, preExisting, fallbacks);
     }
+    appendConvergenceAndSignoff(body, convergenceAdvice, signoff);
+    appendCoverageLines(body, coverageLines, detailed, skippedDuplicate, fallbacks);
+    appendUnverifiedStats(body, ordered, unverifiedIds, unverifiedUnpublished, degradations);
+    appendRunMarker(body, request, runId, ordered, suppressedByTruncation, degraded);
+    return body.toString();
+  }
+
+  /**
+   * 可疑注入警告段（05§1.3 规则 2：可疑标记 ≥3 → Summary 警告疑似注入尝试）。
+   *
+   * @param body 输出
+   * @param suspectWarning 可疑标记聚合警告（空串 = 无警告）
+   */
+  private static void appendSuspectWarning(StringBuilder body, String suspectWarning) {
+    if (!suspectWarning.isEmpty()) {
+      body.append("> ⚠️ ").append(suspectWarning).append("\n\n");
+    }
+  }
+
+  /**
+   * 空结果声明段（无 Important/Nit/Pre-existing/fallback 可列时）：有去重抑制 → 抑制计数声明；否则按 02§4.2
+   * 区分无评审范围/验证不可得/确无发现——验证不可得 ≠ 无问题，不把 UNVERIFIED 静默当空结果。
+   *
+   * @param body 输出
+   * @param ordered 已排序候选
+   * @param skippedDuplicate 指纹去重抑制数
+   * @param unverifiedUnpublished 验证不可得未发布数
+   * @param noReviewableChanges 是否无评审范围
+   */
+  private static void appendEmptyFindingsNote(
+      StringBuilder body,
+      List<FindingAggregator.Scored> ordered,
+      int skippedDuplicate,
+      int unverifiedUnpublished,
+      boolean noReviewableChanges) {
+    if (ordered.isEmpty() && skippedDuplicate == 0) {
+      appendEmptyResultNote(body, unverifiedUnpublished, noReviewableChanges);
+    } else {
+      body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
+    }
+  }
+
+  /**
+   * 确无候选时的空结果说明（02§4.2：无评审范围/验证不可得/确无发现三态可区分）。
+   *
+   * @param body 输出
+   * @param unverifiedUnpublished 验证不可得未发布数
+   * @param noReviewableChanges 是否无评审范围
+   */
+  private static void appendEmptyResultNote(
+      StringBuilder body, int unverifiedUnpublished, boolean noReviewableChanges) {
+    if (noReviewableChanges) {
+      body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
+    } else if (unverifiedUnpublished > 0) {
+      body.append("本次无已确认发现；")
+          .append(unverifiedUnpublished)
+          .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
+    } else {
+      body.append("本次未发现问题（评审返回空结果）。\n\n");
+    }
+  }
+
+  /**
+   * 分级列表段（Important/Nit/Pre-existing/位置非法 fallback 四节，各节空则整体缺席；节间以空行分隔）。
+   *
+   * @param body 输出
+   * @param important IMPORTANT 级候选
+   * @param nits NIT 级候选
+   * @param preExisting jgit blame 确证变更前已存在的候选
+   * @param fallbacks 位置非法降级进 Summary 的候选
+   */
+  private static void appendListSections(
+      StringBuilder body,
+      List<FindingAggregator.Scored> important,
+      List<FindingAggregator.Scored> nits,
+      List<FindingAggregator.Scored> preExisting,
+      List<FindingAggregator.Scored> fallbacks) {
+    if (!important.isEmpty()) {
+      body.append("### Important\n");
+      for (FindingAggregator.Scored s : important) {
+        body.append(listLine(s));
+      }
+      body.append("\n");
+    }
+    if (!nits.isEmpty()) {
+      body.append("### Nit\n");
+      for (FindingAggregator.Scored s : nits) {
+        body.append(listLine(s));
+      }
+      body.append("\n");
+    }
+    if (!preExisting.isEmpty()) {
+      body.append("### Pre-existing（jgit blame 确证变更前已存在）\n");
+      for (FindingAggregator.Scored s : preExisting) {
+        body.append(listLine(s));
+      }
+      body.append("\n");
+    }
+    if (!fallbacks.isEmpty()) {
+      body.append("### 位置非法（降级进 Summary）\n");
+      for (FindingAggregator.Scored s : fallbacks) {
+        body.append("- **")
+            .append(escape(s.finding().title()))
+            .append("** — `")
+            .append(s.finding().file())
+            .append(":")
+            .append(s.finding().line())
+            .append("`：")
+            .append(escape(s.finding().description()))
+            .append("\n");
+      }
+      body.append("\n");
+    }
+  }
+
+  /**
+   * 收敛控制与签字建议段：T2.7 轮次超限建议（03§5，停止一切新 finding——人在这一关踩刹车）+ 签字建议（07§5 M4a， 建议型非审批，绑定 head
+   * commit，覆盖声明之前独立成段）。
+   *
+   * @param body 输出
+   * @param convergenceAdvice 收敛建议（null/空白 = 无）
+   * @param signoff 签字建议
+   */
+  private static void appendConvergenceAndSignoff(
+      StringBuilder body, String convergenceAdvice, SignoffAdvice signoff) {
     if (convergenceAdvice != null && !convergenceAdvice.isBlank()) {
-      // T2.7 轮次超限（03§5）：停止一切新 finding，建议打回重新设计——人在这一关踩刹车
       body.append("### 收敛控制\n> ⚠️ ").append(convergenceAdvice).append("\n\n");
     }
-    // 07§5 M4a：签字建议（建议型，非审批；绑定 head commit）——覆盖声明之前独立成段
     for (String line : SignoffSections.lines(signoff)) {
       body.append(line).append("\n");
     }
+  }
+
+  /**
+   * 覆盖声明清单段（"### 覆盖与统计" 标题 + 逐行声明 + 载体形态差异行）。
+   *
+   * @param body 输出
+   * @param coverageLines 覆盖声明行
+   * @param detailed 是否详情形态（载体无行级锚）
+   * @param skippedDuplicate 指纹去重抑制数
+   * @param fallbacks 位置非法降级候选（计数用）
+   */
+  private static void appendCoverageLines(
+      StringBuilder body,
+      List<String> coverageLines,
+      boolean detailed,
+      int skippedDuplicate,
+      List<FindingAggregator.Scored> fallbacks) {
     body.append("### 覆盖与统计\n");
     for (String line : coverageLines) {
       body.append("- ").append(line).append("\n");
@@ -191,6 +281,23 @@ final class ReviewBodyRenderer {
           .append(fallbacks.size())
           .append(" 条\n");
     }
+  }
+
+  /**
+   * 复核与晋升统计段（确认/UNVERIFIED 标签发布/验证不可得未发布计数 + 降级事件清单）。
+   *
+   * @param body 输出
+   * @param ordered 已排序候选
+   * @param unverifiedIds 以 UNVERIFIED 标签发布的 finding id
+   * @param unverifiedUnpublished 验证不可得未发布数
+   * @param degradations 降级事件（空 = 无清单行）
+   */
+  private static void appendUnverifiedStats(
+      StringBuilder body,
+      List<FindingAggregator.Scored> ordered,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished,
+      List<String> degradations) {
     body.append("- 复核与晋升：确认 ")
         .append(ordered.size() - unverifiedIds.size())
         .append(" 条")
@@ -206,7 +313,25 @@ final class ReviewBodyRenderer {
     if (!degradations.isEmpty()) {
       body.append("- 降级事件：").append(String.join("、", degradations)).append("\n");
     }
-    // run 完成标记（05§1.3）：DEGRADED 也是完整发布（02§4.1）；suppressed = 指纹抑制计数
+  }
+
+  /**
+   * run 完成标记段（05§1.3：DEGRADED 也是完整发布，02§4.1；suppressed = 指纹抑制计数）。
+   *
+   * @param body 输出
+   * @param request 评审请求（head commit 来源）
+   * @param runId run 标识
+   * @param ordered 已排序候选（findings 计数）
+   * @param suppressedByTruncation 截断抑制计数
+   * @param degraded run 是否 DEGRADED 收尾
+   */
+  private static void appendRunMarker(
+      StringBuilder body,
+      ReviewRequest request,
+      String runId,
+      List<FindingAggregator.Scored> ordered,
+      int suppressedByTruncation,
+      boolean degraded) {
     body.append("\n<!-- cra:v=")
         .append(MARKER_VERSION)
         .append(" | run=")
@@ -220,7 +345,6 @@ final class ReviewBodyRenderer {
         .append(" | suppressed=")
         .append(suppressedByTruncation)
         .append(" -->");
-    return body.toString();
   }
 
   private static void appendChangeHeader(StringBuilder body, ReviewRequest request) {

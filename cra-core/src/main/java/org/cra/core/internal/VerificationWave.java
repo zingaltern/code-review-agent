@@ -254,6 +254,57 @@ final class VerificationWave {
       long tokensOut,
       Map<String, CallSiteIndex> indexByFinding) {}
 
+  /**
+   * 首轮 + 重试的执行结果（verifyBatch 与重试细节的解耦载体）。
+   *
+   * @param run 可用 run（首轮成功 = 首轮；重试成功 = 重试那次；双不可得 = 首次 run，仅为其 tokens 之外无意义）
+   * @param unavailable 重试后仍不可得（批次按全 UNVERIFIED 收敛）
+   * @param unavailableTokensIn 双不可得时的累计输入 token（两次 run 之和）
+   * @param unavailableTokensOut 双不可得时的累计输出 token（两次 run 之和）
+   */
+  private record VerifierRun(
+      AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> run,
+      boolean unavailable,
+      long unavailableTokensIn,
+      long unavailableTokensOut) {}
+
+  /**
+   * 单 finding 的受控补查结果。
+   *
+   * @param verdict 补查后判定（可能被 followup run 的同 id 判定覆盖；原样透传时不变）
+   * @param attempted 是否实际执行了补查（followup 内容可得）
+   * @param text 补查文本（未尝试为 null；机械校验可见上下文拼接用）
+   * @param tokensIn 补查累计输入 token（未尝试为 0）
+   * @param tokensOut 补查累计输出 token（未尝试为 0）
+   */
+  private record FollowupOutcome(
+      VerdictJsonCodec.ParsedVerdict verdict,
+      boolean attempted,
+      String text,
+      long tokensIn,
+      long tokensOut) {}
+
+  /**
+   * 质控门校验结果。
+   *
+   * @param verdict 门后判定（REFUTED 无可核查反证时已降级）
+   * @param refuteCheck 反证门结果（非 REFUTED 为 notApplicable）
+   * @param antiAnchor 反锚定校验结果（非 CONFIRMED 为 null）
+   */
+  private record GateOutcome(
+      VerdictJsonCodec.ParsedVerdict verdict,
+      RefuteEvidenceGate.Result refuteCheck,
+      AntiAnchorValidator.Result antiAnchor) {}
+
+  /**
+   * 单 finding 的完整收敛结果。
+   *
+   * @param outcome 判定结果（入批内 outcomes）
+   * @param tokensIn 该 finding 的补查累计输入 token
+   * @param tokensOut 该 finding 的补查累计输出 token
+   */
+  private record FindingResolution(PerFinding outcome, long tokensIn, long tokensOut) {}
+
   private BatchOutcome verifyBatch(
       String file,
       List<FindingAggregator.Scored> batch,
@@ -303,41 +354,26 @@ final class VerificationWave {
             "agent", verifier.role().id(),
             "file_batch", file,
             "brief_path", persisted.toString()));
-    AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> run =
-        agentRunner.executeParsed(
-            brief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)), trace);
-    if (run.llmUnavailable()) {
-      // 缩上下文重试 1 次（02§4.2 验证不可得语义的前半段）
-      trace.emit("verify_retry", Map.of("file_batch", file, "reason", run.llmError()));
-      degradations.add(Degradations.VERIFIER_RETRY_ONCE);
-      VerificationBatchInput reduced = reduceContext(input);
-      AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> retry =
-          agentRunner.executeParsed(
-              verifier.buildBrief(reduced),
-              runId,
-              (json, model) -> adapt(VerdictJsonCodec.parse(json)),
-              trace);
-      if (retry.llmUnavailable()) {
-        degradations.add(Degradations.VERIFIER_UNAVAILABLE);
-        trace.emit(
-            "verify",
-            Map.of(
-                "file_batch",
-                file,
-                "findings",
-                batch.size(),
-                "verdicts",
-                "unavailable",
-                "reason",
-                "llm"));
-        return new BatchOutcome(
-            allUnavailable(batch),
-            run.tokensIn() + retry.tokensIn(),
-            run.tokensOut() + retry.tokensOut(),
-            Map.of());
-      }
-      run = retry;
+    VerifierRun verifierRun = executeWithRetry(input, brief, file, runId, degradations);
+    if (verifierRun.unavailable()) {
+      trace.emit(
+          "verify",
+          Map.of(
+              "file_batch",
+              file,
+              "findings",
+              batch.size(),
+              "verdicts",
+              "unavailable",
+              "reason",
+              "llm"));
+      return new BatchOutcome(
+          allUnavailable(batch),
+          verifierRun.unavailableTokensIn(),
+          verifierRun.unavailableTokensOut(),
+          Map.of());
     }
+    AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> run = verifierRun.run();
     if (run.output() == null) {
       // schema 校验重试耗尽：本批无可信判定 → 全部验证不可得（UNVERIFIED 不发布）
       degradations.add(Degradations.VERIFIER_SCHEMA_VIOLATION);
@@ -361,125 +397,17 @@ final class VerificationWave {
     long tokensOut = run.tokensOut();
     Map<String, VerdictJsonCodec.ParsedVerdict> effective = new LinkedHashMap<>(parsed.verdicts());
     for (FindingAggregator.Scored scored : batch) {
-      CandidateFinding finding = scored.finding();
-      VerdictJsonCodec.ParsedVerdict verdict = effective.get(finding.id());
-      boolean followupAttempted = false;
-      String followupText = null;
-      if (verdict != null
-          && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE) {
-        String followupFile = verdict.followupFile();
-        Optional<String> followupContent =
-            followupFile == null ? Optional.empty() : followupLookup.apply(followupFile);
-        trace.emit(
-            "verify_followup",
-            Map.of(
-                "finding_id", finding.id(),
-                "file", String.valueOf(followupFile),
-                "status", followupContent.isPresent() ? "provided" : "unreadable"));
-        if (followupContent.isPresent()) {
-          followupAttempted = true;
-          followupText = followupContent.get();
-          AgentBrief followupBrief =
-              verifier.buildBrief(
-                  VerificationBatchAssembler.withFollowup(input, followupText, verifier.budget()));
-          trace.persistBrief(followupBrief, briefSuffix(file) + "-fu");
-          AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> followupRun =
-              agentRunner.executeParsed(
-                  followupBrief,
-                  runId,
-                  (json, model) -> adapt(VerdictJsonCodec.parse(json)),
-                  trace);
-          tokensIn += followupRun.tokensIn();
-          tokensOut += followupRun.tokensOut();
-          if (!followupRun.llmUnavailable() && followupRun.output() != null) {
-            VerdictJsonCodec.ParsedVerdict updated =
-                followupRun.output().verdicts().get(finding.id());
-            if (updated != null) {
-              verdict = updated;
-            }
-          }
-        }
-      }
-      RefuteEvidenceGate.Result refuteCheck = RefuteEvidenceGate.Result.notApplicable();
-      if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.REFUTED) {
-        refuteCheck =
-            RefuteEvidenceGate.check(
-                finding.category(),
-                verdict.verdict(),
-                verdict.refutation(),
-                visibleContext(input, followupText));
-        if (refuteCheck.downgraded()) {
-          // ADR-0015：无可核查反证的 REFUTED 不得直接丢弃——降级交 Judge 仲裁
-          verdict = downgrade(verdict, refuteCheck.reason());
-        }
-        trace.emit(
-            "refute_evidence_check",
-            Map.of(
-                "finding_id", finding.id(),
-                "status", refuteCheck.status().name(),
-                "reason", refuteCheck.reason().name(),
-                "downgraded", refuteCheck.downgraded()));
-      }
-      AntiAnchorValidator.Result antiAnchor = null;
-      if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.CONFIRMED) {
-        antiAnchor = AntiAnchorValidator.check(findingText(finding), verdict.rationale());
-        trace.emit(
-            "anti_anchor_check",
-            Map.of(
-                "finding_id", finding.id(),
-                "status", antiAnchor.status().name(),
-                "overlap", antiAnchor.overlapRatio(),
-                "refs", antiAnchor.refsTotal()));
-      }
-      // 逐条判定落 trace（含理由，M3 取证需要：verify 批次事件只有计数，无法回答"为什么拒"）
-      if (verdict != null) {
-        String rationale = verdict.rationale() == null ? "" : verdict.rationale();
-        trace.emit(
-            "verification",
-            Map.of(
-                "finding_id",
-                finding.id(),
-                "verdict",
-                verdict.verdict().name(),
-                "rationale",
-                rationale.length() > 400 ? rationale.substring(0, 400) : rationale,
-                "followup",
-                followupAttempted,
-                "refutation_kind",
-                verdict.refutation() == null || verdict.refutation().kind() == null
-                    ? "none"
-                    : verdict.refutation().kind().name()));
-      }
-      outcomes.put(
-          finding.id(),
-          new PerFinding(verdict, antiAnchor, followupAttempted, run.model(), refuteCheck));
+      FindingResolution resolution =
+          resolveFinding(scored, effective, input, file, runId, run.model());
+      outcomes.put(scored.finding().id(), resolution.outcome());
+      tokensIn += resolution.tokensIn();
+      tokensOut += resolution.tokensOut();
     }
-    long confirmed =
-        outcomes.values().stream()
-            .filter(
-                p ->
-                    p.verdict() != null
-                        && p.verdict().verdict() == VerdictJsonCodec.VerifierVerdict.CONFIRMED)
-            .count();
-    long refuted =
-        outcomes.values().stream()
-            .filter(
-                p ->
-                    p.verdict() != null
-                        && p.verdict().verdict() == VerdictJsonCodec.VerifierVerdict.REFUTED)
-            .count();
+    long confirmed = countVerdict(outcomes, VerdictJsonCodec.VerifierVerdict.CONFIRMED);
+    long refuted = countVerdict(outcomes, VerdictJsonCodec.VerifierVerdict.REFUTED);
     long insufficient =
-        outcomes.values().stream()
-            .filter(
-                p ->
-                    p.verdict() != null
-                        && p.verdict().verdict()
-                            == VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE)
-            .count();
-    long downgraded =
-        outcomes.values().stream()
-            .filter(p -> p.refuteCheck() != null && p.refuteCheck().downgraded())
-            .count();
+        countVerdict(outcomes, VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE);
+    long downgraded = countDowngraded(outcomes);
     trace.emit(
         "verify",
         Map.of(
@@ -499,11 +427,234 @@ final class VerificationWave {
                 outcomes.size() - confirmed - refuted - insufficient),
             "refute_downgraded",
             downgraded));
+    return new BatchOutcome(outcomes, tokensIn, tokensOut, indexByFinding(callSiteIndex, batch));
+  }
+
+  /**
+   * 首轮 + 缩上下文重试的执行收敛（02§4.2 验证不可得语义）：首轮不可得 → emit {@code verify_retry} + 声明 VERIFIER_RETRY_ONCE →
+   * 缩小上下文重试 1 次；重试仍不可得 → 声明 VERIFIER_UNAVAILABLE 并以"两次 tokens 之和"回报不可得； 重试成功 → 后续全部以重试那次 run
+   * 为准（tokens/model/output 同源）。
+   *
+   * @param input 本批验证输入（首轮已构建；重试时在其上缩上下文）
+   * @param brief 首轮简报（首轮直接执行；重试时重建）
+   * @param file 批次文件（trace 归属）
+   * @param runId run 标识
+   * @param degradations 降级事件（VERIFIER_RETRY_ONCE / VERIFIER_UNAVAILABLE 追加点）
+   * @return 首轮/重试执行结果
+   */
+  private VerifierRun executeWithRetry(
+      VerificationBatchInput input,
+      AgentBrief brief,
+      String file,
+      String runId,
+      List<String> degradations) {
+    AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> run =
+        agentRunner.executeParsed(
+            brief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)), trace);
+    if (!run.llmUnavailable()) {
+      return new VerifierRun(run, false, 0, 0);
+    }
+    // 缩上下文重试 1 次（02§4.2 验证不可得语义的前半段）
+    trace.emit("verify_retry", Map.of("file_batch", file, "reason", run.llmError()));
+    degradations.add(Degradations.VERIFIER_RETRY_ONCE);
+    AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> retry =
+        agentRunner.executeParsed(
+            verifier.buildBrief(reduceContext(input)),
+            runId,
+            (json, model) -> adapt(VerdictJsonCodec.parse(json)),
+            trace);
+    if (retry.llmUnavailable()) {
+      degradations.add(Degradations.VERIFIER_UNAVAILABLE);
+      return new VerifierRun(
+          run, true, run.tokensIn() + retry.tokensIn(), run.tokensOut() + retry.tokensOut());
+    }
+    return new VerifierRun(retry, false, 0, 0);
+  }
+
+  /**
+   * 单 finding 的受控补查（INSUFFICIENT_EVIDENCE → followup_file 全文注入，03§4.2 判定要求第三条）：查找 + emit {@code
+   * verify_followup}（status provided/unreadable）→ 有内容则重建 brief 并 persistBrief("-fu") + 执行 + tokens
+   * 累加 + 更新判定；非 INSUFFICIENT_EVIDENCE 或判定缺失时原样透传。
+   *
+   * @param verdict 首轮判定（可能为 null = 判定缺失）
+   * @param input 本批验证输入（followup 重建 brief 的基底）
+   * @param finding 候选 finding
+   * @param file 批次文件（persistBrief 后缀与 trace 归属）
+   * @param runId run 标识
+   * @return 更新后判定 + 是否尝试补查 + 补查文本 + 补查 tokens
+   */
+  private FollowupOutcome resolveFollowup(
+      VerdictJsonCodec.ParsedVerdict verdict,
+      VerificationBatchInput input,
+      CandidateFinding finding,
+      String file,
+      String runId) {
+    boolean followupAttempted = false;
+    String followupText = null;
+    long tokensIn = 0;
+    long tokensOut = 0;
+    if (verdict != null
+        && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE) {
+      String followupFile = verdict.followupFile();
+      Optional<String> followupContent =
+          followupFile == null ? Optional.empty() : followupLookup.apply(followupFile);
+      trace.emit(
+          "verify_followup",
+          Map.of(
+              "finding_id", finding.id(),
+              "file", String.valueOf(followupFile),
+              "status", followupContent.isPresent() ? "provided" : "unreadable"));
+      if (followupContent.isPresent()) {
+        followupAttempted = true;
+        followupText = followupContent.get();
+        AgentBrief followupBrief =
+            verifier.buildBrief(
+                VerificationBatchAssembler.withFollowup(input, followupText, verifier.budget()));
+        trace.persistBrief(followupBrief, briefSuffix(file) + "-fu");
+        AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> followupRun =
+            agentRunner.executeParsed(
+                followupBrief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)), trace);
+        tokensIn += followupRun.tokensIn();
+        tokensOut += followupRun.tokensOut();
+        if (!followupRun.llmUnavailable() && followupRun.output() != null) {
+          VerdictJsonCodec.ParsedVerdict updated =
+              followupRun.output().verdicts().get(finding.id());
+          if (updated != null) {
+            verdict = updated;
+          }
+        }
+      }
+    }
+    return new FollowupOutcome(verdict, followupAttempted, followupText, tokensIn, tokensOut);
+  }
+
+  /**
+   * 质控门校验（顺序不变）：REFUTED → {@link RefuteEvidenceGate} 机械校验，无可核查反证则降级 INSUFFICIENT_EVIDENCE 交 Judge
+   * 仲裁（ADR-0015）+ emit {@code refute_evidence_check}；CONFIRMED → {@link AntiAnchorValidator}
+   * 引用新颖性校验 + emit {@code anti_anchor_check}。两者都是质控信号，不阻断。
+   *
+   * @param verdict 判定（可能为 null = 判定缺失，两门均跳过）
+   * @param finding 候选 finding（类别与原文来源）
+   * @param input 本批验证输入（机械校验可见上下文来源）
+   * @param followupText 补查文本（可 null，拼接进机械校验可见上下文）
+   * @return 门后判定（可能被降级）+ 两门结果
+   */
+  private GateOutcome applyGates(
+      VerdictJsonCodec.ParsedVerdict verdict,
+      CandidateFinding finding,
+      VerificationBatchInput input,
+      String followupText) {
+    RefuteEvidenceGate.Result refuteCheck = RefuteEvidenceGate.Result.notApplicable();
+    if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.REFUTED) {
+      refuteCheck =
+          RefuteEvidenceGate.check(
+              finding.category(),
+              verdict.verdict(),
+              verdict.refutation(),
+              visibleContext(input, followupText));
+      if (refuteCheck.downgraded()) {
+        // ADR-0015：无可核查反证的 REFUTED 不得直接丢弃——降级交 Judge 仲裁
+        verdict = downgrade(verdict, refuteCheck.reason());
+      }
+      trace.emit(
+          "refute_evidence_check",
+          Map.of(
+              "finding_id", finding.id(),
+              "status", refuteCheck.status().name(),
+              "reason", refuteCheck.reason().name(),
+              "downgraded", refuteCheck.downgraded()));
+    }
+    AntiAnchorValidator.Result antiAnchor = null;
+    if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.CONFIRMED) {
+      antiAnchor = AntiAnchorValidator.check(findingText(finding), verdict.rationale());
+      trace.emit(
+          "anti_anchor_check",
+          Map.of(
+              "finding_id", finding.id(),
+              "status", antiAnchor.status().name(),
+              "overlap", antiAnchor.overlapRatio(),
+              "refs", antiAnchor.refsTotal()));
+    }
+    return new GateOutcome(verdict, refuteCheck, antiAnchor);
+  }
+
+  /**
+   * 批内单 finding 的完整收敛（原 per-finding 循环体原样搬移）：受控补查 → 质控门 → 逐条判定落 trace（含理由，M3 取证需要）→ 构建 PerFinding。
+   *
+   * @param scored 候选（finding id 与类别来源）
+   * @param effective finding id → 首轮判定
+   * @param input 本批验证输入
+   * @param file 批次文件
+   * @param runId run 标识
+   * @param model 首轮（或重试）run 的实际响应模型（PerFinding.model）
+   * @return 单 finding 结果 + 补查 tokens（计入批次）
+   */
+  private FindingResolution resolveFinding(
+      FindingAggregator.Scored scored,
+      Map<String, VerdictJsonCodec.ParsedVerdict> effective,
+      VerificationBatchInput input,
+      String file,
+      String runId,
+      String model) {
+    CandidateFinding finding = scored.finding();
+    FollowupOutcome followup =
+        resolveFollowup(effective.get(finding.id()), input, finding, file, runId);
+    GateOutcome gates = applyGates(followup.verdict(), finding, input, followup.text());
+    VerdictJsonCodec.ParsedVerdict verdict = gates.verdict();
+    // 逐条判定落 trace（含理由，M3 取证需要：verify 批次事件只有计数，无法回答"为什么拒"）
+    if (verdict != null) {
+      String rationale = verdict.rationale() == null ? "" : verdict.rationale();
+      trace.emit(
+          "verification",
+          Map.of(
+              "finding_id",
+              finding.id(),
+              "verdict",
+              verdict.verdict().name(),
+              "rationale",
+              rationale.length() > 400 ? rationale.substring(0, 400) : rationale,
+              "followup",
+              followup.attempted(),
+              "refutation_kind",
+              verdict.refutation() == null || verdict.refutation().kind() == null
+                  ? "none"
+                  : verdict.refutation().kind().name()));
+    }
+    PerFinding outcome =
+        new PerFinding(
+            verdict, gates.antiAnchor(), followup.attempted(), model, gates.refuteCheck());
+    return new FindingResolution(outcome, followup.tokensIn(), followup.tokensOut());
+  }
+
+  /** 某一三值判定的批内计数（verdict 缺失不计入任一桶）。 */
+  private static long countVerdict(
+      Map<String, PerFinding> outcomes, VerdictJsonCodec.VerifierVerdict verdict) {
+    return outcomes.values().stream()
+        .filter(p -> p.verdict() != null && p.verdict().verdict() == verdict)
+        .count();
+  }
+
+  /** 反证门降级的批内计数（refuteCheck 缺失不计入）。 */
+  private static long countDowngraded(Map<String, PerFinding> outcomes) {
+    return outcomes.values().stream()
+        .filter(p -> p.refuteCheck() != null && p.refuteCheck().downgraded())
+        .count();
+  }
+
+  /**
+   * bug 类批次的确定性调用点索引（finding id → 索引）：仅索引可得时逐条挂载（不可得/未采集为空 map）。
+   *
+   * @param callSiteIndex 批级索引（可 null）
+   * @param batch 本批候选
+   * @return finding id → 索引
+   */
+  private static Map<String, CallSiteIndex> indexByFinding(
+      CallSiteIndex callSiteIndex, List<FindingAggregator.Scored> batch) {
     Map<String, CallSiteIndex> indexByFinding = new LinkedHashMap<>();
     if (callSiteIndex != null && callSiteIndex.available()) {
       batch.forEach(s -> indexByFinding.put(s.finding().id(), callSiteIndex));
     }
-    return new BatchOutcome(outcomes, tokensIn, tokensOut, indexByFinding);
+    return indexByFinding;
   }
 
   /** 调用点索引（bug 类批次；采集失败不影响验证，索引内部如实降级）。 */
