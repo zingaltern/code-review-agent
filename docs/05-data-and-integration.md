@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.10（2026-10-31，§5 配置面补全：`CRA_LLM_MAX_CONCURRENCY`（1..64，有效并发 = min(值, 线程池宽度)）与 `CRA_REVIEW_*` 七项（review/sweep/server 共用）；`review.large-diff-lines` / `hard-cap-lines` 示例值同步 4000/16000）
 > 文档版本：v1.9（2026-10-30，02§4.4 评审范围：§3/§5 新增 `--review-tests` / `CRA_REVIEW_TESTS` / `review.include-test-files`（默认 false——测试文件默认不评审））
 > 文档版本：v1.8（2026-10-28，M4e 池内项"语义索引/跨文件上下文"第一版：§5 新增 `semantic_context.*` 配置项与环境变量（ADR-0014；默认关闭））
 > 文档版本：v1.7（2026-10-27，M4e 第二半 + M4f-full：CLI/server 平台选择与 GitLab webhook（ADR-0013）；§1.6 产品事件史 JSONL/PG/检索/引用（ADR-0012）；调试/契约不变）
@@ -493,7 +494,7 @@ cra:
     temperature: null
     # opencode-go 适配（v1.3.2）：base-url 指向 opencode.ai 时自动附加 x-opencode-session 头
     # （opencode-go 的路由要求；无需显式配置，网关构建时生成 UUID 会话）
-    max-concurrency: 8              # v1.1：LLM 并发信号量
+    max-concurrency: 8              # v1.1：LLM 并发信号量（CRA_LLM_MAX_CONCURRENCY，1..64；有效并发 = min(值, 线程池宽度)）
     per-model-rpm: { standard: 60, strong: 30, light: 60 }
   agents:                        # v1.3.1：crosschecker 配置（默认关闭，M4f 启用）；M4a：signoff 建议
     crosschecker:
@@ -534,14 +535,19 @@ cra:
       slice-tokens: 6000           # 单 brief 切片 token 上限，从 L1 预算扣除（CRA_SEMANTIC_CONTEXT_SLICE_TOKENS；2026-10-30：4000→6000）
   review:
     default-depth: standard
-    large-diff-lines: 2000
-    hard-cap-lines: 8000
+    large-diff-lines: 4000          # CRA_REVIEW_LARGE_DIFF_LINES / --large-diff-lines
+    hard-cap-lines: 16000           # CRA_REVIEW_HARD_CAP_LINES / --hard-cap-lines（须大于 large）
     nit-budget-default: 3
     publish-unverified: never       # never | labeled
     include-test-files: false       # 02§4.4：测试文件默认不评审（--review-tests / CRA_REVIEW_TESTS）
   trust:
     review-policy-source: base      # v1.1：固定 base，禁 head（04§3.2）
 ```
+
+**review 策略环境变量（v1.10）**：`CRA_REVIEW_LARGE_DIFF_LINES` / `CRA_REVIEW_HARD_CAP_LINES` /
+`CRA_REVIEW_NIT_BUDGET` / `CRA_REVIEW_DEGRADE_AT` / `CRA_REVIEW_SPOT_CHECK_PERCENT` /
+`CRA_REVIEW_PUBLISH_UNVERIFIED` / `CRA_REVIEW_TESTS` 是 **review / sweep / server 三形态共用**的 05§5
+`review.*` 策略组：CLI 支持同名 flag 覆盖（flag > env > 基准值），`sweep` 与 `server` 只认环境变量（CI/容器配置面，不扩命令行面）。
 
 **平台选择（M4e 第二半，ADR-0013）**：平台不是 `application.yml` 的模型配置，而是组合根启动参数（平台实现模块互不依赖，11§4）：
 
@@ -558,11 +564,17 @@ cra:
 | `CRA_SEMANTIC_CONTEXT_MAX_FILES` / `--semantic-context-max-files` | 索引扫描 Java 文件数上限（升序截断并声明） | `2000` |
 | `CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES` / `--semantic-context-max-file-bytes` | 单文件字节上限（超限跳过并声明） | `262144` |
 | `CRA_SEMANTIC_CONTEXT_SLICE_TOKENS` / `--semantic-context-slice-tokens` | 单 brief 切片 token 上限（500–12000；从 L1 预算扣除） | `6000` |
-| `CRA_REVIEW_TESTS` / `--review-tests` | 评审范围是否含测试文件（02§4.4）：`false` 时 `src/test/**`、`*Test.java`、`*Tests.java` 不进评审计划（Summary 声明跳过数）；`sweep` 无独立 flag，只认该环境变量 | `false` |
+| `CRA_REVIEW_LARGE_DIFF_LINES` / `--large-diff-lines` | 大 diff 降档线（04§2.2 行数口径；review/sweep/server 共用） | `4000` |
+| `CRA_REVIEW_HARD_CAP_LINES` / `--hard-cap-lines` | 硬上限（须大于 large-diff-lines；review/sweep/server 共用） | `16000` |
+| `CRA_REVIEW_NIT_BUDGET` / `--nit-budget` | nit 预算默认（0 = 禁止 nit；REVIEW.md 显式配置优先；review/sweep/server 共用） | `3` |
+| `CRA_REVIEW_DEGRADE_AT` / `--degrade-at` | run 预算降档阈值（`0<first<second<=1`；review/sweep/server 共用） | `0.70,0.85` |
+| `CRA_REVIEW_SPOT_CHECK_PERCENT` / `--spot-check-percent` | important/security 级 REFUTED 抽查保险丝（0..100；review/sweep/server 共用） | `20` |
+| `CRA_REVIEW_PUBLISH_UNVERIFIED` / `--publish-unverified` | UNVERIFIED 发布策略（`never`\|`labeled`；review/sweep/server 共用） | `never` |
+| `CRA_REVIEW_TESTS` / `--review-tests` | 评审范围是否含测试文件（02§4.4）：`false` 时 `src/test/**`、`*Test.java`、`*Tests.java` 不进评审计划（Summary 声明跳过数）；`sweep`/server 无独立 flag，只认该环境变量 | `false` |
+| `CRA_LLM_MAX_CONCURRENCY` | LLM 并发信号量上限（1..64；有效并发 = min(值, cra-core 线程池宽度)，09§6） | `8` |
 | `CRA_AGENTS_BUDGET_<ROLE>_INPUT_TOKENS` / `--<role>-input-tokens` | 单代理输入预算覆盖（03§6 默认值；`<role>` ∈ `bug-hunter`/`security-reviewer`/`test-reviewer`/`convention-reviewer`/`perf-reviewer`/`cross-checker`/`verifier`/`judge`） | 见 03§6 |
 | `CRA_AGENTS_BUDGET_<ROLE>_OUTPUT_TOKENS` / `--<role>-output-tokens` | 单代理输出预算覆盖（未覆盖的维度沿用定义默认；input 必须大于 output） | 见 03§6 |
 | `CRA_SERVER_RUN_TOTAL_TOKENS` / `--run-total-tokens` | run 级 token 预算（02§4.4） | `800000` |
-| `--large-diff-lines` / `--hard-cap-lines` | 大 diff 降档线与硬上限（行数口径 04§2.2） | `4000` / `16000` |
 
 M4a 的 PR 模板提示项（docs 片段，**不强加**——仓库可自行复制到 `.github/pull_request_template.md`）：
 

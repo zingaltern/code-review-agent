@@ -101,7 +101,14 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 | `CRA_SERVER_DRY_RUN` | 否 | `false` | 全程零写（调试） |
 | `CRA_SERVER_RUN_ROOT` | 否 | `.cra/server-runs` | trace/brief 落盘根 |
 | `CRA_SERVER_WORKSPACE` | 否 | `.` | 本地仓库根；无 checkout 时 pre-existing 检测降级声明（05§2.1） |
-| `CRA_SERVER_RUN_TOTAL_TOKENS` | 否 | `500000` | run 级预算（02§4.4） |
+| `CRA_SERVER_RUN_TOTAL_TOKENS` | 否 | `800000` | run 级预算（02§4.4） |
+| `CRA_REVIEW_LARGE_DIFF_LINES` | 否 | `4000` | 大 diff 降档线（05§5 review.*；与 CLI/sweep 共用同一组键） |
+| `CRA_REVIEW_HARD_CAP_LINES` | 否 | `16000` | 硬上限（须大于 `CRA_REVIEW_LARGE_DIFF_LINES`） |
+| `CRA_REVIEW_NIT_BUDGET` | 否 | `3` | nit 预算默认（0 = 禁止 nit） |
+| `CRA_REVIEW_DEGRADE_AT` | 否 | `0.70,0.85` | run 预算降档阈值（`0<first<second<=1`） |
+| `CRA_REVIEW_SPOT_CHECK_PERCENT` | 否 | `20` | important/security 级 REFUTED 抽查保险丝（0..100） |
+| `CRA_REVIEW_PUBLISH_UNVERIFIED` | 否 | `never` | UNVERIFIED 发布策略（`never`\|`labeled`） |
+| `CRA_REVIEW_TESTS` | 否 | `false` | 测试文件是否进入评审范围（02§4.4） |
 | `CRA_GITHUB_API_BASE` | 否 | `https://api.github.com` | GitHub API 根（测试/stub 可注入） |
 | `CRA_GITHUB_TOKEN` | 否* | — | GitHub token（*生产建议必填：rate limit 与回帖权限） |
 | `CRA_LLM_API_KEY` / `CRA_LLM_BASE_URL` / `CRA_LLM_MODEL` | 是 | — | OpenAI 兼容端点（缺失拒绝启动） |
@@ -109,6 +116,7 @@ GitLab 的完整事件映射、状态码、幂等键与待验证项见 [deployme
 | `CRA_LLM_TEMPERATURE` | 否 | 空（不传） | 建议 `0.2`（05§5） |
 | `CRA_LLM_FALLBACK_CHAIN` | 否 | `standard,light` | 降级链 |
 | `CRA_LLM_RPM` | 否 | 文档默认 | 形如 `standard=60,strong=30,light=60` |
+| `CRA_LLM_MAX_CONCURRENCY` | 否 | `8` | LLM 并发信号量上限（1..64；有效并发 = min(值, cra-core 线程池宽度)） |
 | `CRA_CROSSCHECKER_ENABLED` | 否 | `false` | M4f-lite CrossChecker |
 | `CRA_CROSSCHECKER_MODES` | 否 | `assumption,sniff` | 模式开关 |
 | `CRA_CROSSCHECKER_HISTORY_WEEKS` | 否 | `8` | 变更史回溯周数 |
