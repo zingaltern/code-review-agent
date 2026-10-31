@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.CharacterCodingException;
 import java.time.Instant;
@@ -12,6 +13,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongConsumer;
+import java.util.regex.Pattern;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -68,7 +71,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private final GitHubHttpTransport transport;
   private final LedgerMarkerParser markerParser = new LedgerMarkerParser();
-  private String cachedLogin;
+  private volatile String cachedLogin;
 
   /**
    * @param apiBase API 根（默认 https://api.github.com，测试注入 WireMock 地址）
@@ -76,11 +79,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
    * @param http HTTP 客户端
    * @param sleeper 退避睡眠（测试注入即时实现）
    */
-  public GitHubHttpAdapter(
-      String apiBase,
-      String token,
-      java.net.http.HttpClient http,
-      java.util.function.LongConsumer sleeper) {
+  public GitHubHttpAdapter(String apiBase, String token, HttpClient http, LongConsumer sleeper) {
     this.transport = new GitHubHttpTransport(apiBase, token, http, sleeper);
   }
 
@@ -143,10 +142,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
             repo, "/git/trees/" + GitHubPayloadSupport.urlEncode(sha) + "?recursive=1");
     if (root.path("truncated").asBoolean(false)) {
       // ADR-0015 §2.2：不可得不静默——截断的文件树会让"调用方/测试覆盖"判定把未看到的文件当成不存在
-      throw new org.cra.common.exception.CraIntegrationException(
-          "GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
+      throw new CraIntegrationException("GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
     }
-    java.util.regex.Pattern glob = PathGlobs.compile(pathGlob);
+    Pattern glob = PathGlobs.compile(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry : root.path("tree")) {
       if ("blob".equals(entry.path("type").asText())) {
@@ -168,7 +166,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     if (!cmd.inlineComments().isEmpty()) {
       try {
         PostedReview posted = postInlineReview(cmd, cmd.inlineComments());
-        reviewId = Optional.of(posted.reviewId());
+        reviewId = posted.reviewId().isBlank() ? Optional.empty() : Optional.of(posted.reviewId());
         List<Long> ids = posted.commentIds();
         for (int i = 0; i < cmd.inlineComments().size(); i++) {
           InlineComment c = cmd.inlineComments().get(i);
@@ -245,17 +243,23 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 commentId > 0 ? commentId : null,
                 ""));
       } catch (CraIntegrationException e) {
-        items.add(
-            new ReviewItemResult(
-                one.findingId(),
-                one.path(),
-                one.line(),
-                PublishStatus.SUMMARY_FALLBACK,
-                AnchorStatus.SUMMARY_FALLBACK,
-                null,
-                e.getMessage()));
+        if (!GitHubHttpTransport.isUnprocessable(e)) {
+          throw e; // 逐条发布时的鉴权/服务端故障仍是 run 级失败，只有锚定 422 降级
+        }
+        items.add(fallbackItem(one, e.getMessage()));
       }
     }
+  }
+
+  private static ReviewItemResult fallbackItem(InlineComment comment, String reason) {
+    return new ReviewItemResult(
+        comment.findingId(),
+        comment.path(),
+        comment.line(),
+        PublishStatus.SUMMARY_FALLBACK,
+        AnchorStatus.SUMMARY_FALLBACK,
+        null,
+        reason);
   }
 
   private Optional<Long> postSummary(PostReviewCommand cmd) {
@@ -333,35 +337,45 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     List<LedgerComment> comments = new ArrayList<>();
     List<LedgerFindingMarker> findings = new ArrayList<>();
     List<LedgerRunMarker> runs = new ArrayList<>();
-    int[] suspectCount = {0};
     collectPaged(
         repo, "/pulls/" + prNumber + "/comments", login, LedgerComment.KIND_INLINE, comments);
     collectPaged(
         repo, "/issues/" + prNumber + "/comments", login, LedgerComment.KIND_ISSUE, comments);
+    int suspectCount = parseMarkers(comments, findings, runs);
+    return new CommentLedger(comments, findings, runs, suspectCount);
+  }
+
+  /** 评论原文 → 两类账本标记（suspect 计数一并返回；inline/issue/commit 三个载体共用）。 */
+  private int parseMarkers(
+      List<LedgerComment> comments,
+      List<LedgerFindingMarker> findings,
+      List<LedgerRunMarker> runs) {
+    int suspects = 0;
     for (LedgerComment c : comments) {
       ParseOutcome outcome = markerParser.parse(c.body());
-      suspectCount[0] += outcome.suspects().size();
-      if (outcome.marker().isPresent()) {
-        MarkerParseResult parsed = outcome.marker().get();
-        if (parsed instanceof MarkerParseResult.FindingMark f) {
-          findings.add(
-              new LedgerFindingMarker(
-                  f.fingerprint(),
-                  f.file(),
-                  f.line(),
-                  f.category(),
-                  f.findingId(),
-                  f.runId(),
-                  f.commitSha(),
-                  c.id()));
-        } else if (parsed instanceof MarkerParseResult.RunMark r) {
-          runs.add(
-              new LedgerRunMarker(
-                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
-        }
+      suspects += outcome.suspects().size();
+      if (outcome.marker().isEmpty()) {
+        continue;
+      }
+      MarkerParseResult parsed = outcome.marker().get();
+      if (parsed instanceof MarkerParseResult.FindingMark f) {
+        findings.add(
+            new LedgerFindingMarker(
+                f.fingerprint(),
+                f.file(),
+                f.line(),
+                f.category(),
+                f.findingId(),
+                f.runId(),
+                f.commitSha(),
+                c.id()));
+      } else if (parsed instanceof MarkerParseResult.RunMark r) {
+        runs.add(
+            new LedgerRunMarker(
+                r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
       }
     }
-    return new CommentLedger(comments, findings, runs, suspectCount[0]);
+    return suspects;
   }
 
   private void collectPaged(
@@ -371,8 +385,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
       if (page == MAX_PAGES + 1) {
         if (root.isArray() && !root.isEmpty()) {
-          throw new org.cra.common.exception.CraIntegrationException(
-              "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
+          throw new CraIntegrationException("评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
         }
         return;
       }
@@ -389,9 +402,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 kind,
                 login,
                 c.path("body").asText(""),
-                c.path("created_at").isMissingNode()
-                    ? Instant.EPOCH
-                    : Instant.parse(c.path("created_at").asText()),
+                DispositionSupport.instantOrEpoch(c.path("created_at")),
                 c.path("commit_id").isMissingNode() || c.path("commit_id").isNull()
                     ? null
                     : c.path("commit_id").asText()));
@@ -408,37 +419,14 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     List<LedgerComment> comments = new ArrayList<>();
     List<LedgerFindingMarker> findings = new ArrayList<>();
     List<LedgerRunMarker> runs = new ArrayList<>();
-    int[] suspectCount = {0};
     collectPaged(
         repo,
         "/commits/" + GitHubPayloadSupport.urlEncode(commitSha) + "/comments",
         login,
         LedgerComment.KIND_COMMIT,
         comments);
-    for (LedgerComment c : comments) {
-      ParseOutcome outcome = markerParser.parse(c.body());
-      suspectCount[0] += outcome.suspects().size();
-      if (outcome.marker().isPresent()) {
-        MarkerParseResult parsed = outcome.marker().get();
-        if (parsed instanceof MarkerParseResult.FindingMark f) {
-          findings.add(
-              new LedgerFindingMarker(
-                  f.fingerprint(),
-                  f.file(),
-                  f.line(),
-                  f.category(),
-                  f.findingId(),
-                  f.runId(),
-                  f.commitSha(),
-                  c.id()));
-        } else if (parsed instanceof MarkerParseResult.RunMark r) {
-          runs.add(
-              new LedgerRunMarker(
-                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
-        }
-      }
-    }
-    return new CommentLedger(comments, findings, runs, suspectCount[0]);
+    int suspectCount = parseMarkers(comments, findings, runs);
+    return new CommentLedger(comments, findings, runs, suspectCount);
   }
 
   /**
@@ -485,7 +473,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     List<LedgerComment> out = new ArrayList<>();
     String sinceQuery =
         since == null ? "" : "&since=" + GitHubPayloadSupport.urlEncode(since.toString());
-    for (int page = 1; page <= MAX_PAGES; page++) {
+    for (int page = 1; page <= MAX_PAGES + 1; page++) {
       JsonNode root =
           transport.getJson(
               repo,
@@ -494,6 +482,12 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                   + "&page="
                   + page
                   + sinceQuery);
+      if (page == MAX_PAGES + 1) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new CraIntegrationException("issue 分页超过上限 " + MAX_ITEMS + " 条，无法保证列表完整");
+        }
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
@@ -503,7 +497,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
           continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
         }
         Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && updated != null && updated.isBefore(since)) {
+        if (since != null && (updated == null || updated.isBefore(since))) {
           reachedOlder = true;
           continue;
         }
@@ -544,7 +538,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
   @Override
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
     List<PullRequestRef> out = new ArrayList<>();
-    for (int page = 1; page <= MAX_PAGES; page++) {
+    for (int page = 1; page <= MAX_PAGES + 1; page++) {
       JsonNode root =
           transport.getJson(
               repo,
@@ -552,13 +546,19 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                   + PAGE_SIZE
                   + "&page="
                   + page);
+      if (page == MAX_PAGES + 1) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new CraIntegrationException("PR 分页超过上限 " + MAX_ITEMS + " 条，无法保证列表完整");
+        }
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
       boolean reachedOlder = false;
       for (JsonNode pr : root) {
         Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
-        if (updated == null || updated.isBefore(since)) {
+        if (since != null && (updated == null || updated.isBefore(since))) {
           // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
           continue;
@@ -646,8 +646,15 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private List<JsonNode> getPaged(RepoRef repo, String path) {
     List<JsonNode> out = new ArrayList<>();
-    for (int page = 1; page <= MAX_PAGES; page++) {
+    for (int page = 1; page <= MAX_PAGES + 1; page++) {
       JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
+      if (page == MAX_PAGES + 1) {
+        // 探页：恰好 10k 条时第 101 页为空才算完整；有数据说明还有未读条目
+        if (root.isArray() && !root.isEmpty()) {
+          throw new CraIntegrationException("分页超过上限 " + MAX_ITEMS + " 条，无法保证结果完整: " + path);
+        }
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
@@ -665,13 +672,19 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       HttpRequest request =
           transport.request("/user").header("Accept", "application/vnd.github+json").GET().build();
       try {
-        cachedLogin =
+        String login =
             transport
                 .parseJson(transport.execute(request, "/user").body(), "/user")
                 .path("login")
-                .asText();
+                .asText("");
+        if (login.isBlank()) {
+          // 空 login 会让账本过滤把所有评论都排除（空账本会被误判为可重发），宁可失败
+          throw new CraIntegrationException(
+              "GitHub bot identity unavailable: empty login from /user");
+        }
+        cachedLogin = login;
       } catch (CraIntegrationException e) {
-        if (!isUserForbidden(e)) {
+        if (!GitHubHttpTransport.isStatusOnPath(e, 403, "/user")) {
           throw e;
         }
         // Actions 集成 token（GITHUB_TOKEN）是 App 语义，/user 恒 403——CI 内 bot 身份即
@@ -680,9 +693,5 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       }
     }
     return cachedLogin;
-  }
-
-  private static boolean isUserForbidden(CraIntegrationException e) {
-    return e.getMessage() != null && e.getMessage().contains("GitHub API 403 on /user");
   }
 }
