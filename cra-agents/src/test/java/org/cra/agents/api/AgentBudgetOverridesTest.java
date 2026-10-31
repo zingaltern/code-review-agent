@@ -107,17 +107,17 @@ class AgentBudgetOverridesTest {
 
   @Test
   void rejectsUnknownRoleAndIllegalValues() {
-    assertThatThrownBy(
-            () ->
-                AgentBudgetOverrides.of(
-                    Map.of("nope", new AgentBudgetOverrides.RoleOverride(16_000L, null))))
+    Map<String, AgentBudgetOverrides.RoleOverride> unknownRole =
+        Map.of("nope", new AgentBudgetOverrides.RoleOverride(16_000L, null));
+    assertThatThrownBy(() -> AgentBudgetOverrides.of(unknownRole))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("未知角色键");
-    assertThatThrownBy(
-            () ->
-                AgentBudgetOverrides.fromConfig(Map.of("agents.budget.verifier.input-tokens", "x")))
+    Map<String, String> nonInteger = Map.of("agents.budget.verifier.input-tokens", "x");
+    assertThatThrownBy(() -> AgentBudgetOverrides.fromConfig(nonInteger))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("必须为整数");
+    // 下列三项的抛出点是 RoleOverride 的紧凑构造器校验——构造必须留在 lambda 内，
+    // 否则异常在断言之前抛出（S5778 在此为误报，见 PR 报告）
     assertThatThrownBy(
             () ->
                 AgentBudgetOverrides.of(

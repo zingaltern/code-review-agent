@@ -26,7 +26,7 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
       new AgentBudget(16_000, 4_000, 2, 240_000);
 
   /** 角色（kebab-case，05§1.1）。 */
-  public static final AgentRole ROLE = new AgentRole("cross-checker", "上下文对齐评审");
+  public static final AgentRole AGENT_ROLE = new AgentRole("cross-checker", "上下文对齐评审");
 
   private static final String TEMPLATE = "prompts/reviewer/cross-checker.md";
 
@@ -41,7 +41,7 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
 
   @Override
   public AgentRole role() {
-    return ROLE;
+    return AGENT_ROLE;
   }
 
   @Override
@@ -64,7 +64,7 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget());
   }
 
   @Override

@@ -31,8 +31,7 @@ class TemplateSupportTest {
     String note =
         TemplateSupport.scopedPathsNote(
             List.of("a/A.java", "a/B.java", "a/C.java"), "read_file", 2);
-    assertThat(note).contains("共 3 个文件，仅列前 2 个");
-    assertThat(note).doesNotContain("a/C.java");
+    assertThat(note).contains("共 3 个文件，仅列前 2 个").doesNotContain("a/C.java");
   }
 
   private static int occurrences(String text, String needle) {

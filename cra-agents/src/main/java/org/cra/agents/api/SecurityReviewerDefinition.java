@@ -13,7 +13,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   private static final AgentBudget BUDGET = new AgentBudget(24_000, 2_000, 3, 240_000);
 
   /** 角色（kebab-case，05§1.1）。 */
-  public static final AgentRole ROLE = new AgentRole("security-reviewer", "安全评审");
+  public static final AgentRole AGENT_ROLE = new AgentRole("security-reviewer", "安全评审");
 
   private static final String TEMPLATE = "prompts/reviewer/security.md";
 
@@ -28,7 +28,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
 
   @Override
   public AgentRole role() {
-    return ROLE;
+    return AGENT_ROLE;
   }
 
   @Override
@@ -59,7 +59,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget());
   }
 
   @Override
