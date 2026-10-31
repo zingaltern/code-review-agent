@@ -703,6 +703,109 @@ class GitLabHttpAdapterWireMockTest {
         .hasMessageContaining("分页超过上限");
   }
 
+  @Test
+  void listPullRequestsOverflowFailsLoudly() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"username\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  PROJECT
+                      + "/merge_requests?state=all&order_by=updated_at&sort=desc"
+                      + "&per_page=100&page="
+                      + page))
+              .willReturn(
+                  okJson(mrPage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(
+                PROJECT
+                    + "/merge_requests?state=all&order_by=updated_at&sort=desc"
+                    + "&per_page=100&page=101"))
+            .willReturn(okJson(mrPage(101))));
+
+    assertThatThrownBy(() -> adapter.listPullRequests(REPO, null))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("分页超过上限");
+  }
+
+  @Test
+  void listBotIssuesOverflowFailsLoudly() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"username\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  PROJECT
+                      + "/issues?state=all&order_by=updated_at&sort=desc&author_username=cra-bot"
+                      + "&per_page=100&page="
+                      + page))
+              .willReturn(
+                  okJson(issuePage(page)).withHeader("X-Next-Page", String.valueOf(page + 1))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(
+                PROJECT
+                    + "/issues?state=all&order_by=updated_at&sort=desc&author_username=cra-bot"
+                    + "&per_page=100&page=101"))
+            .willReturn(okJson(issuePage(101))));
+
+    assertThatThrownBy(() -> adapter.listBotIssues(REPO, null))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("分页超过上限");
+  }
+
+  @Test
+  void retryAfterIsCapped() {
+    wm.stubFor(
+        get(urlEqualTo(PROJECT + "/repository/compare?from=base1&to=head2"))
+            .inScenario("huge-retry-after")
+            .whenScenarioStateIs("Started")
+            .willReturn(
+                aResponse()
+                    .withStatus(429)
+                    .withBody("Retry later")
+                    .withHeader("Retry-After", "999999999"))
+            .willSetStateTo("recovered"));
+    wm.stubFor(
+        get(urlEqualTo(PROJECT + "/repository/compare?from=base1&to=head2"))
+            .inScenario("huge-retry-after")
+            .whenScenarioStateIs("recovered")
+            .willReturn(okJson(compareBody())));
+
+    adapter.fetchDiff(REPO, "base1", "head2");
+
+    assertThat(sleeps).containsExactly(60_000L);
+  }
+
+  private static String mrPage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"iid\":")
+          .append(page * 1_000L + i)
+          .append(",\"state\":\"opened\",\"sha\":\"h\",")
+          .append("\"diff_refs\":{\"base_sha\":\"b\",\"head_sha\":\"h\",")
+          .append("\"start_sha\":\"s\"},\"updated_at\":\"2026-10-27T00:00:00Z\"}");
+    }
+    return sb.append(']').toString();
+  }
+
+  private static String issuePage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"iid\":")
+          .append(page * 1_000L + i)
+          .append(",\"author\":{\"username\":\"cra-bot\"},\"description\":\"d\",")
+          .append("\"created_at\":\"2026-10-27T00:00:00Z\",")
+          .append("\"updated_at\":\"2026-10-27T00:00:00Z\"}");
+    }
+    return sb.append(']').toString();
+  }
+
   private static String treePage(int page) {
     StringBuilder sb = new StringBuilder("[");
     for (int i = 0; i < 100; i++) {

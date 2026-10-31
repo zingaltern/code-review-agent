@@ -6,6 +6,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.function.Predicate;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
@@ -24,11 +25,29 @@ final class GitLabLedgerSupport {
   private GitLabLedgerSupport() {}
 
   static CommentLedger parse(List<LedgerComment> comments, LedgerMarkerParser parser) {
+    return parseFiltered(comments, parser, outcome -> true);
+  }
+
+  /**
+   * 解析并按谓词过滤（issue 载体按 commit 键控等）：一次解析同时完成过滤与标记映射， 避免"先 parse 判定、再由 parse 重解析"的双倍开销。
+   *
+   * @param comments 评论原文
+   * @param parser 共享标记解析器
+   * @param accept 过滤谓词（入参为已解析的 outcome）
+   * @return 仅含命中评论的账本快照
+   */
+  static CommentLedger parseFiltered(
+      List<LedgerComment> comments, LedgerMarkerParser parser, Predicate<ParseOutcome> accept) {
+    List<LedgerComment> matched = new ArrayList<>();
     List<LedgerFindingMarker> findings = new ArrayList<>();
     List<LedgerRunMarker> runs = new ArrayList<>();
     int suspects = 0;
     for (LedgerComment c : comments) {
       ParseOutcome outcome = parser.parse(c.body());
+      if (!accept.test(outcome)) {
+        continue;
+      }
+      matched.add(c);
       suspects += outcome.suspects().size();
       if (outcome.marker().isEmpty()) {
         continue;
@@ -51,7 +70,7 @@ final class GitLabLedgerSupport {
                 r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
       }
     }
-    return new CommentLedger(comments, findings, runs, suspects);
+    return new CommentLedger(matched, findings, runs, suspects);
   }
 
   static boolean marksCommit(ParseOutcome outcome, String commitSha) {

@@ -11,6 +11,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.LongConsumer;
+import java.util.regex.Pattern;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -27,7 +29,6 @@ import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerMarkerParser;
-import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
 import org.cra.common.git.PostCommitReviewCommand;
 import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
@@ -60,7 +61,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
   private final GitLabHttpTransport transport;
   private final String botUsernameFallback;
   private final LedgerMarkerParser markerParser = new LedgerMarkerParser();
-  private String cachedUsername;
+  private volatile String cachedUsername;
 
   /**
    * @param apiBase API 根（默认 https://gitlab.com/api/v4，测试注入 WireMock 地址）
@@ -73,7 +74,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
       String apiBase,
       String token,
       HttpClient http,
-      java.util.function.LongConsumer sleeper,
+      LongConsumer sleeper,
       String botUsernameFallback) {
     this.transport = new GitLabHttpTransport(apiBase, token, http, sleeper);
     this.botUsernameFallback =
@@ -161,7 +162,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   @Override
   public List<String> listFiles(RepoRef repo, String sha, String pathGlob) {
-    java.util.regex.Pattern glob = PathGlobs.compile(pathGlob);
+    Pattern glob = PathGlobs.compile(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry :
         getPagedArray(
@@ -424,19 +425,15 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
   }
 
   /**
-   * issue 载体账本（M4d，05§2.5）：列出 bot 的 issue，只保留 run 完成标记内 commit 与 {@code commitSha} 一致者—— issue
-   * 载体本身不带 PR 号，head sha 即键（05§1.3）。
+   * issue 载体账本（M4d，05§2.5）：列出 bot 的 issue，只保留完成标记（run / finding）内 commit 与 {@code commitSha}
+   * 一致者——issue 载体本身不带 PR 号，head sha 即键（05§1.3）。
    */
   @Override
   public CommentLedger fetchIssueBotComments(RepoRef repo, String commitSha) {
-    List<LedgerComment> matched = new ArrayList<>();
-    for (LedgerComment c : listBotIssues(repo, null)) {
-      ParseOutcome outcome = markerParser.parse(c.body());
-      if (GitLabLedgerSupport.marksCommit(outcome, commitSha)) {
-        matched.add(c);
-      }
-    }
-    return GitLabLedgerSupport.parse(matched, markerParser);
+    return GitLabLedgerSupport.parseFiltered(
+        listBotIssues(repo, null),
+        markerParser,
+        outcome -> GitLabLedgerSupport.marksCommit(outcome, commitSha));
   }
 
   @Override
@@ -444,7 +441,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     String login = botUsername(repo);
     List<LedgerComment> out = new ArrayList<>();
     String page = "1";
-    for (int i = 0; i < MAX_PAGES; i++) {
+    for (int i = 0; i <= MAX_PAGES; i++) {
       String query =
           "/issues?state=all&order_by=updated_at&sort=desc&author_username="
               + GitLabPayloadSupport.urlEncode(login)
@@ -453,13 +450,20 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
                   : "&updated_after=" + GitLabPayloadSupport.urlEncode(since.toString()));
       GitLabHttpTransport.Page p = transport.getPage(repo, withPage(query, page));
       JsonNode root = p.body();
+      if (i == MAX_PAGES) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new CraIntegrationException(
+              "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证列表完整: " + query);
+        }
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
       boolean reachedOlder = false;
       for (JsonNode issue : root) {
         Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && updated != null && updated.isBefore(since)) {
+        if (since != null && (updated == null || updated.isBefore(since))) {
           reachedOlder = true;
           continue;
         }
@@ -494,11 +498,18 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
     List<PullRequestRef> out = new ArrayList<>();
     String page = "1";
-    for (int i = 0; i < MAX_PAGES; i++) {
+    for (int i = 0; i <= MAX_PAGES; i++) {
       GitLabHttpTransport.Page p =
           transport.getPage(
               repo, withPage("/merge_requests?state=all&order_by=updated_at&sort=desc", page));
       JsonNode root = p.body();
+      if (i == MAX_PAGES) {
+        if (root.isArray() && !root.isEmpty()) {
+          throw new CraIntegrationException(
+              "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证列表完整");
+        }
+        break;
+      }
       if (!root.isArray() || root.isEmpty()) {
         break;
       }
@@ -670,7 +681,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
       if (i == MAX_PAGES) {
         // 探页：恰好 MAX_PAGES 个满页后第 101 页为空才算正常结束；有数据即超过上限
         if (root.isArray() && !root.isEmpty()) {
-          throw new org.cra.common.exception.CraIntegrationException(
+          throw new CraIntegrationException(
               "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
         }
         exhausted = true;
@@ -697,7 +708,7 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     }
     if (!exhausted) {
       // 触顶仍是满页 = 还有数据未读：返回部分结果会让文件索引/账本"看起来完整"
-      throw new org.cra.common.exception.CraIntegrationException(
+      throw new CraIntegrationException(
           "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
     }
     return out;
