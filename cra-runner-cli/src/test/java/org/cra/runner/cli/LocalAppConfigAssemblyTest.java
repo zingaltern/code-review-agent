@@ -47,36 +47,34 @@ class LocalAppConfigAssemblyTest {
   }
 
   private static CraConfig config(Path repo) {
-    return new CraConfig(
-        "local",
-        "fixture",
-        0,
-        "HEAD",
-        "HEAD",
-        "quick",
-        true,
-        false,
-        "",
-        "https://api.github.com",
-        "sk-test",
-        "http://127.0.0.1:9",
-        "test-model",
-        repo.resolve(".cra/runs").toString(),
-        repo.toString(),
-        2000,
-        8000,
-        5,
-        500_000L,
-        0.70,
-        0.85,
-        "never",
-        20,
-        true,
-        "true",
-        repo.resolve("ledger.db").toString(),
-        null,
-        null,
-        "standard,light",
-        "");
+    return CraConfig.builder()
+        .repoOwner("local")
+        .repoName("fixture")
+        .prNumber(0)
+        .baseSha("HEAD")
+        .headSha("HEAD")
+        .depth("quick")
+        .dryRun(true)
+        .githubToken("")
+        .githubApi("https://api.github.com")
+        .llmApiKey("sk-test")
+        .llmBaseUrl("http://127.0.0.1:9")
+        .llmModel("test-model")
+        .runRoot(repo.resolve(".cra/runs").toString())
+        .workspace(repo.toString())
+        .largeDiffLines(2000)
+        .hardCapLines(8000)
+        .nitBudget(5)
+        .runTotalTokens(500_000L)
+        .degradeAtFirst(0.70)
+        .degradeAtSecond(0.85)
+        .publishUnverified("never")
+        .spotCheckPercent(20)
+        .local(true)
+        .execCommand("true")
+        .ledgerDb(repo.resolve("ledger.db").toString())
+        .fallbackChain("standard,light")
+        .rpm("")
+        .build();
   }
 }

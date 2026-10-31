@@ -17,38 +17,7 @@ class ReviewCommandWiringTest {
 
   @Test
   void compositionRootAssemblesFullGraph() {
-    CraConfig config =
-        new CraConfig(
-            "o",
-            "r",
-            1,
-            "a",
-            "b",
-            "standard",
-            true,
-            false,
-            "token",
-            "http://127.0.0.1:1",
-            "sk",
-            "http://127.0.0.1:1",
-            "m",
-            runRoot.toString(),
-            ".",
-            2000,
-            8000,
-            3,
-            500_000L,
-            0.70,
-            0.85,
-            "never",
-            20,
-            false,
-            "mvn -B -ntp verify",
-            "~/.cra/ledger.db",
-            null,
-            null,
-            "standard,light",
-            "");
+    CraConfig config = config(runRoot.toString()).dryRun(true).build();
     try (var context =
         new org.springframework.context.annotation.AnnotationConfigApplicationContext()) {
       context.registerBean(CraConfig.class, () -> config);
@@ -59,6 +28,36 @@ class ReviewCommandWiringTest {
       assertThat(context.getBean(org.cra.store.api.ReviewLedger.class)).isNotNull();
       assertThat(context.getBean(org.cra.llm.api.LlmGateway.class)).isNotNull();
     }
+  }
+
+  /** 最小装配形态（CI 形态；LLM/Git 端点指向本机不可达端口——装配不发起网络调用）。 */
+  private static CraConfig.Builder config(String runRoot) {
+    return CraConfig.builder()
+        .repoOwner("o")
+        .repoName("r")
+        .prNumber(1)
+        .baseSha("a")
+        .headSha("b")
+        .depth("standard")
+        .githubToken("token")
+        .githubApi("http://127.0.0.1:1")
+        .llmApiKey("sk")
+        .llmBaseUrl("http://127.0.0.1:1")
+        .llmModel("m")
+        .runRoot(runRoot)
+        .workspace(".")
+        .largeDiffLines(2000)
+        .hardCapLines(8000)
+        .nitBudget(3)
+        .runTotalTokens(500_000L)
+        .degradeAtFirst(0.70)
+        .degradeAtSecond(0.85)
+        .publishUnverified("never")
+        .spotCheckPercent(20)
+        .execCommand("mvn -B -ntp verify")
+        .ledgerDb("~/.cra/ledger.db")
+        .fallbackChain("standard,light")
+        .rpm("");
   }
 
   @Test
@@ -98,38 +97,7 @@ class ReviewCommandWiringTest {
                 new org.cra.common.run.Coverage(0, 0, "")),
             "",
             "");
-    CraConfig config =
-        new CraConfig(
-            "o",
-            "r",
-            1,
-            "a",
-            "b",
-            "standard",
-            false,
-            true,
-            "t",
-            "api",
-            "sk",
-            "url",
-            "m",
-            ".",
-            ".",
-            2000,
-            8000,
-            3,
-            500_000L,
-            0.70,
-            0.85,
-            "never",
-            20,
-            false,
-            "mvn -B -ntp verify",
-            "~/.cra/ledger.db",
-            null,
-            null,
-            "standard,light",
-            "");
+    CraConfig config = config(".").securityBlock(true).build();
     return ReviewCommand.exitCode(result, config);
   }
 }
