@@ -85,6 +85,28 @@ class DefaultReviewPolicyParserTest {
     ReviewPolicy negative = parser.parse("## Nit budget: -1\n");
     assertThat(negative.nitBudget()).isNull();
     assertThat(negative.warnings()).anyMatch(w -> w.contains("Nit budget 数值非法"));
+    // 溢出（超出 int 范围，Integer.parseInt 抛 NFE）与非法文本同口径：警告 + 未配置
+    ReviewPolicy overflow = parser.parse("## Nit budget: 2147483648\n");
+    assertThat(overflow.nitBudget()).isNull();
+    assertThat(overflow.warnings()).anyMatch(w -> w.contains("Nit budget 数值非法"));
+  }
+
+  @Test
+  void h3HeadingLineIsSkippedAndDoesNotResetSection() {
+    // "###" 行不构成段落边界（由紧随的 "#" 分支拦截），后续列表项仍属当前段落——
+    // 删除恒真条件 !startsWith("###") 前后行为一致，本用例锁行为
+    ReviewPolicy policy =
+        parser.parse(
+            """
+            ## Conventions
+            - a
+            ### 三级标题
+            - b
+            ## Skip paths
+            - c
+            """);
+    assertThat(policy.conventions()).containsExactly("a", "b");
+    assertThat(policy.skipPaths()).containsExactly("c");
   }
 
   @Test
