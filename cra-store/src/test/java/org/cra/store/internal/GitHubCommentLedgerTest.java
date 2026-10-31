@@ -1,6 +1,7 @@
 package org.cra.store.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -12,6 +13,7 @@ import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.RepoRef;
+import org.cra.common.git.ReviewKey;
 import org.junit.jupiter.api.Test;
 
 /** GitHub 评论账本单测（ADR-0005 构造器注入端口；mock SPI 边界，08§3.1）。 */
@@ -81,6 +83,53 @@ class GitHubCommentLedgerTest {
                 0));
     GitHubCommentLedger ledger = new GitHubCommentLedger(source, REPO);
     assertThat(ledger.completedRuns(7)).hasSize(2);
+  }
+
+  @Test
+  void completedRunsAreOrderedByCarrierCommentTime() {
+    // SPI 约定按发布时间序（02§5）；端口拼接顺序不可依赖——收敛轮次取末元素作上一轮基点
+    CommentSource source = mock(CommentSource.class);
+    LedgerComment newer =
+        new LedgerComment(
+            12L,
+            LedgerComment.KIND_ISSUE,
+            "bot",
+            "newer",
+            Instant.parse("2026-10-26T00:00:02Z"),
+            null);
+    LedgerComment older =
+        new LedgerComment(
+            11L,
+            LedgerComment.KIND_ISSUE,
+            "bot",
+            "older",
+            Instant.parse("2026-10-26T00:00:01Z"),
+            null);
+    when(source.fetchBotComments(REPO, 7))
+        .thenReturn(
+            new CommentLedger(
+                List.of(newer, older),
+                List.of(),
+                List.of(
+                    new LedgerRunMarker("run_2", "def5678", "DONE", 1, 0, 12L),
+                    new LedgerRunMarker("run_1", "abc1234", "DONE", 2, 0, 11L)),
+                0));
+    GitHubCommentLedger ledger = new GitHubCommentLedger(source, REPO);
+    assertThat(ledger.completedRuns(7))
+        .extracting(LedgerRunMarker::runId)
+        .containsExactly("run_1", "run_2");
+  }
+
+  @Test
+  void keyedLookupRejectsMismatchedRepo() {
+    CommentSource source = mock(CommentSource.class);
+    when(source.fetchBotComments(REPO, 7))
+        .thenReturn(new CommentLedger(List.of(), List.of(), List.of(), 0));
+    GitHubCommentLedger ledger = new GitHubCommentLedger(source, REPO);
+    ReviewKey otherRepo = ReviewKey.pullRequest("other", "r", 7, "abc1234");
+    assertThatThrownBy(() -> ledger.findCompletion(otherRepo))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("账本仓库不匹配");
   }
 
   @Test

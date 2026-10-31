@@ -51,7 +51,12 @@ public final class PostgresLedger implements ReviewLedger {
     this.dataSource = dataSource;
   }
 
-  /** 执行幂等 DDL（server 启动时调用；重复调用安全）。 */
+  /**
+   * 执行幂等 DDL（server 启动时调用；重复调用安全）。
+   *
+   * <p>串行化是为了避开 PG 并发 {@code CREATE TABLE IF NOT EXISTS} 的 pg_type 唯一键竞争；锁内 I/O 只发生在启动路径（09§6 建议的
+   * 例外理由）。
+   */
   public void ensureSchema() {
     synchronized (PostgresLedger.class) {
       String script = readSchema();

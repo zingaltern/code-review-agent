@@ -1,6 +1,7 @@
 package org.cra.store.api;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
@@ -9,8 +10,8 @@ import org.cra.common.git.ReviewKey;
 
 /**
  * 评审账本 SPI（02§5、05§1.5；11§2 稳定级）。读侧：commit 级幂等闸（只认 DONE/DEGRADED 完成标记，02§4.1）与 指纹级去重（已发布 finding
- * 指纹）。写侧（M1，T1.1/T1.2）：完成标记与已发布 finding 的账本化登记 + 过期收尾 （02§5）所需的历史轮查询。三形态：GitHub 评论账本（CI）/
- * SQLite（本地）/ PG（服务，M4）。
+ * 指纹）。写侧：完成标记与已发布 finding 的账本化登记 + 过期收尾 （02§5）所需的历史轮查询。三种存储形态：GitHub 评论账本（CI；含 PR 评论与无 PR 的
+ * commit/issue 载体两种实现）/ SQLite（本地）/ PG（服务，M4b 起）。
  *
  * <p>SPI 演进只加 default 方法（11§4 第 1 条）。写侧 default 语义 = <b>无操作</b>：只读形态（GitHub 评论账本）
  * 的写入由发布动作内嵌标记完成（05§1.3 规则 3），无需重复登记；可持久化形态（SQLite/PG）必须覆写落库， 否则幂等闸与补发将失去事实源。
@@ -93,8 +94,7 @@ public interface ReviewLedger {
    * @param runId run 标识
    * @param versions 角色 → 模板版本
    */
-  default void recordTemplateVersions(
-      int prNumber, String runId, java.util.Map<String, String> versions) {}
+  default void recordTemplateVersions(int prNumber, String runId, Map<String, String> versions) {}
 
   // ---------- 键控扩展（M4c/M4d，05§1.3；SPI 只加 default 方法，11§4 第 1 条） ----------
 
@@ -178,8 +178,7 @@ public interface ReviewLedger {
    * @param runId run 标识
    * @param versions 角色 → 模板版本
    */
-  default void recordTemplateVersions(
-      ReviewKey key, String runId, java.util.Map<String, String> versions) {
+  default void recordTemplateVersions(ReviewKey key, String runId, Map<String, String> versions) {
     recordTemplateVersions(key.prNumber(), runId, versions);
   }
 }

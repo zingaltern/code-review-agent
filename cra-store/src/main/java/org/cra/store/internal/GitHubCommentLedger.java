@@ -17,7 +17,7 @@ import org.cra.store.api.ReviewLedger;
  * 3）；写侧 default 方法在此保持无操作（{@link ReviewLedger} 约定）。 解析与兜底分层由取数端口返回的 {@link CommentLedger} 承载（05§1.3
  * 规则 5）。
  */
-public class GitHubCommentLedger implements ReviewLedger {
+public final class GitHubCommentLedger implements ReviewLedger {
 
   private final CommentSource source;
   private final RepoRef repo;
@@ -48,9 +48,7 @@ public class GitHubCommentLedger implements ReviewLedger {
 
   @Override
   public List<LedgerRunMarker> completedRuns(int prNumber) {
-    return source.fetchBotComments(repo, prNumber).runMarkers().stream()
-        .filter(LedgerRunMarker::isCompletion)
-        .toList();
+    return LedgerMarkerOrder.completionMarkers(source.fetchBotComments(repo, prNumber));
   }
 
   @Override
@@ -92,10 +90,15 @@ public class GitHubCommentLedger implements ReviewLedger {
     return comment(requirePullRequest(key), commentId);
   }
 
-  private static int requirePullRequest(ReviewKey key) {
+  private int requirePullRequest(ReviewKey key) {
     if (key.mode() != ReviewMode.PULL_REQUEST) {
       throw new IllegalArgumentException(
           "PR 评论账本只接受 PULL_REQUEST 键: " + key.mode() + "（无 PR 形态用 GitHubCarrierLedger）");
+    }
+    if (!repo.owner().equalsIgnoreCase(key.repoOwner())
+        || !repo.repo().equalsIgnoreCase(key.repoName())) {
+      throw new IllegalArgumentException(
+          "账本仓库不匹配：ledger=" + repo + " key=" + key.repoOwner() + "/" + key.repoName());
     }
     return key.prNumber();
   }

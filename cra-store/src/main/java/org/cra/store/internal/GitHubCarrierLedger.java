@@ -33,6 +33,9 @@ public final class GitHubCarrierLedger implements ReviewLedger {
    * @param mode 载体形态（COMMIT | ISSUE）
    */
   public GitHubCarrierLedger(CommentSource source, RepoRef repo, ReviewMode mode) {
+    if (source == null || repo == null || mode == null) {
+      throw new IllegalArgumentException("source/repo/mode 不能为空");
+    }
     if (mode == ReviewMode.PULL_REQUEST) {
       throw new IllegalArgumentException("PR 形态请使用 GitHubCommentLedger（05§2.2）");
     }
@@ -81,14 +84,14 @@ public final class GitHubCarrierLedger implements ReviewLedger {
 
   @Override
   public List<LedgerRunMarker> completedRuns(ReviewKey key) {
-    return fetch(key).runMarkers().stream()
-        .filter(LedgerRunMarker::isCompletion)
+    return LedgerMarkerOrder.completionMarkers(fetch(key)).stream()
         .filter(m -> m.commitSha().equalsIgnoreCase(key.commitSha()))
         .toList();
   }
 
   @Override
   public int suspectMarkerCount(int prNumber) {
+    // int 形态无法表达 commit 作用域；无 PR 载体的可疑计数只走键控重载
     return 0;
   }
 

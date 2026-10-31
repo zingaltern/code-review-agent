@@ -46,7 +46,7 @@ public interface DeliveryStore {
   void markFailed(String deliveryId, String detail);
 
   /**
-   * 释放接收占位（队列满背压时调用，使 GitHub 重投可再次 claim）。
+   * 释放接收占位（队列满背压时调用，使平台重投可再次 claim）。
    *
    * @param deliveryId delivery id
    */

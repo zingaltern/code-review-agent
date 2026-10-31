@@ -63,6 +63,15 @@ class JsonlEventHistorySourceTest {
   }
 
   @Test
+  void presignedUrlIdExcludesQueryString() {
+    // 查询串是临时凭证：不能进水位键（会随轮换漂移）也不能落库
+    JsonlEventHistorySource source =
+        new JsonlEventHistorySource(
+            "https://bucket.example/events.jsonl?X-Amz-Signature=secret", 1024, Clock.systemUTC());
+    assertThat(source.id()).isEqualTo("https://bucket.example/events.jsonl");
+  }
+
+  @Test
   void oversizedPayloadFailsLoudly() throws Exception {
     Path file = dir.resolve("big.jsonl");
     Files.writeString(file, "x".repeat(2048));

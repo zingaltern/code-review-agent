@@ -17,9 +17,11 @@ import org.cra.core.api.CoreAssembly;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.Orchestrator;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.core.api.SignoffOptions;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.llm.api.LlmGateway;
 import org.cra.server.config.ServerConfig;
 import org.cra.server.queue.ReviewJob;
@@ -48,8 +50,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
   private final PipelineOptions pipelineOptions;
   private final CrossCheckerOptions crossCheckerOptions;
   private final EventHistoryQuery eventHistoryQuery;
-  private final org.cra.core.api.SemanticContextOptions semanticContextOptions;
-  private final org.cra.git.api.SymbolIndex symbolIndex;
+  private final SemanticContextOptions semanticContextOptions;
+  private final SymbolIndex symbolIndex;
   private final Path runRoot;
   private final Depth depth;
   private final boolean dryRun;
@@ -81,8 +83,8 @@ public final class CoreReviewExecutor implements ReviewExecutor {
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryQuery eventHistoryQuery,
-      org.cra.core.api.SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex,
       ServerConfig config) {
     this.dataSource = dataSource;
     this.adapter = adapter;
@@ -132,15 +134,6 @@ public final class CoreReviewExecutor implements ReviewExecutor {
         result.status(),
         result.stats().findingsPublished());
     return result;
-  }
-
-  /**
-   * 已缓存的仓库数（诊断用）。
-   *
-   * @return 仓库数
-   */
-  public int cachedRepositories() {
-    return orchestrators.size();
   }
 
   private Orchestrator newOrchestrator(ReviewJob job) {
