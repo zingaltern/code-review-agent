@@ -41,6 +41,23 @@ final class LocalPrePrReport {
       String reviewSkipReason,
       String reviewError) {
     StringBuilder out = new StringBuilder();
+    appendHeader(out, config, repoIdentity, baseRef);
+    appendExecSection(out, config, exec);
+    appendReviewSection(out, config, review, reviewSkipReason, reviewError);
+    out.append("=========================================================\n");
+    return out.toString();
+  }
+
+  /**
+   * 报告头（仓库身份 + 评审区间）。
+   *
+   * @param out 输出
+   * @param config 运行配置
+   * @param repoIdentity 仓库身份
+   * @param baseRef 基线 ref
+   */
+  private static void appendHeader(
+      StringBuilder out, CraConfig config, String repoIdentity, String baseRef) {
     out.append("\n================ cra pre-PR 本地评审报告 ================\n");
     out.append("仓库: ")
         .append(repoIdentity)
@@ -51,7 +68,17 @@ final class LocalPrePrReport {
         .append("..")
         .append(shortSha(config.headSha()))
         .append("（仅已提交变更，未提交工作区改动不在评审内）\n\n");
+  }
 
+  /**
+   * 构建/测试实跑段（07 T2.10：展示真实输出，不以声称完成代替）。
+   *
+   * @param out 输出
+   * @param config 运行配置
+   * @param exec 实跑结果
+   */
+  private static void appendExecSection(
+      StringBuilder out, CraConfig config, BuildVerifyRunner.ExecResult exec) {
     out.append("【1】构建/测试实跑（07 T2.10：展示真实输出，不以声称完成代替）\n");
     out.append("命令: ").append(config.execCommand()).append('\n');
     out.append("退出码: ")
@@ -77,7 +104,23 @@ final class LocalPrePrReport {
         }
       }
     }
+  }
 
+  /**
+   * 本地评审段（跳过/故障/正常三态互斥）。
+   *
+   * @param out 输出
+   * @param config 运行配置
+   * @param review 评审结果（可为 null）
+   * @param reviewSkipReason 跳过原因（可 null）
+   * @param reviewError 故障说明（可 null）
+   */
+  private static void appendReviewSection(
+      StringBuilder out,
+      CraConfig config,
+      ReviewResult review,
+      String reviewSkipReason,
+      String reviewError) {
     out.append("\n【2】本地评审\n");
     out.append("模式: dry-run=")
         .append(config.dryRun())
@@ -105,8 +148,6 @@ final class LocalPrePrReport {
     out.append("trace: ")
         .append(review == null ? "（未运行评审，无 trace）" : review.traceRef())
         .append('\n');
-    out.append("=========================================================\n");
-    return out.toString();
   }
 
   /** 建议清单（无建议时如实声明——不编造）。 */

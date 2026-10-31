@@ -1,6 +1,5 @@
 package org.cra.runner.cli;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -208,22 +207,21 @@ final class CliArgs {
         }
         named.put(arg, args[i + 1]);
         i += 2;
-        continue;
-      }
-      TriStateMatch triState = matchTriState(arg);
-      if (triState != null) {
-        triSeen.add(triState.flag().flag());
-        triValues.put(triState.flag().flag(), triState.value());
+      } else {
+        TriStateMatch triState = matchTriState(arg);
+        if (triState != null) {
+          triSeen.add(triState.flag().flag());
+          triValues.put(triState.flag().flag(), triState.value());
+        } else {
+          switch (arg) {
+            case "--security-block" -> securityBlock = true;
+            case "--local" -> local = true;
+            case "--push" -> push = true;
+            default -> throw unknownArg(arg);
+          }
+        }
         i++;
-        continue;
       }
-      switch (arg) {
-        case "--security-block" -> securityBlock = true;
-        case "--local" -> local = true;
-        case "--push" -> push = true;
-        default -> throw unknownArg(arg);
-      }
-      i++;
     }
     return new Scan(named, triValues, triSeen, securityBlock, local, push);
   }
@@ -247,8 +245,27 @@ final class CliArgs {
     boolean local = scan.local();
     String repo = PlatformArgs.repoOrProject(named, env, gitlab);
     PlatformArgs.OwnerRepo ownerRepo = repo == null ? null : PlatformArgs.splitRepo(repo, gitlab);
-    int pr;
-    String base;
+    TargetBase targetBase = resolveTargetBase(scan, env, gitlab);
+    // 本地模式 head 可省（= HEAD）；CI 必填
+    String head = resolveHead(named, env, gitlab, local);
+    String depth = PlatformArgs.depthCheck(named.getOrDefault("--depth", "standard"));
+    // token 解析（R5 共享）：GitLab 拒收 --token；本地形态与平台无关，不读取任何远端 token
+    String token = local ? null : PlatformArgs.tokenOrGitlabGuard(named, env, gitlab);
+    validateRemote(local, gitlab, token, ownerRepo, head);
+    return new Target(ownerRepo, targetBase.pr(), targetBase.base(), head, depth, token);
+  }
+
+  /**
+   * push/PR 形态的 PR 号与基线解析。
+   *
+   * @param scan flag 扫描结果
+   * @param env 环境变量
+   * @param gitlab 是否 GitLab 平台
+   * @return PR 号与基线
+   */
+  private static TargetBase resolveTargetBase(Scan scan, Map<String, String> env, boolean gitlab) {
+    Map<String, String> named = scan.named();
+    boolean local = scan.local();
     if (scan.push()) {
       if (local) {
         throw new CraConfigException("--push 与 --local 互斥（push 形态走平台 commit comment，05§2.4）");
@@ -256,45 +273,77 @@ final class CliArgs {
       if (named.containsKey("--pr")) {
         throw new CraConfigException("--push 模式无 PR 编号（账本键 = repo + commit，05§1.3）");
       }
-      pr = 0;
       // push 基线：--base / --baseline 显式给出即用；缺省由命令执行期沿首父链查账本解析
       // （上一完成 commit；首次 = 仓库初版，05§2.4）
       String explicitBase = PlatformArgs.blankToNull(named.get("--base"));
-      base =
-          explicitBase != null ? explicitBase : PlatformArgs.blankToNull(named.get("--baseline"));
-    } else {
-      String prEnv = gitlab ? env.get("CI_MERGE_REQUEST_IID") : env.get("PR_NUMBER");
-      pr =
-          local ? parseIntOrDefault(named.get("--pr"), 0) : parsePr(required(named, "--pr", prEnv));
-      String baseEnv = gitlab ? env.get("CI_MERGE_REQUEST_DIFF_BASE_SHA") : env.get("BASE_SHA");
-      base = named.containsKey("--base") || !local ? required(named, "--base", baseEnv) : "main";
+      return new TargetBase(
+          0,
+          explicitBase != null ? explicitBase : PlatformArgs.blankToNull(named.get("--baseline")));
     }
-    // 本地模式 head 可省（= HEAD）；CI 必填
+    String prEnv = env.get(gitlab ? "CI_MERGE_REQUEST_IID" : "PR_NUMBER");
+    int pr =
+        local ? parseIntOrDefault(named.get("--pr"), 0) : parsePr(required(named, "--pr", prEnv));
+    String baseEnv = env.get(gitlab ? "CI_MERGE_REQUEST_DIFF_BASE_SHA" : "BASE_SHA");
+    String base =
+        named.containsKey("--base") || !local ? required(named, "--base", baseEnv) : "main";
+    return new TargetBase(pr, base);
+  }
+
+  /**
+   * head 解析：显式 --head &gt; env；本地模式可省（= HEAD），CI 必填。
+   *
+   * @param named 值参数
+   * @param env 环境变量
+   * @param gitlab 是否 GitLab 平台
+   * @param local 是否本地模式
+   * @return head sha（本地缺省为 null）
+   */
+  private static String resolveHead(
+      Map<String, String> named, Map<String, String> env, boolean gitlab, boolean local) {
     String head = PlatformArgs.blankToNull(named.get("--head"));
     if (head == null) {
-      String headEnv = gitlab ? env.get("CI_COMMIT_SHA") : env.get("HEAD_SHA");
+      String headEnv = env.get(gitlab ? "CI_COMMIT_SHA" : "HEAD_SHA");
       head = local ? null : required(named, "--head", headEnv);
     }
-    String depth = PlatformArgs.depthCheck(named.getOrDefault("--depth", "standard"));
-    // token 解析（R5 共享）：GitLab 拒收 --token；本地形态与平台无关，不读取任何远端 token
-    String token = local ? null : PlatformArgs.tokenOrGitlabGuard(named, env, gitlab);
-    if (!local) {
-      if (gitlab && (token == null || token.isBlank())) {
-        throw new CraConfigException("CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件；05§6）");
-      }
-      if (!gitlab && (token == null || token.isBlank())) {
-        throw new CraConfigException("缺参数: --token（或 GITHUB_TOKEN）");
-      }
-      if (ownerRepo == null) {
-        throw new CraConfigException(PlatformArgs.missingRepoMessage(gitlab));
-      }
-      if (head == null) {
-        throw new CraConfigException(
-            gitlab ? "缺参数: --head（或 CI_COMMIT_SHA）" : "缺参数: --head（或 HEAD_SHA）");
-      }
-    }
-    return new Target(ownerRepo, pr, base, head, depth, token);
+    return head;
   }
+
+  /**
+   * 远端形态的必填项校验（token / owner-repo / head）。
+   *
+   * @param local 是否本地模式
+   * @param gitlab 是否 GitLab 平台
+   * @param token 平台 token
+   * @param ownerRepo 仓库标识
+   * @param head head sha
+   */
+  private static void validateRemote(
+      boolean local, boolean gitlab, String token, PlatformArgs.OwnerRepo ownerRepo, String head) {
+    if (local) {
+      return;
+    }
+    if (gitlab && (token == null || token.isBlank())) {
+      throw new CraConfigException("CRA_GITLAB_TOKEN 未设置（或 CRA_GITLAB_TOKEN_FILE 指向密钥文件；05§6）");
+    }
+    if (!gitlab && (token == null || token.isBlank())) {
+      throw new CraConfigException("缺参数: --token（或 GITHUB_TOKEN）");
+    }
+    if (ownerRepo == null) {
+      throw new CraConfigException(PlatformArgs.missingRepoMessage(gitlab));
+    }
+    if (head == null) {
+      throw new CraConfigException(
+          gitlab ? "缺参数: --head（或 CI_COMMIT_SHA）" : "缺参数: --head（或 HEAD_SHA）");
+    }
+  }
+
+  /**
+   * PR 号与基线的中间结果。
+   *
+   * @param pr PR 号（push 形态为 0）
+   * @param base 基线 ref
+   */
+  private record TargetBase(int pr, String base) {}
 
   /** 预算/阈值解析（05§5 review.*；flag &gt; CRA_REVIEW_* env &gt; 基准值，解析器与 sweep 共享于 PlatformArgs）。 */
   private static Limits parseLimits(Map<String, String> named, Map<String, String> env) {
@@ -491,13 +540,10 @@ final class CliArgs {
     if (raw == null || raw.isBlank()) {
       return List.of();
     }
-    List<String> values = new ArrayList<>();
-    for (String part : raw.split(",")) {
-      if (!part.isBlank()) {
-        values.add(part.strip());
-      }
-    }
-    return List.copyOf(values);
+    return Arrays.stream(raw.split(","))
+        .filter(part -> !part.isBlank())
+        .map(String::strip)
+        .toList();
   }
 
   /** flag 优先、环境变量次之；两者都缺省返回 null，由解析器取默认值。 */
