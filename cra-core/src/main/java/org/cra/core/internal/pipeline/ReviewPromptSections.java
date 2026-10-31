@@ -28,7 +28,7 @@ final class ReviewPromptSections {
   /** Security 附加段字符上限（≈8k token，04§2.1 字符/3.5）。 */
   private static final int EXTRA_SECTION_MAX_CHARS = 28_000;
 
-  /** TestReviewer 测试清单条目上限（有界注入；其余计数声明，防大 PR 吃穿 12k 输入预算，02§4.4）。 */
+  /** TestReviewer 测试清单条目上限（有界注入；其余计数声明，防大 PR 吃穿 16k 输入预算，02§4.4）。 */
   private static final int TEST_LIST_MAX_ENTRIES = 60;
 
   private ReviewPromptSections() {}
@@ -106,7 +106,7 @@ final class ReviewPromptSections {
       sb.append(lines.get(i)).append('\n');
     }
     if (lines.size() > shown) {
-      // 大 PR（AI coding 时代常见数百个测试文件）：清单必须有界，否则单段吃穿 TestReviewer 的 12k 输入预算
+      // 大 PR（AI coding 时代常见数百个测试文件）：清单必须有界，否则单段吃穿 TestReviewer 的 16k 输入预算
       sb.append("…等 ")
           .append(lines.size() - shown)
           .append(" 个（共 ")

@@ -57,12 +57,12 @@ final class VerificationBatchAssembler {
 
   private static final int CITED_EVENT_MAX = 5;
 
-  /** Judge 涉事文件单文件 token 上限（03§6：≤16k/案件，3 文件内分配）。 */
+  /** Judge 涉事文件单文件 token 上限（03§6：≤20k/案件，3 文件内分配）。 */
   private static final long JUDGE_FILE_TOKEN_CAP = 4_000;
 
   private static final int JUDGE_MAX_FILES = 3;
 
-  /** Judge 案件调用点索引渲染上限（ADR-0015：16k 案件预算内的预留）。 */
+  /** Judge 案件调用点索引渲染上限（ADR-0015：20k 案件预算内的预留）。 */
   private static final long JUDGE_CALL_SITE_TOKEN_CAP = 500;
 
   private VerificationBatchAssembler() {}

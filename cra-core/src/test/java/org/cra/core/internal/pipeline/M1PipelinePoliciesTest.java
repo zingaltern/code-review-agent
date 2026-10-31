@@ -205,7 +205,7 @@ class M1PipelinePoliciesTest {
 
   @Test
   void testEvidenceListIsBoundedForLargePullRequests() {
-    // 02§4.4：测试清单必须口语有界——数百个测试文件不得吃穿 TestReviewer 的 12k 输入预算
+    // 02§4.4：测试清单必须口语有界——数百个测试文件不得吃穿 TestReviewer 的 16k 输入预算
     List<DiffFile> files = new ArrayList<>();
     for (int i = 0; i < 70; i++) {
       files.add(file("src/test/java/demo/Case" + i + "Test.java"));

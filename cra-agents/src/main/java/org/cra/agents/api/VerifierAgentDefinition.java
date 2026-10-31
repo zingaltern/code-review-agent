@@ -6,7 +6,7 @@ import java.util.Objects;
 
 /**
  * VerifierAgent 定义（07 T2.4；03§4.2 M2 形态：每文件批次 × 1 个强模型验证者，平衡式独立复核）。 纯定义：模板装载 + brief 组装；LLM
- * 执行与判定解析在 cra-core（10§2，与 GeneralReviewerDefinition 同构）。
+ * 执行与判定解析在 cra-core（10§2）。
  *
  * <p>预算对齐 03§6 速查表 VerifierAgent 行（代码类 ≤16k 输入 / ≤2k 输出 / 2 轮；context 类与调用点索引
  * 在同一输入预算内由编排器裁剪，不额外加预算）。反锚定是输出约束 + 机器侧质控信号（PASS/FAIL 入 trace，不阻断晋升）。

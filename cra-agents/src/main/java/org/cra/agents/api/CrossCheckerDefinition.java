@@ -14,7 +14,7 @@ import java.util.Objects;
  * 属不可信输入，UNTRUSTED 定界（04§3.3）。brief 槽位映射：diffText = 精简视图， extraSection = 变更史（不可信），
  * reviewPolicySection = 产品段（可信）。
  *
- * <p>预算对齐 03§6 速查表 CrossChecker 行（≤16k 输入 = diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k；≤1.5k 输出；2
+ * <p>预算对齐 03§6 速查表 CrossChecker 行（≤16k 输入 = diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k；v1.3.2 起 ≤4k 输出；2
  * 轮；标准档；read_file(scoped)）。
  */
 public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> {
