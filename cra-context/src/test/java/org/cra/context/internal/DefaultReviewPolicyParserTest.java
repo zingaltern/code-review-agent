@@ -81,6 +81,10 @@ class DefaultReviewPolicyParserTest {
     ReviewPolicy invalid = parser.parse("## Nit budget: many\n");
     assertThat(invalid.nitBudget()).isNull();
     assertThat(invalid.warnings()).anyMatch(w -> w.contains("Nit budget 数值非法"));
+    // 负数与非法文本同口径：警告 + 未配置（不走异常分支）
+    ReviewPolicy negative = parser.parse("## Nit budget: -1\n");
+    assertThat(negative.nitBudget()).isNull();
+    assertThat(negative.warnings()).anyMatch(w -> w.contains("Nit budget 数值非法"));
   }
 
   @Test
