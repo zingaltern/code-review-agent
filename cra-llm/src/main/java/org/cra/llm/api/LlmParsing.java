@@ -5,12 +5,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import org.cra.common.exception.CraConfigException;
@@ -55,7 +58,7 @@ public final class LlmParsing {
    * @return 档位列表
    */
   public static List<ModelTier> parseFallbackChain(String value, String errorPrefix) {
-    List<ModelTier> chain = new java.util.ArrayList<>();
+    List<ModelTier> chain = new ArrayList<>();
     if (value == null || value.isBlank()) {
       return chain;
     }
@@ -87,7 +90,7 @@ public final class LlmParsing {
     if (value == null || value.isBlank()) {
       return defaults;
     }
-    Map<ModelTier, Integer> rpm = new java.util.EnumMap<>(ModelTier.class);
+    Map<ModelTier, Integer> rpm = new EnumMap<>(ModelTier.class);
     for (String part : value.split(",")) {
       String entry = part.strip();
       if (entry.isEmpty()) {
@@ -224,7 +227,7 @@ public final class LlmParsing {
    */
   public static Map<String, String> opencodeExtraHeaders(String baseUrl) {
     if (baseUrl != null && baseUrl.contains("opencode.ai")) {
-      return Map.of("x-opencode-session", java.util.UUID.randomUUID().toString());
+      return Map.of("x-opencode-session", UUID.randomUUID().toString());
     }
     return Map.of();
   }

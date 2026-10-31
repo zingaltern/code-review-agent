@@ -3,8 +3,8 @@ package org.cra.llm.api;
 import java.util.Optional;
 
 /**
- * LlmGateway：外部 LLM 服务的唯一接触面（09§3 *Gateway 语义）——路由/限流/重试/降级/核算 全部收敛在此（02§3 L2）。M0
- * 最小实现：单模型、chat+JSON 双模式、超时重试、并发信号量、 token 计数；模型路由与 per-model RPM 于 T2.9 扩展（05§5）。
+ * LlmGateway：外部 LLM 服务的唯一接触面（09§3 *Gateway 语义）——路由/限流/重试/降级与单次调用的 token 计量全部收敛在此（02§3 L2）。 run
+ * 级预算与降档阶梯由编排层执行（02§4.4：AgentRunner 逐代理硬限、ReviewStage 阶梯）——网关负责每次调用的计量与不可得降级，不做预算裁决。
  */
 public interface LlmGateway {
 
