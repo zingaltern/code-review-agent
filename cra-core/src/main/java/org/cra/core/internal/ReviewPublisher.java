@@ -44,23 +44,23 @@ final class ReviewPublisher {
     this.ledger = ledger;
   }
 
-  int publish(
-      ReviewRequest request,
-      String runId,
-      TraceWriter trace,
-      List<FindingAggregator.Scored> ordered,
-      int skippedDuplicate,
-      int suppressedByTruncation,
-      List<String> degradations,
-      boolean degraded,
-      String suspectWarning,
-      List<String> coverageLines,
-      String convergenceAdvice,
-      Set<String> unverifiedIds,
-      int unverifiedUnpublished,
-      boolean noReviewableChanges,
-      Map<String, String> templateVersions,
-      SignoffAdvice signoff) {
+  int publish(RunHeader run, FindingSet findings, SummaryMeta summary, PublishMeta meta) {
+    ReviewRequest request = run.request();
+    String runId = run.runId();
+    TraceWriter trace = run.trace();
+    List<FindingAggregator.Scored> ordered = findings.ordered();
+    int skippedDuplicate = findings.skippedDuplicate();
+    int suppressedByTruncation = findings.suppressedByTruncation();
+    Set<String> unverifiedIds = findings.unverifiedIds();
+    int unverifiedUnpublished = findings.unverifiedUnpublished();
+    List<String> degradations = summary.degradations();
+    boolean degraded = summary.degraded();
+    String suspectWarning = summary.suspectWarning();
+    List<String> coverageLines = summary.coverageLines();
+    String convergenceAdvice = summary.convergenceAdvice();
+    boolean noReviewableChanges = summary.noReviewableChanges();
+    Map<String, String> templateVersions = meta.templateVersions();
+    SignoffAdvice signoff = meta.signoff();
     ReviewMode mode = request.mode();
     boolean pullRequest = mode == ReviewMode.PULL_REQUEST;
     // 无 PR 载体（commit comment / issue）没有行级锚点：全部 finding 以详情进正文（05§2.4/§2.5），
@@ -134,32 +134,39 @@ final class ReviewPublisher {
     }
     if (mode == ReviewMode.COMMIT) {
       return publishCarrier(
-          request,
-          runId,
-          trace,
-          ordered,
-          summaryBody,
-          skippedDuplicate,
-          suppressedByTruncation,
-          degradations,
-          degraded,
-          templateVersions,
-          "commit_comment");
+          new CarrierContent(run, ordered, summaryBody, skippedDuplicate, suppressedByTruncation),
+          new CarrierMeta(summary, templateVersions, "commit_comment"));
     }
     if (mode == ReviewMode.ISSUE) {
       return publishCarrier(
-          request,
-          runId,
-          trace,
-          ordered,
-          summaryBody,
-          skippedDuplicate,
-          suppressedByTruncation,
-          degradations,
-          degraded,
-          templateVersions,
-          "issue");
+          new CarrierContent(run, ordered, summaryBody, skippedDuplicate, suppressedByTruncation),
+          new CarrierMeta(summary, templateVersions, "issue"));
     }
+    return publishPullRequest(
+        new PullRequestContent(
+            run, ordered, inline, summaryBody, skippedDuplicate, suppressedByTruncation),
+        new PullRequestMeta(degradations, degraded, templateVersions));
+  }
+
+  /**
+   * PR 载体发布（inline review + Summary issue comment）。
+   *
+   * @param content 发布内容
+   * @param meta 元信息（降级记录可变）
+   * @return 实际发布条数（published + fallback）
+   */
+  private int publishPullRequest(PullRequestContent content, PullRequestMeta meta) {
+    ReviewRequest request = content.run().request();
+    String runId = content.run().runId();
+    TraceWriter trace = content.run().trace();
+    List<FindingAggregator.Scored> ordered = content.ordered();
+    List<InlineComment> inline = content.inline();
+    String summaryBody = content.summaryBody();
+    int skippedDuplicate = content.skippedDuplicate();
+    int suppressedByTruncation = content.suppressedByTruncation();
+    List<String> degradations = meta.degradations();
+    Map<String, String> templateVersions = meta.templateVersions();
+    boolean degraded = meta.degraded();
     String reviewBody =
         inline.isEmpty()
             ? "cra 评审（run_" + runId + "）：无可 inline 的发现，详见本 PR 的评审 Summary 评论。"
@@ -222,18 +229,18 @@ final class ReviewPublisher {
    * 无 PR 载体发布（M4c commit comment / M4d issue，05§2.4/§2.5）：单条原子载体，正文含全部 finding 详情与 run 完成标记。载体发布成功
    * = 完整发布（无半截状态），失败 = 无标记 = 重跑（02§4.1）。
    */
-  private int publishCarrier(
-      ReviewRequest request,
-      String runId,
-      TraceWriter trace,
-      List<FindingAggregator.Scored> ordered,
-      String summaryBody,
-      int skippedDuplicate,
-      int suppressedByTruncation,
-      List<String> degradations,
-      boolean degraded,
-      Map<String, String> templateVersions,
-      String carrier) {
+  private int publishCarrier(CarrierContent content, CarrierMeta meta) {
+    ReviewRequest request = content.run().request();
+    String runId = content.run().runId();
+    TraceWriter trace = content.run().trace();
+    List<FindingAggregator.Scored> ordered = content.ordered();
+    String summaryBody = content.summaryBody();
+    int skippedDuplicate = content.skippedDuplicate();
+    int suppressedByTruncation = content.suppressedByTruncation();
+    List<String> degradations = meta.summary().degradations();
+    boolean degraded = meta.summary().degraded();
+    Map<String, String> templateVersions = meta.templateVersions();
+    String carrier = meta.carrier();
     Optional<Long> carrierId =
         switch (request.mode()) {
           case COMMIT ->
@@ -354,48 +361,63 @@ final class ReviewPublisher {
   private int supersedePreviousSummaries(ReviewRequest request, String runId, TraceWriter trace) {
     int failures = 0;
     for (LedgerRunMarker old : ledger.completedRuns(request.key())) {
-      if (old.commitSha().equalsIgnoreCase(request.headSha()) || old.commentId() <= 0) {
-        continue;
-      }
-      String body =
-          ledger.comment(request.key(), old.commentId()).map(LedgerComment::body).orElse(null);
-      if (body == null) {
-        trace.emit(
-            "summary_supersede", Map.of("comment_id", old.commentId(), "status", "unavailable"));
-        continue;
-      }
-      if (body.startsWith(SUPERSEDED_PREFIX)) {
-        trace.emit("summary_supersede", Map.of("comment_id", old.commentId(), "status", "skipped"));
-        continue;
-      }
-      if (SignoffSections.hasSignoffSection(body) && !SignoffSections.hasStaleNotice(body)) {
-        // 07§5 M4a 规矩 2：approve 只对特定 commit 有效——旧 Summary 的签字建议随新 commit 标记 stale
-        body = SignoffSections.staleNotice(old.commitSha(), request.headSha()) + "\n\n" + body;
-      }
-      try {
-        adapter.updateSummaryComment(
-            new RepoRef(request.repoOwner(), request.repoName()),
-            request.prNumber(),
-            old.commentId(),
-            "[已被 " + runId + " 取代]\n\n" + body);
-        trace.emit(
-            "summary_supersede",
-            Map.of("comment_id", old.commentId(), "status", "patched", "superseded_by", runId));
-      } catch (RuntimeException e) {
-        // 收尾失败不回滚完成标记（降级写状态，09§4）；次数计入 stats 供 Summary/健康度可见
-        trace.emit(
-            "summary_supersede",
-            Map.of(
-                "comment_id",
-                old.commentId(),
-                "status",
-                "failed",
-                "error",
-                String.valueOf(e.getMessage())));
-        failures++;
-      }
+      failures += supersedeOldSummary(request, runId, trace, old);
     }
     return failures;
+  }
+
+  /**
+   * 对单条旧 Summary 施加取代标记（不可得/已标记视为跳过；PATCH 失败计 1）。
+   *
+   * @param request 评审请求
+   * @param runId 新 run 标识
+   * @param trace 追踪写入
+   * @param old 旧 run 完成标记
+   * @return 失败次数（0/1）
+   */
+  private int supersedeOldSummary(
+      ReviewRequest request, String runId, TraceWriter trace, LedgerRunMarker old) {
+    if (old.commitSha().equalsIgnoreCase(request.headSha()) || old.commentId() <= 0) {
+      return 0;
+    }
+    String body =
+        ledger.comment(request.key(), old.commentId()).map(LedgerComment::body).orElse(null);
+    if (body == null) {
+      trace.emit(
+          "summary_supersede", Map.of("comment_id", old.commentId(), "status", "unavailable"));
+      return 0;
+    }
+    if (body.startsWith(SUPERSEDED_PREFIX)) {
+      trace.emit("summary_supersede", Map.of("comment_id", old.commentId(), "status", "skipped"));
+      return 0;
+    }
+    if (SignoffSections.hasSignoffSection(body) && !SignoffSections.hasStaleNotice(body)) {
+      // 07§5 M4a 规矩 2：approve 只对特定 commit 有效——旧 Summary 的签字建议随新 commit 标记 stale
+      body = SignoffSections.staleNotice(old.commitSha(), request.headSha()) + "\n\n" + body;
+    }
+    try {
+      adapter.updateSummaryComment(
+          new RepoRef(request.repoOwner(), request.repoName()),
+          request.prNumber(),
+          old.commentId(),
+          "[已被 " + runId + " 取代]\n\n" + body);
+      trace.emit(
+          "summary_supersede",
+          Map.of("comment_id", old.commentId(), "status", "patched", "superseded_by", runId));
+      return 0;
+    } catch (RuntimeException e) {
+      // 收尾失败不回滚完成标记（降级写状态，09§4）；次数计入 stats 供 Summary/健康度可见
+      trace.emit(
+          "summary_supersede",
+          Map.of(
+              "comment_id",
+              old.commentId(),
+              "status",
+              "failed",
+              "error",
+              String.valueOf(e.getMessage())));
+      return 1;
+    }
   }
 
   /** inline 候选里是否存在会破坏账本标记的路径（Summary 候选不受影响）。 */
@@ -406,4 +428,109 @@ final class ReviewPublisher {
                 s.anchor() == AnchorStatus.INLINE
                     && !ReviewBodyRenderer.markerSafePath(s.finding().file()));
   }
+
+  /**
+   * run 级上下文（请求/runId/trace）。
+   *
+   * @param request 评审请求
+   * @param runId run 标识
+   * @param trace 追踪写入
+   */
+  record RunHeader(ReviewRequest request, String runId, TraceWriter trace) {}
+
+  /**
+   * 发布候选与去重/截断计数。
+   *
+   * @param ordered 待发布候选
+   * @param skippedDuplicate 去重跳过数
+   * @param suppressedByTruncation 截断抑制数
+   * @param unverifiedIds 未验证 id 集
+   * @param unverifiedUnpublished 未验证未发布数
+   */
+  record FindingSet(
+      List<FindingAggregator.Scored> ordered,
+      int skippedDuplicate,
+      int suppressedByTruncation,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished) {}
+
+  /**
+   * Summary 元信息（降级/告警/覆盖与收敛建议）。
+   *
+   * @param degradations 降级记录（可变）
+   * @param degraded 是否已降级
+   * @param suspectWarning 可疑标记告警
+   * @param coverageLines 覆盖声明行
+   * @param convergenceAdvice 收敛建议（可空）
+   * @param noReviewableChanges 是否无评审范围
+   */
+  record SummaryMeta(
+      List<String> degradations,
+      boolean degraded,
+      String suspectWarning,
+      List<String> coverageLines,
+      String convergenceAdvice,
+      boolean noReviewableChanges) {}
+
+  /**
+   * 发布元信息（模板版本与签字建议）。
+   *
+   * @param templateVersions 模板版本
+   * @param signoff 签字建议
+   */
+  record PublishMeta(Map<String, String> templateVersions, SignoffAdvice signoff) {}
+
+  /**
+   * 单载体（commit comment / issue）发布内容。
+   *
+   * @param run run 上下文
+   * @param ordered 待发布候选
+   * @param summaryBody Summary 正文
+   * @param skippedDuplicate 去重跳过数
+   * @param suppressedByTruncation 截断抑制数
+   */
+  private record CarrierContent(
+      RunHeader run,
+      List<FindingAggregator.Scored> ordered,
+      String summaryBody,
+      int skippedDuplicate,
+      int suppressedByTruncation) {}
+
+  /**
+   * 单载体发布元信息。
+   *
+   * @param summary Summary 元信息
+   * @param templateVersions 模板版本
+   * @param carrier 载体名（trace 字段）
+   */
+  private record CarrierMeta(
+      SummaryMeta summary, Map<String, String> templateVersions, String carrier) {}
+
+  /**
+   * PR 发布内容。
+   *
+   * @param run run 上下文
+   * @param ordered 待发布候选
+   * @param inline inline 评论
+   * @param summaryBody Summary 正文
+   * @param skippedDuplicate 去重跳过数
+   * @param suppressedByTruncation 截断抑制数
+   */
+  private record PullRequestContent(
+      RunHeader run,
+      List<FindingAggregator.Scored> ordered,
+      List<InlineComment> inline,
+      String summaryBody,
+      int skippedDuplicate,
+      int suppressedByTruncation) {}
+
+  /**
+   * PR 发布元信息。
+   *
+   * @param degradations 降级记录（可变）
+   * @param degraded 是否已降级
+   * @param templateVersions 模板版本
+   */
+  private record PullRequestMeta(
+      List<String> degradations, boolean degraded, Map<String, String> templateVersions) {}
 }

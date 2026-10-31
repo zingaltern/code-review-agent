@@ -21,31 +21,50 @@ final class CoverageReportBuilder {
 
   private CoverageReportBuilder() {}
 
+  /**
+   * 覆盖声明行（07 T1.4/02§4.4）。
+   *
+   * @param plan 深度计划与分块计划
+   * @param diff 评审范围 diff
+   * @param policy 评审策略
+   * @param outcome 评审阶段结果
+   * @param blameOutcome blame 结果
+   * @param policyModified 策略是否被修改
+   * @param aggregation 发现聚合结果
+   * @return 覆盖声明行
+   */
   static List<String> lines(
+      ReviewPlan plan,
       DiffResult diff,
       ReviewPolicy policy,
-      DepthPlan depthPlan,
-      ChunkPlanner.Plan plan,
       ReviewStage.StageOutcome outcome,
       PreExistingBlameChecker.Outcome blameOutcome,
       boolean policyModified,
       FindingAggregator.Aggregation aggregation) {
-    int filesReviewed = plan.chunks().stream().mapToInt(c -> c.files().size()).sum();
+    int filesReviewed = plan.chunkPlan().chunks().stream().mapToInt(c -> c.files().size()).sum();
     return SummarySections.lines(
         new CoverageInput(
-            depthPlan,
+            plan.depthPlan(),
             diff.files().size(),
             filesReviewed,
-            plan.skippedPaths(),
+            plan.chunkPlan().skippedPaths(),
             outcome.contextNotes(),
             outcome.trimDecisions(),
-            plan.notes(),
+            plan.chunkPlan().notes(),
             PolicySections.warnings(policy, policyModified),
             blameOutcome.notes(),
             aggregation.nitDropped(),
             aggregation.suppressedByTruncation(),
-            plan.skippedTestCount()));
+            plan.chunkPlan().skippedTestCount()));
   }
+
+  /**
+   * 深度计划与分块计划的成对参数组（S107：两者恒同时出现，属同一评审计划快照）。
+   *
+   * @param depthPlan 深度计划
+   * @param chunkPlan 分块计划
+   */
+  record ReviewPlan(DepthPlan depthPlan, ChunkPlanner.Plan chunkPlan) {}
 
   static String note(List<String> coverageLines) {
     return String.join("；", coverageLines);

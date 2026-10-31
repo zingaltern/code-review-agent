@@ -120,6 +120,83 @@ public final class JgitSymbolIndex implements SymbolIndex {
 
     List<String> notes = new ArrayList<>();
     notes.add(JAVA_ONLY_NOTE);
+    Selection selection = selectCandidates(candidates, options, notes);
+    int skipped = selection.skipped();
+
+    // 第一趟：定义 + import + 包名（内存只保留结构化结果，不缓存源码）
+    DefinitionScan scan = scanDefinitions(repository, selection.selected(), notes);
+    skipped += scan.readFailures();
+
+    // import 解析：仓库内可唯一定位才填 resolvedPath（外部类型保持 null，不假装知道）
+    List<TypeImport> imports =
+        scan.rawImports().stream()
+            .map(
+                raw ->
+                    raw.withResolvedPath(
+                        resolveImport(raw, scan.typePathsByName(), scan.packageByPath())))
+            .toList();
+
+    // 第二趟：只统计索引内已定义符号名的出现（未定义标识符 = 局部/外部，不作跨文件证据）
+    Set<String> definedNames = new TreeSet<>();
+    Map<String, List<String>> definitionPathsByName = new TreeMap<>();
+    Map<String, Integer> definitionsPerPath = new TreeMap<>();
+    for (SymbolDefinition definition : scan.definitions()) {
+      definedNames.add(definition.name());
+      definitionPathsByName
+          .computeIfAbsent(definition.name(), key -> new ArrayList<>())
+          .add(definition.path());
+      definitionsPerPath.merge(definition.path(), 1, Integer::sum);
+    }
+    ReferenceScan references =
+        collectReferences(
+            repository,
+            scan.scannedPaths(),
+            scan.candidateByPath(),
+            definedNames,
+            definitionPathsByName);
+    List<SymbolReferences> referenceList =
+        references.occurrencesByName().entrySet().stream()
+            .map(
+                entry ->
+                    new SymbolReferences(
+                        entry.getKey(),
+                        entry.getValue(),
+                        references.sitesByName().getOrDefault(entry.getKey(), List.of())))
+            .toList();
+    List<FileReferenceStats> fileStats =
+        scan.scannedPaths().stream()
+            .map(
+                path ->
+                    new FileReferenceStats(
+                        path,
+                        definitionsPerPath.getOrDefault(path, 0),
+                        references.outboundByPath().getOrDefault(path, 0),
+                        references.inboundByPath().getOrDefault(path, 0)))
+            .toList();
+    return new SymbolIndexSnapshot(
+        true,
+        headSha,
+        "",
+        scan.scannedPaths().size(),
+        skipped,
+        selection.truncated(),
+        notes,
+        scan.definitions(),
+        referenceList,
+        imports,
+        fileStats);
+  }
+
+  /**
+   * 按 maxFiles/maxFileBytes 从候选集选本轮扫描集（超限明细如实进 notes）。
+   *
+   * @param candidates 全部 Java 候选（路径升序）
+   * @param options 索引选项
+   * @param notes 覆盖声明
+   * @return 选择结果
+   */
+  private static Selection selectCandidates(
+      List<Candidate> candidates, SymbolIndexOptions options, List<String> notes) {
     List<String> skipDetails = new ArrayList<>();
     List<Candidate> selected = new ArrayList<>();
     int skipped = 0;
@@ -141,9 +218,9 @@ public final class JgitSymbolIndex implements SymbolIndex {
                   + options.maxFileBytes()
                   + "）");
         }
-        continue;
+      } else {
+        selected.add(candidate);
       }
-      selected.add(candidate);
     }
     notes.addAll(skipDetails);
     if (skipped > skipDetails.size()) {
@@ -159,8 +236,19 @@ public final class JgitSymbolIndex implements SymbolIndex {
               + options.maxFiles()
               + "，按路径升序截断）");
     }
+    return new Selection(selected, skipped, truncated);
+  }
 
-    // 第一趟：定义 + import + 包名（内存只保留结构化结果，不缓存源码）
+  /**
+   * 第一趟扫描：逐文件读 blob 并抽取定义/import/包名（读取失败如实计数）。
+   *
+   * @param repository 仓库
+   * @param selected 本轮扫描集
+   * @param notes 覆盖声明
+   * @return 第一趟结果
+   */
+  private static DefinitionScan scanDefinitions(
+      Repository repository, List<Candidate> selected, List<String> notes) {
     Map<String, String> packageByPath = new TreeMap<>();
     Map<String, List<String>> typePathsByName = new TreeMap<>();
     List<SymbolDefinition> definitions = new ArrayList<>();
@@ -171,7 +259,6 @@ public final class JgitSymbolIndex implements SymbolIndex {
     for (Candidate candidate : selected) {
       String text = readBlob(repository, candidate.blobId());
       if (text == null) {
-        skipped++;
         readFailures++;
         if (readFailures <= MAX_LISTED_SKIPS) {
           notes.add("读取失败跳过 " + candidate.path());
@@ -195,24 +282,32 @@ public final class JgitSymbolIndex implements SymbolIndex {
     if (readFailures > 0) {
       notes.add("读取失败 " + readFailures + " 个文件（已从扫描集剔除）");
     }
+    return new DefinitionScan(
+        scannedPaths,
+        candidateByPath,
+        packageByPath,
+        typePathsByName,
+        definitions,
+        rawImports,
+        readFailures);
+  }
 
-    // import 解析：仓库内可唯一定位才填 resolvedPath（外部类型保持 null，不假装知道）
-    List<TypeImport> imports = new ArrayList<>();
-    for (TypeImport raw : rawImports) {
-      imports.add(raw.withResolvedPath(resolveImport(raw, typePathsByName, packageByPath)));
-    }
-
-    // 第二趟：只统计索引内已定义符号名的出现（未定义标识符 = 局部/外部，不作跨文件证据）
-    Set<String> definedNames = new TreeSet<>();
-    Map<String, List<String>> definitionPathsByName = new TreeMap<>();
-    Map<String, Integer> definitionsPerPath = new TreeMap<>();
-    for (SymbolDefinition definition : definitions) {
-      definedNames.add(definition.name());
-      definitionPathsByName
-          .computeIfAbsent(definition.name(), key -> new ArrayList<>())
-          .add(definition.path());
-      definitionsPerPath.merge(definition.path(), 1, Integer::sum);
-    }
+  /**
+   * 第二趟扫描：只统计索引内已定义符号名的出现与引用位置。
+   *
+   * @param repository 仓库
+   * @param scannedPaths 第一趟成功扫描的路径
+   * @param candidateByPath 路径 → 候选
+   * @param definedNames 索引内已定义符号名
+   * @param definitionPathsByName 符号名 → 定义路径
+   * @return 引用统计
+   */
+  private static ReferenceScan collectReferences(
+      Repository repository,
+      List<String> scannedPaths,
+      Map<String, Candidate> candidateByPath,
+      Set<String> definedNames,
+      Map<String, List<String>> definitionPathsByName) {
     Map<String, Integer> occurrencesByName = new TreeMap<>();
     Map<String, List<SymbolReferenceSite>> sitesByName = new TreeMap<>();
     Map<String, Set<String>> siteFilesByName = new TreeMap<>();
@@ -220,10 +315,7 @@ public final class JgitSymbolIndex implements SymbolIndex {
     Map<String, Integer> inboundByPath = new TreeMap<>();
     for (String path : scannedPaths) {
       Candidate candidate = candidateByPath.get(path);
-      if (candidate == null) {
-        continue;
-      }
-      String text = readBlob(repository, candidate.blobId());
+      String text = candidate == null ? null : readBlob(repository, candidate.blobId());
       if (text == null) {
         continue;
       }
@@ -245,57 +337,86 @@ public final class JgitSymbolIndex implements SymbolIndex {
         List<SymbolReferenceSite> sites =
             sitesByName.computeIfAbsent(name, key -> new ArrayList<>());
         Set<String> files = siteFilesByName.computeIfAbsent(name, key -> new LinkedHashSet<>());
-        for (int line : entry.getValue()) {
-          if (sites.size() >= MAX_SITES_PER_SYMBOL) {
-            break;
-          }
-          boolean newFile = !files.contains(path);
-          if (newFile && files.size() >= MAX_FILES_PER_SYMBOL) {
-            break;
-          }
-          if (newFile) {
-            files.add(path);
-          }
-          sites.add(
-              new SymbolReferenceSite(
-                  path, line, JavaSourceScanner.snippet(scan.sourceLines(), line)));
-        }
+        addReferenceSites(sites, files, path, scan, entry.getValue());
       }
     }
+    return new ReferenceScan(occurrencesByName, sitesByName, outboundByPath, inboundByPath);
+  }
 
-    List<SymbolReferences> references = new ArrayList<>();
-    for (Map.Entry<String, Integer> entry : occurrencesByName.entrySet()) {
-      references.add(
-          new SymbolReferences(
-              entry.getKey(),
-              entry.getValue(),
-              sitesByName.getOrDefault(entry.getKey(), List.of())));
+  /**
+   * 追加单个符号在本文件的引用位置（受单符号位置/文件上限约束）。
+   *
+   * @param sites 该符号已收集的位置
+   * @param files 该符号已覆盖的文件
+   * @param path 当前文件
+   * @param scan 当前文件扫描结果
+   * @param lines 当前文件命中行
+   */
+  private static void addReferenceSites(
+      List<SymbolReferenceSite> sites,
+      Set<String> files,
+      String path,
+      JavaSourceScanner.FileScan scan,
+      List<Integer> lines) {
+    for (int line : lines) {
+      boolean newFile = !files.contains(path);
+      if (sites.size() >= MAX_SITES_PER_SYMBOL
+          || (newFile && files.size() >= MAX_FILES_PER_SYMBOL)) {
+        break;
+      }
+      if (newFile) {
+        files.add(path);
+      }
+      sites.add(
+          new SymbolReferenceSite(path, line, JavaSourceScanner.snippet(scan.sourceLines(), line)));
     }
-    List<FileReferenceStats> fileStats = new ArrayList<>();
-    for (String path : scannedPaths) {
-      fileStats.add(
-          new FileReferenceStats(
-              path,
-              definitionsPerPath.getOrDefault(path, 0),
-              outboundByPath.getOrDefault(path, 0),
-              inboundByPath.getOrDefault(path, 0)));
-    }
-    return new SymbolIndexSnapshot(
-        true,
-        headSha,
-        "",
-        scannedPaths.size(),
-        skipped,
-        truncated,
-        notes,
-        definitions,
-        references,
-        imports,
-        fileStats);
   }
 
   /** 树内 Java 候选（路径升序；每项只带 blob id 与大小，不缓存内容）。 */
   private record Candidate(String path, ObjectId blobId, long size) {}
+
+  /**
+   * 候选选择结果。
+   *
+   * @param selected 本轮扫描集
+   * @param skipped 超长跳过数
+   * @param truncated 是否因 maxFiles 截断
+   */
+  private record Selection(List<Candidate> selected, int skipped, boolean truncated) {}
+
+  /**
+   * 第一趟扫描结果。
+   *
+   * @param scannedPaths 成功扫描路径
+   * @param candidateByPath 路径 → 候选
+   * @param packageByPath 路径 → 包名
+   * @param typePathsByName 类型名 → 定义路径
+   * @param definitions 符号定义
+   * @param rawImports 原始 import
+   * @param readFailures 读取失败数
+   */
+  private record DefinitionScan(
+      List<String> scannedPaths,
+      Map<String, Candidate> candidateByPath,
+      Map<String, String> packageByPath,
+      Map<String, List<String>> typePathsByName,
+      List<SymbolDefinition> definitions,
+      List<TypeImport> rawImports,
+      int readFailures) {}
+
+  /**
+   * 第二趟扫描结果。
+   *
+   * @param occurrencesByName 符号名 → 出现次数
+   * @param sitesByName 符号名 → 引用位置
+   * @param outboundByPath 文件 → 出向引用数
+   * @param inboundByPath 定义文件 → 入向引用数
+   */
+  private record ReferenceScan(
+      Map<String, Integer> occurrencesByName,
+      Map<String, List<SymbolReferenceSite>> sitesByName,
+      Map<String, Integer> outboundByPath,
+      Map<String, Integer> inboundByPath) {}
 
   private static List<Candidate> collectJavaSources(
       Repository repository, ObjectId commitId, SymbolIndexOptions options) throws IOException {
@@ -309,27 +430,36 @@ public final class JgitSymbolIndex implements SymbolIndex {
         treeWalk.setRecursive(true);
         while (treeWalk.next()) {
           String path = treeWalk.getPathString();
-          if (!path.endsWith(".java") || underSkippedDirectory(path)) {
-            continue;
+          if (path.endsWith(".java")
+              && !underSkippedDirectory(path)
+              && (includes.isEmpty() || matchesAny(includes, path))
+              && (excludes.isEmpty() || !matchesAny(excludes, path))) {
+            addCandidate(repository, treeWalk, path, candidates);
           }
-          if (!includes.isEmpty() && !matchesAny(includes, path)) {
-            continue;
-          }
-          if (!excludes.isEmpty() && matchesAny(excludes, path)) {
-            continue;
-          }
-          long size;
-          try {
-            size = repository.getObjectDatabase().open(treeWalk.getObjectId(0)).getSize();
-          } catch (IOException e) {
-            continue;
-          }
-          candidates.add(new Candidate(path, treeWalk.getObjectId(0).copy(), size));
         }
       }
     }
     candidates.sort(Comparator.comparing(Candidate::path));
     return candidates;
+  }
+
+  /**
+   * 追加单个 Java 候选（对象不可读时跳过，不中断枚举）。
+   *
+   * @param repository 仓库
+   * @param treeWalk 树遍历
+   * @param path 文件路径
+   * @param candidates 候选集
+   */
+  private static void addCandidate(
+      Repository repository, TreeWalk treeWalk, String path, List<Candidate> candidates) {
+    try {
+      long size = repository.getObjectDatabase().open(treeWalk.getObjectId(0)).getSize();
+      candidates.add(new Candidate(path, treeWalk.getObjectId(0).copy(), size));
+    } catch (IOException e) {
+      // 对象不可读：与既有 continue 语义一致，跳过该候选
+      return;
+    }
   }
 
   private static List<Pattern> compile(Set<String> globs) {

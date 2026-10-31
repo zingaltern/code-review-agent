@@ -1,6 +1,5 @@
 package org.cra.agents.api;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -135,49 +134,82 @@ public final class AgentBudgetOverrides {
     }
     Map<String, RoleOverride> collected = new LinkedHashMap<>();
     for (Map.Entry<String, String> entry : values.entrySet()) {
-      // 整键先归一（首尾空白）：此前仅在 role/field 段 strip，键首空白会让 startsWith 失配而静默丢弃配置
-      String key = entry.getKey() == null ? null : entry.getKey().strip();
-      if (key == null || !key.startsWith("agents.budget.")) {
-        continue;
+      ParsedOverride parsed = parseOverride(entry);
+      if (parsed != null) {
+        mergeOverride(collected, parsed);
       }
-      String rest = key.substring("agents.budget.".length());
-      int dot = rest.lastIndexOf('.');
-      if (dot <= 0) {
-        continue;
-      }
-      // 角色键大小写/首尾空白不敏感（整键先 strip，角色段再归一）——静默丢弃配置比拒绝更危险
-      String role = rest.substring(0, dot).strip().toLowerCase(Locale.ROOT);
-      String field = rest.substring(dot + 1).strip();
-      if (!ROLE_KEYS.contains(role)) {
-        // 未知角色/字段按未配置忽略（fromConfig 接收整张配置表；严格校验走 of()）
-        continue;
-      }
-      if (!"input-tokens".equals(field) && !"output-tokens".equals(field)) {
-        continue;
-      }
-      String raw = entry.getValue();
-      if (raw == null || raw.isBlank()) {
-        continue;
-      }
-      long value;
-      try {
-        value = Long.parseLong(raw.strip());
-      } catch (NumberFormatException e) {
-        throw new IllegalArgumentException(
-            "agents.budget." + role + "." + field + " 必须为整数: " + raw, e);
-      }
-      RoleOverride existing = collected.get(role);
-      Long input = existing == null ? null : existing.inputTokens();
-      Long output = existing == null ? null : existing.outputTokens();
-      if ("input-tokens".equals(field)) {
-        input = Long.valueOf(value);
-      } else {
-        output = Long.valueOf(value);
-      }
-      collected.put(role, new RoleOverride(input, output));
     }
     return of(collected);
   }
+
+  /**
+   * 解析单条 {@code agents.budget.<role>.<field>} 配置（未命中/空白/未知角色字段 → null）。
+   *
+   * <p>整键先归一（首尾空白）：此前仅在 role/field 段 strip，键首空白会让 startsWith 失配而静默丢弃配置； 角色键大小写/首尾空白不敏感（整键先
+   * strip，角色段再归一）——静默丢弃配置比拒绝更危险。
+   *
+   * @param entry 配置键值
+   * @return 解析结果（null = 忽略）
+   */
+  private static ParsedOverride parseOverride(Map.Entry<String, String> entry) {
+    String key = entry.getKey() == null ? null : entry.getKey().strip();
+    if (key == null || !key.startsWith("agents.budget.")) {
+      return null;
+    }
+    String rest = key.substring("agents.budget.".length());
+    int dot = rest.lastIndexOf('.');
+    if (dot <= 0) {
+      return null;
+    }
+    String role = rest.substring(0, dot).strip().toLowerCase(Locale.ROOT);
+    String field = rest.substring(dot + 1).strip();
+    // 未知角色/字段按未配置忽略（fromConfig 接收整张配置表；严格校验走 of()）
+    if (!ROLE_KEYS.contains(role)) {
+      return null;
+    }
+    if (!"input-tokens".equals(field) && !"output-tokens".equals(field)) {
+      return null;
+    }
+    String raw = entry.getValue();
+    if (raw == null || raw.isBlank()) {
+      return null;
+    }
+    long value;
+    try {
+      value = Long.parseLong(raw.strip());
+    } catch (NumberFormatException e) {
+      throw new IllegalArgumentException(
+          "agents.budget." + role + "." + field + " 必须为整数: " + raw, e);
+    }
+    return new ParsedOverride(role, "input-tokens".equals(field), value);
+  }
+
+  /**
+   * 合并同一角色的单维覆盖（未覆盖维度沿用既有值）。
+   *
+   * @param collected 已收集覆盖
+   * @param parsed 单条解析结果
+   */
+  private static void mergeOverride(Map<String, RoleOverride> collected, ParsedOverride parsed) {
+    RoleOverride existing = collected.get(parsed.role());
+    Long input = existing == null ? null : existing.inputTokens();
+    Long output = existing == null ? null : existing.outputTokens();
+    if (parsed.input()) {
+      input = parsed.value();
+    } else {
+      output = parsed.value();
+    }
+    collected.put(parsed.role(), new RoleOverride(input, output));
+  }
+
+  /**
+   * 单条配置解析结果。
+   *
+   * @param role 角色键（已归一）
+   * @param input true = input-tokens，false = output-tokens
+   * @param value 覆盖值
+   */
+  private record ParsedOverride(String role, boolean input, long value) {}
 
   /**
    * 覆盖是否为空。
@@ -225,10 +257,7 @@ public final class AgentBudgetOverrides {
     if (crew == null || byRole.isEmpty()) {
       return crew;
     }
-    List<SubAgent<ReviewAgentInput>> hunters = new ArrayList<>();
-    for (SubAgent<ReviewAgentInput> hunter : crew.bugHunters()) {
-      hunters.add(apply(hunter));
-    }
+    List<SubAgent<ReviewAgentInput>> hunters = crew.bugHunters().stream().map(this::apply).toList();
     return new ReviewCrew(
         hunters,
         apply(crew.securityReviewer()),

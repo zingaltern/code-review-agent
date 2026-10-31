@@ -49,25 +49,24 @@ final class GitLabLedgerSupport {
       }
       matched.add(c);
       suspects += outcome.suspects().size();
-      if (outcome.marker().isEmpty()) {
-        continue;
-      }
-      MarkerParseResult parsed = outcome.marker().orElseThrow();
-      if (parsed instanceof MarkerParseResult.FindingMark f) {
-        findings.add(
-            new LedgerFindingMarker(
-                f.fingerprint(),
-                f.file(),
-                f.line(),
-                f.category(),
-                f.findingId(),
-                f.runId(),
-                f.commitSha(),
-                c.id()));
-      } else if (parsed instanceof MarkerParseResult.RunMark r) {
-        runs.add(
-            new LedgerRunMarker(
-                r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
+      if (outcome.marker().isPresent()) {
+        MarkerParseResult parsed = outcome.marker().orElseThrow();
+        if (parsed instanceof MarkerParseResult.FindingMark f) {
+          findings.add(
+              new LedgerFindingMarker(
+                  f.fingerprint(),
+                  f.file(),
+                  f.line(),
+                  f.category(),
+                  f.findingId(),
+                  f.runId(),
+                  f.commitSha(),
+                  c.id()));
+        } else if (parsed instanceof MarkerParseResult.RunMark r) {
+          runs.add(
+              new LedgerRunMarker(
+                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
+        }
       }
     }
     return new CommentLedger(matched, findings, runs, suspects);

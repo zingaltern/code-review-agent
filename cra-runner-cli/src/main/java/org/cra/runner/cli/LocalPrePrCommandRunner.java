@@ -64,27 +64,10 @@ final class LocalPrePrCommandRunner {
           new BuildVerifyRunner(Path.of(config.runRoot()).toAbsolutePath())
               .run(workspace, config.execCommand());
 
-      ReviewResult review = null;
-      String reviewSkipReason = null;
-      String reviewError = null;
       // M4a：本地实跑给出真实测试状态（低风险 0 人签的前提之一）；作者仍来自 --pr-author/GITHUB_ACTOR
       TestsStatus testsStatus = exec.failed() ? TestsStatus.FAILED : TestsStatus.PASSED;
       SignoffContext signoffContext = new SignoffContext(config.signoff().author(), testsStatus);
-      if (config.llmApiKey() == null || config.llmApiKey().isBlank()) {
-        reviewSkipReason = "未配置 CRA_LLM_API_KEY（密钥只从环境变量读，05§6）——LLM 评审未运行，本报告仅含构建/测试实跑结果";
-      } else {
-        try {
-          review = runReview(config, git, signoffContext);
-        } catch (CraException e) {
-          // 评审段自身故障（配置/账本/网关）：不掩盖实跑结论，报告中如实声明
-          LOG.error("本地评审段失败: {}", e.getMessage());
-          reviewError = failureMessage(e);
-        } catch (RuntimeException e) {
-          // 组合根装配/网关构造的非预期故障：同样保住已完成的实跑报告（先修构建再看建议）
-          LOG.error("本地评审段未预期故障", e);
-          reviewError = failureMessage(e);
-        }
-      }
+      ReviewPhase reviewPhase = runReviewPhase(config, git, signoffContext);
 
       System.out.println(
           LocalPrePrReport.render(
@@ -92,27 +75,63 @@ final class LocalPrePrCommandRunner {
               exec,
               repoIdentity,
               rawConfig.baseSha(),
-              review,
-              reviewSkipReason,
-              reviewError));
+              reviewPhase.review(),
+              reviewPhase.skipReason(),
+              reviewPhase.error()));
 
       if (exec.failed()) {
         return EXIT_BUILD_FAILED;
       }
-      if (reviewError != null) {
+      if (reviewPhase.error() != null) {
         return 2;
       }
-      if (review != null) {
-        if (review.status() == RunStatus.FAILED) {
+      if (reviewPhase.review() != null) {
+        if (reviewPhase.review().status() == RunStatus.FAILED) {
           return 2; // 自身故障（02§4.2），构建已通过
         }
-        if (config.securityBlock() && review.stats().securityPublished() > 0) {
+        if (config.securityBlock() && reviewPhase.review().stats().securityPublished() > 0) {
           return 3;
         }
       }
       return 0;
     }
   }
+
+  /**
+   * 本地评审段（未配置密钥则跳过；自身故障不掩盖实跑结论，报告中如实声明）。
+   *
+   * @param config 运行配置
+   * @param git 本地仓库
+   * @param signoffContext 签字上下文
+   * @return 评审段结果
+   */
+  private ReviewPhase runReviewPhase(
+      CraConfig config, LocalGitAdapter git, SignoffContext signoffContext) {
+    if (config.llmApiKey() == null || config.llmApiKey().isBlank()) {
+      return new ReviewPhase(
+          null, "未配置 CRA_LLM_API_KEY（密钥只从环境变量读，05§6）——LLM 评审未运行，本报告仅含构建/测试实跑结果", null);
+    }
+    try {
+      return new ReviewPhase(runReview(config, git, signoffContext), null, null);
+    } catch (CraException e) {
+      // 评审段自身故障（配置/账本/网关）：不掩盖实跑结论，报告中如实声明
+      LOG.error("本地评审段失败: {}", e.getMessage());
+      return new ReviewPhase(null, null, failureMessage(e));
+    } catch (RuntimeException e) {
+      // 组合根装配/网关构造的非预期故障：同样保住已完成的实跑报告（先修构建再看建议）
+      LOG.error("本地评审段未预期故障", e);
+      return new ReviewPhase(null, null, failureMessage(e));
+    }
+  }
+
+  /**
+   * 评审段结果（review / 跳过原因 / 故障说明三态互斥）。
+   *
+   * @param review 评审结果（未运行/故障为 null）
+   * @param skipReason 跳过原因（正常为 null）
+   * @param error 故障说明（正常为 null）
+   */
+  private record ReviewPhase(ReviewResult review, String skipReason, String error) {}
 
   /** 仓库身份：显式 --repo 优先，否则 remote origin 推导，兜底 local/&lt;目录名&gt;（账本键控用，诚实降级）。 */
   private static String resolveIdentity(CraConfig config, LocalGitAdapter git, Path workspace) {

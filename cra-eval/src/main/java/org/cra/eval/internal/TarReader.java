@@ -39,114 +39,189 @@ public final class TarReader {
    * @throws CraIntegrationException 归档损坏/截断/路径逃逸/超出大小上限
    */
   public static Result untar(InputStream tar, Path targetDir) throws IOException {
-    int files = 0;
-    int dirs = 0;
-    int skipped = 0;
-    long totalBytes = 0;
+    UntarState state = new UntarState();
     Path root = targetDir.toAbsolutePath().normalize();
     byte[] header = new byte[BLOCK];
-    String pendingPathOverride = null;
-    Long pendingSizeOverride = null;
     while (true) {
       int read = readFully(tar, header);
-      if (read == 0) {
+      if (read == 0 || (read == BLOCK && isZeroBlock(header))) {
         break;
       }
       if (read < BLOCK) {
         throw new CraIntegrationException("tar 数据截断：头部不足 " + BLOCK + " 字节");
       }
-      if (isZeroBlock(header)) {
-        break;
-      }
-      verifyChecksum(header);
-      String name = readString(header, 0, 100);
-      long size = readOctal(header, 124, 12);
-      char type = (char) (header[156] & 0xFF);
-      String prefix = readString(header, 345, 155);
-      String fullName = prefix.isEmpty() ? name : prefix + "/" + name;
+      handleEntry(tar, root, header, state);
+    }
+    return new Result(state.files, state.dirs, state.skipped);
+  }
+
+  /** 解包累计状态（文件/目录/跳过计数与 PAX 覆盖待生效值）。 */
+  private static final class UntarState {
+    private int files;
+    private int dirs;
+    private int skipped;
+    private long totalBytes;
+    private String pendingPathOverride;
+    private Long pendingSizeOverride;
+  }
+
+  /**
+   * 处理一个 tar 条目（扩展头只登记待生效覆盖；目录/文件立即落盘；其它类型跳过）。
+   *
+   * @param tar 数据流
+   * @param root 目标根（归一化绝对路径）
+   * @param header 512 字节条目头
+   * @param state 解包状态
+   * @throws IOException 落盘/读取失败
+   */
+  private static void handleEntry(InputStream tar, Path root, byte[] header, UntarState state)
+      throws IOException {
+    verifyChecksum(header);
+    String name = readString(header, 0, 100);
+    long size = readOctal(header, 124, 12);
+    char type = (char) (header[156] & 0xFF);
+    String prefix = readString(header, 345, 155);
+    String fullName = prefix.isEmpty() ? name : prefix + "/" + name;
+    if (size < 0 || size > MAX_ENTRY_BYTES) {
+      throw new CraIntegrationException("tar 条目大小非法: " + size + "（" + fullName + "）");
+    }
+    long padded = paddedSize(size);
+    if (isExtendedType(type)) {
+      readExtendedHeader(tar, type, size, padded, fullName, state);
+      return;
+    }
+    String path = state.pendingPathOverride != null ? state.pendingPathOverride : fullName;
+    if (state.pendingSizeOverride != null) {
+      // PAX size 覆盖 ustar 头的 size 字段（大文件/非 ASCII 元数据时 GNU/bsdtar 会这样写）
+      size = state.pendingSizeOverride;
       if (size < 0 || size > MAX_ENTRY_BYTES) {
-        throw new CraIntegrationException("tar 条目大小非法: " + size + "（" + fullName + "）");
+        throw new CraIntegrationException("PAX 覆盖的条目大小非法: " + size + "（" + path + "）");
       }
-      long padded = paddedSize(size);
-      if (type == 'x' || type == 'g' || type == 'L') {
-        byte[] payload = new byte[(int) size];
-        if (readFully(tar, payload) != payload.length) {
-          throw new CraIntegrationException("tar 扩展头负载截断: " + fullName);
-        }
-        skipFully(tar, padded - size);
-        if (type == 'x') {
-          PaxHeader pax = paxHeader(payload);
-          if (pax.path() != null) {
-            pendingPathOverride = pax.path();
-          }
-          if (pax.size() != null) {
-            pendingSizeOverride = pax.size();
-          }
-        } else if (type == 'L') {
-          pendingPathOverride =
-              new String(payload, StandardCharsets.UTF_8).replace("\0", "").strip();
-        }
-        continue;
-      }
-      String path = pendingPathOverride != null ? pendingPathOverride : fullName;
-      if (type != 'x' && type != 'g' && type != 'L' && pendingSizeOverride != null) {
-        // PAX size 覆盖 ustar 头的 size 字段（大文件/非 ASCII 元数据时 GNU/bsdtar 会这样写）
-        size = pendingSizeOverride;
-        if (size < 0 || size > MAX_ENTRY_BYTES) {
-          throw new CraIntegrationException("PAX 覆盖的条目大小非法: " + size + "（" + path + "）");
-        }
-        padded = paddedSize(size);
-      }
-      pendingPathOverride = null;
-      pendingSizeOverride = null;
-      if (type == '5') {
-        if (size > 0) {
-          // 目录条目不应有负载：非零 size 会让后续 skip 与流位置不一致（PAX size 覆盖可构造）
-          throw new CraIntegrationException("tar 目录条目负载大小非法（必须为 0）: " + path);
-        }
-        if (isAppleDouble(path)) {
-          skipped++;
-          skipFully(tar, padded);
-          continue;
-        }
-        Files.createDirectories(resolveSafe(root, path));
-        dirs++;
-        continue;
-      }
-      if (type == '0' || type == '\0' || type == '7') {
-        if (isAppleDouble(path)) {
-          skipped++;
-          skipFully(tar, padded);
-          continue;
-        }
-        Path target = resolveSafe(root, path);
-        totalBytes += size;
-        if (totalBytes > MAX_TOTAL_BYTES) {
-          throw new CraIntegrationException("tar 解包总量超过上限 " + MAX_TOTAL_BYTES + " 字节");
-        }
-        Files.createDirectories(target.getParent());
-        long remaining = size;
-        byte[] buf = new byte[8192];
-        try (OutputStream out =
-            Files.newOutputStream(
-                target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
-          while (remaining > 0) {
-            int n = tar.read(buf, 0, (int) Math.min(buf.length, remaining));
-            if (n < 0) {
-              throw new CraIntegrationException("tar 数据截断: " + path);
-            }
-            out.write(buf, 0, n);
-            remaining -= n;
-          }
-        }
-        files++;
-        skipFully(tar, padded - size);
-        continue;
-      }
-      skipped++;
+      padded = paddedSize(size);
+    }
+    state.pendingPathOverride = null;
+    state.pendingSizeOverride = null;
+    if (type == '5') {
+      handleDirectory(tar, root, path, size, padded, state);
+    } else if (type == '0' || type == '\0' || type == '7') {
+      handleFile(tar, root, path, size, padded, state);
+    } else {
+      state.skipped++;
       skipFully(tar, padded);
     }
-    return new Result(files, dirs, skipped);
+  }
+
+  /**
+   * 是否扩展头（PAX x/g 或 GNU L）。
+   *
+   * @param type 条目类型
+   * @return true 若是扩展头
+   */
+  private static boolean isExtendedType(char type) {
+    return type == 'x' || type == 'g' || type == 'L';
+  }
+
+  /**
+   * 读取扩展头负载并登记 path/size 覆盖（g 类型只消费不生效）。
+   *
+   * @param tar 数据流
+   * @param type 条目类型
+   * @param size 负载大小
+   * @param padded 对齐后大小
+   * @param fullName 扩展头条目名（错误信息用）
+   * @param state 解包状态
+   * @throws IOException 读取失败
+   */
+  private static void readExtendedHeader(
+      InputStream tar, char type, long size, long padded, String fullName, UntarState state)
+      throws IOException {
+    byte[] payload = new byte[(int) size];
+    if (readFully(tar, payload) != payload.length) {
+      throw new CraIntegrationException("tar 扩展头负载截断: " + fullName);
+    }
+    skipFully(tar, padded - size);
+    if (type == 'x') {
+      PaxHeader pax = paxHeader(payload);
+      if (pax.path() != null) {
+        state.pendingPathOverride = pax.path();
+      }
+      if (pax.size() != null) {
+        state.pendingSizeOverride = pax.size();
+      }
+    } else if (type == 'L') {
+      state.pendingPathOverride =
+          new String(payload, StandardCharsets.UTF_8).replace("\0", "").strip();
+    }
+  }
+
+  /**
+   * 处理目录条目（AppleDouble 元数据跳过；非零负载拒绝）。
+   *
+   * @param tar 数据流
+   * @param root 目标根
+   * @param path 条目路径
+   * @param size 负载大小
+   * @param padded 对齐后大小
+   * @param state 解包状态
+   * @throws IOException 落盘失败
+   */
+  private static void handleDirectory(
+      InputStream tar, Path root, String path, long size, long padded, UntarState state)
+      throws IOException {
+    if (size > 0) {
+      // 目录条目不应有负载：非零 size 会让后续 skip 与流位置不一致（PAX size 覆盖可构造）
+      throw new CraIntegrationException("tar 目录条目负载大小非法（必须为 0）: " + path);
+    }
+    if (isAppleDouble(path)) {
+      state.skipped++;
+      skipFully(tar, padded);
+      return;
+    }
+    Files.createDirectories(resolveSafe(root, path));
+    state.dirs++;
+  }
+
+  /**
+   * 处理普通文件条目（AppleDouble 元数据跳过；总量上限校验后流式写入）。
+   *
+   * @param tar 数据流
+   * @param root 目标根
+   * @param path 条目路径
+   * @param size 负载大小
+   * @param padded 对齐后大小
+   * @param state 解包状态
+   * @throws IOException 落盘/读取失败
+   */
+  private static void handleFile(
+      InputStream tar, Path root, String path, long size, long padded, UntarState state)
+      throws IOException {
+    if (isAppleDouble(path)) {
+      state.skipped++;
+      skipFully(tar, padded);
+      return;
+    }
+    Path target = resolveSafe(root, path);
+    state.totalBytes += size;
+    if (state.totalBytes > MAX_TOTAL_BYTES) {
+      throw new CraIntegrationException("tar 解包总量超过上限 " + MAX_TOTAL_BYTES + " 字节");
+    }
+    Files.createDirectories(target.getParent());
+    long remaining = size;
+    byte[] buf = new byte[8192];
+    try (OutputStream out =
+        Files.newOutputStream(
+            target, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
+      while (remaining > 0) {
+        int n = tar.read(buf, 0, (int) Math.min(buf.length, remaining));
+        if (n < 0) {
+          throw new CraIntegrationException("tar 数据截断: " + path);
+        }
+        out.write(buf, 0, n);
+        remaining -= n;
+      }
+    }
+    state.files++;
+    skipFully(tar, padded - size);
   }
 
   /** macOS AppleDouble 元数据条目（bsdtar 在有 xattr 的文件上自动附带，与快照内容无关）。 */
@@ -201,51 +276,105 @@ public final class TarReader {
     Long size = null;
     int position = 0;
     while (position < payload.length) {
-      int space = position;
-      while (space < payload.length && payload[space] != ' ') {
-        space++;
-      }
+      int space = findSpace(payload, position);
       if (space >= payload.length) {
         break;
       }
-      long recordLength;
-      try {
-        recordLength =
-            Long.parseLong(
-                new String(payload, position, space - position, StandardCharsets.US_ASCII));
-      } catch (NumberFormatException e) {
-        throw new CraIntegrationException("PAX 记录长度非法");
-      }
-      if (recordLength <= 0 || position + recordLength > payload.length) {
-        throw new CraIntegrationException("PAX 记录越界: " + recordLength);
-      }
-      int recordEnd = position + (int) recordLength;
-      int contentEnd = recordEnd;
-      while (contentEnd > space + 1 && payload[contentEnd - 1] == '\n') {
-        contentEnd--;
-      }
-      String recordText =
-          new String(payload, space + 1, contentEnd - (space + 1), StandardCharsets.UTF_8);
-      int eq = recordText.indexOf('=');
-      if (eq > 0) {
-        String key = recordText.substring(0, eq);
-        String value = recordText.substring(eq + 1);
-        if ("path".equals(key)) {
-          path = value;
-        } else if ("size".equals(key)) {
-          try {
-            size = Long.parseLong(value.strip());
-          } catch (NumberFormatException e) {
-            throw new CraIntegrationException("PAX size 非法: " + value);
-          }
-        }
+      int recordEnd = paxRecordEnd(payload, position, space);
+      PaxField field = paxField(payload, space, recordEnd);
+      if ("path".equals(field.key())) {
+        path = field.value();
+      } else if ("size".equals(field.key())) {
+        size = parsePaxSize(field.value());
       }
       position = recordEnd;
     }
     return new PaxHeader(path, size);
   }
 
+  /**
+   * 找记录中第一个空格（length 与 key 的分界）。
+   *
+   * @param payload PAX 负载
+   * @param from 起点
+   * @return 空格下标（无空格返回负载长度）
+   */
+  private static int findSpace(byte[] payload, int from) {
+    int space = from;
+    while (space < payload.length && payload[space] != ' ') {
+      space++;
+    }
+    return space;
+  }
+
+  /**
+   * 解析记录长度并返回记录结束下标（非法长度/越界即拒绝）。
+   *
+   * @param payload PAX 负载
+   * @param position 记录起点
+   * @param space 长度段结束下标
+   * @return 记录结束下标（不含）
+   */
+  private static int paxRecordEnd(byte[] payload, int position, int space) {
+    long recordLength;
+    try {
+      recordLength =
+          Long.parseLong(
+              new String(payload, position, space - position, StandardCharsets.US_ASCII));
+    } catch (NumberFormatException e) {
+      throw new CraIntegrationException("PAX 记录长度非法");
+    }
+    if (recordLength <= 0 || position + recordLength > payload.length) {
+      throw new CraIntegrationException("PAX 记录越界: " + recordLength);
+    }
+    return position + (int) recordLength;
+  }
+
+  /**
+   * 解析单条记录的 key/value（无等号时 key 为空，调用方按未命中忽略）。
+   *
+   * @param payload PAX 负载
+   * @param space 长度段结束下标
+   * @param recordEnd 记录结束下标
+   * @return key/value
+   */
+  private static PaxField paxField(byte[] payload, int space, int recordEnd) {
+    int contentEnd = recordEnd;
+    while (contentEnd > space + 1 && payload[contentEnd - 1] == '\n') {
+      contentEnd--;
+    }
+    String recordText =
+        new String(payload, space + 1, contentEnd - (space + 1), StandardCharsets.UTF_8);
+    int eq = recordText.indexOf('=');
+    if (eq <= 0) {
+      return new PaxField("", "");
+    }
+    return new PaxField(recordText.substring(0, eq), recordText.substring(eq + 1));
+  }
+
+  /**
+   * 解析 PAX size 值。
+   *
+   * @param value 原始值
+   * @return 大小
+   */
+  private static long parsePaxSize(String value) {
+    try {
+      return Long.parseLong(value.strip());
+    } catch (NumberFormatException e) {
+      throw new CraIntegrationException("PAX size 非法: " + value);
+    }
+  }
+
   private record PaxHeader(String path, Long size) {}
+
+  /**
+   * 单条 PAX 记录字段。
+   *
+   * @param key 键（无等号时为空串）
+   * @param value 值
+   */
+  private record PaxField(String key, String value) {}
 
   private static void verifyChecksum(byte[] header) {
     long stored = readOctalAllowZero(header, 148, 8);

@@ -30,6 +30,27 @@ public final class RunCommand {
    * @return 退出码（0 = 正常完成；5 = --fail-on-red 且门禁红）
    */
   public static int execute(EvalCliArgs.RunArgs args, Map<String, String> env) {
+    List<Path> caseDirs = filterCases(args);
+    Path cacheDir = args.workDir().toAbsolutePath().resolve("cache");
+    Path runsDir = args.workDir().toAbsolutePath().resolve("cases");
+    Map<String, FixtureMeta> metas = new LinkedHashMap<>();
+    Map<String, ExpectedFindings> expecteds = new LinkedHashMap<>();
+    EvalRunner runner = new EvalRunner(CliProcessRunner.javaJar(args.timeoutSec()));
+    List<CaseObservation> observations =
+        runCases(args, env, caseDirs, runner, cacheDir, runsDir, new CaseTables(metas, expecteds));
+    EvalReport report = generateReport(args, env, metas, expecteds, observations);
+    ReportWriter.renderText(report);
+    writeJsonIfRequested(args, report);
+    return gateExitCode(args, report);
+  }
+
+  /**
+   * 解析并过滤用例集（--case 未知即拒绝；空集即拒绝）。
+   *
+   * @param args run 参数
+   * @return 实际运行用例目录
+   */
+  private static List<Path> filterCases(EvalCliArgs.RunArgs args) {
     List<Path> caseDirs = DatasetLoader.listCases(args.dataset(), args.set());
     if (args.onlyCases() != null && !args.onlyCases().isEmpty()) {
       java.util.Set<String> requested =
@@ -56,12 +77,30 @@ public final class RunCommand {
     if (caseDirs.isEmpty()) {
       throw new CraConfigException("数据集为空或过滤后无用例: " + args.dataset() + " set=" + args.set());
     }
-    Path cacheDir = args.workDir().toAbsolutePath().resolve("cache");
-    Path runsDir = args.workDir().toAbsolutePath().resolve("cases");
-    Map<String, FixtureMeta> metas = new LinkedHashMap<>();
-    Map<String, ExpectedFindings> expecteds = new LinkedHashMap<>();
+    return caseDirs;
+  }
+
+  /**
+   * 逐用例逐次执行被测 CLI 并收集观测（draft/relabel/重复 id 的守卫保持原序）。
+   *
+   * @param args run 参数
+   * @param env 进程环境
+   * @param caseDirs 用例目录
+   * @param runner 被测进程执行器
+   * @param cacheDir 快照缓存目录
+   * @param runsDir 各用例工作目录根
+   * @param tables caseId → meta / 断言规格输出表
+   * @return 全部观测
+   */
+  private static List<CaseObservation> runCases(
+      EvalCliArgs.RunArgs args,
+      Map<String, String> env,
+      List<Path> caseDirs,
+      EvalRunner runner,
+      Path cacheDir,
+      Path runsDir,
+      CaseTables tables) {
     List<CaseObservation> observations = new ArrayList<>();
-    EvalRunner runner = new EvalRunner(CliProcessRunner.javaJar(args.timeoutSec()));
     int index = 0;
     for (Path caseDir : caseDirs) {
       // 状态机先于数据加载（06§3）：draft 只有草稿、无 expected_findings.json——先给出"未确认"的
@@ -76,13 +115,13 @@ public final class RunCommand {
         throw new CraConfigException(
             "用例 " + meta.caseId() + " 标注仍为 draft——先 cra-eval annotate confirm 后再 run（禁止跑未确认断言）");
       }
-      if (metas.containsKey(meta.caseId())) {
+      if (tables.metas().containsKey(meta.caseId())) {
         throw new CraConfigException(
             "重复 case_id: " + meta.caseId() + "（用例目录 " + caseDir + " 与其他目录冲突；聚合会按 id 合并样本）");
       }
       DatasetLoader.LoadedCase loaded = DatasetLoader.load(caseDir, cacheDir);
-      metas.put(meta.caseId(), meta);
-      expecteds.put(meta.caseId(), loaded.expected());
+      tables.metas().put(meta.caseId(), meta);
+      tables.expecteds().put(meta.caseId(), loaded.expected());
       Path workDir = runsDir.resolve(meta.caseId());
       ensureEmptyDir(workDir);
       for (int k = 0; k < args.k(); k++) {
@@ -113,35 +152,72 @@ public final class RunCommand {
                     obs.completed() ? "" : "  ⚠ " + obs.failureReason())));
       }
     }
+    return observations;
+  }
+
+  /**
+   * 聚合观测并执行门禁判定。
+   *
+   * @param args run 参数
+   * @param env 进程环境
+   * @param metas caseId → meta
+   * @param expecteds caseId → 断言规格
+   * @param observations 全部观测
+   * @return 报告
+   */
+  private static EvalReport generateReport(
+      EvalCliArgs.RunArgs args,
+      Map<String, String> env,
+      Map<String, FixtureMeta> metas,
+      Map<String, ExpectedFindings> expecteds,
+      List<CaseObservation> observations) {
     GateTier tier = GateTier.parse(args.tier(), args.k(), args.depth());
-    EvalReport report =
-        AggregateEngine.aggregate(
-            args.dataset().toAbsolutePath().toString(),
-            args.cliJar().toString(),
-            args.depth(),
-            args.k(),
-            CliProcessRunner.llmConfigured(env),
-            Instant.now().toString(),
-            metas,
-            expecteds,
-            observations,
-            tier.id(),
-            args.commit(),
-            GatePolicy.of(tier),
-            args.crosscheckerEnabled());
-    ReportWriter.renderText(report);
-    if (args.jsonOut() != null) {
-      Path out = args.jsonOut().toAbsolutePath();
-      if (out.getParent() != null) {
-        mkdirs(out.getParent());
-      }
-      ReportWriter.writeJson(report, out);
-      ReportWriter.printLines(List.of("JSON 报告: " + out));
-      if (args.sha256Out() != null) {
-        String hex = ReportHasher.writeSha256File(out, args.sha256Out());
-        ReportWriter.printLines(List.of("报告哈希 (SHA-256): " + hex));
-      }
+    return AggregateEngine.aggregate(
+        args.dataset().toAbsolutePath().toString(),
+        args.cliJar().toString(),
+        args.depth(),
+        args.k(),
+        CliProcessRunner.llmConfigured(env),
+        Instant.now().toString(),
+        metas,
+        expecteds,
+        observations,
+        tier.id(),
+        args.commit(),
+        GatePolicy.of(tier),
+        args.crosscheckerEnabled());
+  }
+
+  /**
+   * 按需写出 JSON 报告与摘要文件。
+   *
+   * @param args run 参数
+   * @param report 报告
+   */
+  private static void writeJsonIfRequested(EvalCliArgs.RunArgs args, EvalReport report) {
+    if (args.jsonOut() == null) {
+      return;
     }
+    Path out = args.jsonOut().toAbsolutePath();
+    if (out.getParent() != null) {
+      mkdirs(out.getParent());
+    }
+    ReportWriter.writeJson(report, out);
+    ReportWriter.printLines(List.of("JSON 报告: " + out));
+    if (args.sha256Out() != null) {
+      String hex = ReportHasher.writeSha256File(out, args.sha256Out());
+      ReportWriter.printLines(List.of("报告哈希 (SHA-256): " + hex));
+    }
+  }
+
+  /**
+   * 门禁结论输出与退出码（红且 --fail-on-red 才返回失败码）。
+   *
+   * @param args run 参数
+   * @param report 报告
+   * @return 退出码
+   */
+  private static int gateExitCode(EvalCliArgs.RunArgs args, EvalReport report) {
     if (report.gate() != null && !report.gate().passed()) {
       ReportWriter.printLines(
           List.of(
@@ -193,4 +269,13 @@ public final class RunCommand {
       throw new CraIntegrationException("输出目录创建失败: " + dir, e);
     }
   }
+
+  /**
+   * 用例元数据与断言规格输出表（同一轮 run 的聚合输入）。
+   *
+   * @param metas caseId → meta
+   * @param expecteds caseId → 断言规格
+   */
+  private record CaseTables(
+      Map<String, FixtureMeta> metas, Map<String, ExpectedFindings> expecteds) {}
 }

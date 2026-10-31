@@ -67,54 +67,67 @@ public final class DiffSplitter {
     if (current != null) {
       sections.add(String.join("\n", current));
     }
-    for (String section : sections) {
-      files.add(parseSection(section));
-    }
+    files.addAll(sections.stream().map(DiffSplitter::parseSection).toList());
     return files;
   }
 
   private static PatchedFile parseSection(String section) {
     String[] lines = section.split("\n", -1);
-    String oldPath = null;
-    String newPath = null;
-    String status = "modified";
-    StringBuilder patch = new StringBuilder();
-    boolean inHunks = false;
-    for (int i = 0; i < lines.length; i++) {
-      String line = lines[i];
-      if (line.startsWith(DIFF_GIT)) {
-        String[] paths = parseDiffGitHeader(line);
-        oldPath = paths[0];
-        newPath = paths[1];
-      } else if (line.startsWith("new file mode")) {
-        status = "added";
-      } else if (line.startsWith("deleted file mode")) {
-        status = "removed";
-      } else if (line.startsWith("rename from ")) {
-        status = "renamed";
-        oldPath = renamePath(line.substring("rename from ".length()), line);
-      } else if (line.startsWith("rename to ")) {
-        status = "renamed";
-        newPath = renamePath(line.substring("rename to ".length()), line);
-      } else if (!inHunks && (line.startsWith("--- a/") || line.startsWith("--- /dev/null"))) {
-        // 保持 GitHub patch 形态：跳过 ---/+++ 头（仅在 hunk 之前——hunk 内容行可能以 "--- " 开头）
-      } else if (!inHunks && (line.startsWith("+++ b/") || line.startsWith("+++ /dev/null"))) {
-        // 同上
-      } else if (line.startsWith("@@")) {
-        inHunks = true;
-        patch.append(line).append('\n');
-      } else if (inHunks) {
-        patch.append(line).append('\n');
-      }
-      if (!inHunks && (line.startsWith("Binary files") || line.startsWith("GIT binary patch"))) {
-        return new PatchedFile(oldPath, newPath, status, null);
+    SectionState state = new SectionState();
+    for (String line : lines) {
+      applyLine(state, line);
+      if (!state.inHunks
+          && (line.startsWith("Binary files") || line.startsWith("GIT binary patch"))) {
+        return new PatchedFile(state.oldPath, state.newPath, state.status, null);
       }
     }
-    String p = patch.toString();
-    if (oldPath == null || newPath == null) {
+    String p = state.patch.toString();
+    if (state.oldPath == null || state.newPath == null) {
       throw new CraConfigException("diff 段缺 --git 头，无法解析: " + firstLine(section));
     }
-    return new PatchedFile(oldPath, newPath, status, p.isBlank() ? null : p);
+    return new PatchedFile(state.oldPath, state.newPath, state.status, p.isBlank() ? null : p);
+  }
+
+  /**
+   * 处理 diff 段的一行（头字段与 hunk 内容累计）。
+   *
+   * @param state 段解析状态
+   * @param line 当前行
+   */
+  private static void applyLine(SectionState state, String line) {
+    if (line.startsWith(DIFF_GIT)) {
+      String[] paths = parseDiffGitHeader(line);
+      state.oldPath = paths[0];
+      state.newPath = paths[1];
+    } else if (line.startsWith("new file mode")) {
+      state.status = "added";
+    } else if (line.startsWith("deleted file mode")) {
+      state.status = "removed";
+    } else if (line.startsWith("rename from ")) {
+      state.status = "renamed";
+      state.oldPath = renamePath(line.substring("rename from ".length()), line);
+    } else if (line.startsWith("rename to ")) {
+      state.status = "renamed";
+      state.newPath = renamePath(line.substring("rename to ".length()), line);
+    } else if (!state.inHunks && (line.startsWith("--- a/") || line.startsWith("--- /dev/null"))) {
+      // 保持 GitHub patch 形态：跳过 ---/+++ 头（仅在 hunk 之前——hunk 内容行可能以 "--- " 开头）
+    } else if (!state.inHunks && (line.startsWith("+++ b/") || line.startsWith("+++ /dev/null"))) {
+      // 同上
+    } else if (line.startsWith("@@")) {
+      state.inHunks = true;
+      state.patch.append(line).append('\n');
+    } else if (state.inHunks) {
+      state.patch.append(line).append('\n');
+    }
+  }
+
+  /** diff 段解析状态（路径/状态/累积 patch）。 */
+  private static final class SectionState {
+    private String oldPath;
+    private String newPath;
+    private String status = "modified";
+    private final StringBuilder patch = new StringBuilder();
+    private boolean inHunks;
   }
 
   private static String[] parseDiffGitHeader(String line) {
@@ -158,38 +171,13 @@ public final class DiffSplitter {
             bytes.writeBytes(String.valueOf(c).getBytes(java.nio.charset.StandardCharsets.UTF_8));
           }
           i++;
-          continue;
-        }
-        i++;
-        if (i >= body.length()) {
-          break;
-        }
-        char esc = body.charAt(i);
-        switch (esc) {
-          case 'n' -> bytes.write('\n');
-          case 't' -> bytes.write('\t');
-          case 'r' -> bytes.write('\r');
-          case '\\' -> bytes.write('\\');
-          case '"' -> bytes.write('"');
-          default -> {
-            if (esc >= '0' && esc <= '7' && i + 2 < body.length()) {
-              int value = 0;
-              int digits = 0;
-              while (digits < 3
-                  && i < body.length()
-                  && body.charAt(i) >= '0'
-                  && body.charAt(i) <= '7') {
-                value = value * 8 + (body.charAt(i) - '0');
-                i++;
-                digits++;
-              }
-              bytes.write(value & 0xFF);
-              continue;
-            }
-            bytes.write(esc);
+        } else {
+          i++;
+          if (i >= body.length()) {
+            break;
           }
+          i = decodeEscape(body, i, bytes);
         }
-        i++;
       }
       if (i < body.length() && body.charAt(i) == '"') {
         i++;
@@ -197,6 +185,59 @@ public final class DiffSplitter {
       out.add(bytes.toString(java.nio.charset.StandardCharsets.UTF_8));
     }
     return out;
+  }
+
+  /**
+   * 解码一个反斜杠转义（含 1–3 位八进制字节），返回转义后的下标。
+   *
+   * @param body 原文
+   * @param i 转义字符下标（反斜杠之后）
+   * @param bytes 输出字节流
+   * @return 下一个待处理下标
+   */
+  private static int decodeEscape(String body, int i, java.io.ByteArrayOutputStream bytes) {
+    char esc = body.charAt(i);
+    switch (esc) {
+      case 'n' -> {
+        bytes.write('\n');
+        return i + 1;
+      }
+      case 't' -> {
+        bytes.write('\t');
+        return i + 1;
+      }
+      case 'r' -> {
+        bytes.write('\r');
+        return i + 1;
+      }
+      case '\\' -> {
+        bytes.write('\\');
+        return i + 1;
+      }
+      case '"' -> {
+        bytes.write('"');
+        return i + 1;
+      }
+      default -> {
+        if (esc >= '0' && esc <= '7' && i + 2 < body.length()) {
+          int value = 0;
+          int digits = 0;
+          int j = i;
+          while (digits < 3
+              && j < body.length()
+              && body.charAt(j) >= '0'
+              && body.charAt(j) <= '7') {
+            value = value * 8 + (body.charAt(j) - '0');
+            j++;
+            digits++;
+          }
+          bytes.write(value & 0xFF);
+          return j;
+        }
+        bytes.write(esc);
+        return i + 1;
+      }
+    }
   }
 
   /** rename from/to 行按 C 风格引号解码（与 diff --git 头一致）；未加引号时保留原样路径。 */

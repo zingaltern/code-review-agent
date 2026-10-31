@@ -39,20 +39,13 @@ final class VerifyArgsParser {
     String sha256File = named.get("--sha256-file");
     String signature = named.get("--signature");
     boolean hasSignature = signature != null && !signature.isBlank();
-    if ((sha256 == null || sha256.isBlank())
-        && (sha256File == null || sha256File.isBlank())
-        && !hasSignature) {
-      throw new CraConfigException(
-          "缺参数: --sha256 <hex>、--sha256-file <path> 或 --signature <path>（至少一个）");
-    }
+    requireHashOrSignature(sha256, sha256File, hasSignature);
     String tier = named.get("--tier");
     if (tier != null && !"l1".equals(tier) && !"l2".equals(tier) && !"l3".equals(tier)) {
       throw new CraConfigException("verify --tier 非法: " + tier + "（l1|l2|l3）");
     }
     String repo = named.get("--repo");
-    if (repo != null && !repo.isBlank() && !hasSignature) {
-      throw new CraConfigException("--repo 仅与 --signature 同时使用（签名验签的仓库限定绑定）");
-    }
+    validateRepo(repo, hasSignature);
     String signingKeyFile = named.get("--signing-key-file");
     if (!hasSignature && signingKeyFile != null) {
       throw new CraConfigException("--signing-key-file 仅与 --signature 同时使用");
@@ -68,5 +61,34 @@ final class VerifyArgsParser {
         named.getOrDefault("--signing-key-env", DEFAULT_SIGNING_KEY_ENV),
         signingKeyFile == null ? null : Path.of(signingKeyFile),
         named.get("--signing-key-id"));
+  }
+
+  /**
+   * 至少提供一种校验凭据（哈希或签名）。
+   *
+   * @param sha256 哈希值
+   * @param sha256File 哈希文件
+   * @param hasSignature 是否有签名
+   */
+  private static void requireHashOrSignature(
+      String sha256, String sha256File, boolean hasSignature) {
+    if ((sha256 == null || sha256.isBlank())
+        && (sha256File == null || sha256File.isBlank())
+        && !hasSignature) {
+      throw new CraConfigException(
+          "缺参数: --sha256 <hex>、--sha256-file <path> 或 --signature <path>（至少一个）");
+    }
+  }
+
+  /**
+   * --repo 仅与 --signature 同时使用。
+   *
+   * @param repo --repo 值
+   * @param hasSignature 是否有签名
+   */
+  private static void validateRepo(String repo, boolean hasSignature) {
+    if (repo != null && !repo.isBlank() && !hasSignature) {
+      throw new CraConfigException("--repo 仅与 --signature 同时使用（签名验签的仓库限定绑定）");
+    }
   }
 }

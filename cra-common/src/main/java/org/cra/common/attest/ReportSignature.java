@@ -116,6 +116,63 @@ public final class ReportSignature {
     public String text() {
       return canonicalText() + "\nsignature:" + signature + "\n";
     }
+
+    /**
+     * 必填单行字段：拒绝空值与 CR/LF。
+     *
+     * @param value 字段值
+     * @param field 字段名（错误信息用）
+     * @return 去空白后的值
+     */
+    private static String requireText(String value, String field) {
+      if (value == null || value.isBlank()) {
+        throw new IllegalArgumentException(field + " 不能为空");
+      }
+      if (value.contains("\n") || value.contains("\r")) {
+        throw new IllegalArgumentException(field + " 不得包含换行");
+      }
+      return value.strip();
+    }
+
+    /** 可空单行字段（commit/tier）：空值归一为空串，但同样拒绝 CR/LF——否则信封会多出物理行。 */
+    private static String requireOptionalSingleLine(String value, String field) {
+      if (value == null || value.isBlank()) {
+        return "";
+      }
+      if (value.contains("\n") || value.contains("\r")) {
+        throw new IllegalArgumentException(field + " 不得包含换行");
+      }
+      return value.strip();
+    }
+
+    /**
+     * 校验 repo 为 owner/name 形式。
+     *
+     * @param value 仓库
+     * @return 规范化仓库
+     */
+    private static String requireRepo(String value) {
+      String normalized = requireText(value, "repo");
+      if (!isValidRepo(normalized)) {
+        throw new IllegalArgumentException("repo 必须为 owner/name 形式: " + value);
+      }
+      return normalized;
+    }
+
+    /**
+     * 校验 64 位小写十六进制摘要。
+     *
+     * @param value 摘要值
+     * @param field 字段名（错误信息用）
+     * @return 小写摘要
+     */
+    private static String requireSha256(String value, String field) {
+      String normalized = requireText(value, field).toLowerCase(Locale.ROOT);
+      if (normalized.length() != SHA256_HEX_LENGTH || !normalized.matches("[0-9a-f]+")) {
+        throw new IllegalArgumentException(field + " 必须为 64 位十六进制");
+      }
+      return normalized;
+    }
   }
 
   /**
@@ -222,43 +279,6 @@ public final class ReportSignature {
       throw new IllegalArgumentException("签名信封字段非法（期望 " + prefix + "）: " + line);
     }
     return line.substring(prefix.length()).strip();
-  }
-
-  private static String requireText(String value, String field) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " 不能为空");
-    }
-    if (value.contains("\n") || value.contains("\r")) {
-      throw new IllegalArgumentException(field + " 不得包含换行");
-    }
-    return value.strip();
-  }
-
-  /** 可空单行字段（commit/tier）：空值归一为空串，但同样拒绝 CR/LF——否则信封会多出物理行。 */
-  private static String requireOptionalSingleLine(String value, String field) {
-    if (value == null || value.isBlank()) {
-      return "";
-    }
-    if (value.contains("\n") || value.contains("\r")) {
-      throw new IllegalArgumentException(field + " 不得包含换行");
-    }
-    return value.strip();
-  }
-
-  private static String requireRepo(String value) {
-    String normalized = requireText(value, "repo");
-    if (!isValidRepo(normalized)) {
-      throw new IllegalArgumentException("repo 必须为 owner/name 形式: " + value);
-    }
-    return normalized;
-  }
-
-  private static String requireSha256(String value, String field) {
-    String normalized = requireText(value, field).toLowerCase(Locale.ROOT);
-    if (normalized.length() != SHA256_HEX_LENGTH || !normalized.matches("[0-9a-f]+")) {
-      throw new IllegalArgumentException(field + " 必须为 64 位十六进制");
-    }
-    return normalized;
   }
 
   private static void requireSecret(byte[] secret) {

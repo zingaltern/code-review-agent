@@ -36,10 +36,7 @@ public final class FindingAsserter {
     for (int e = 0; e < expected.expected().size(); e++) {
       ExpectedFinding exp = expected.expected().get(e);
       for (int o = 0; o < observed.size(); o++) {
-        if (consumed[o]) {
-          continue;
-        }
-        if (matches(exp, observed.get(o))) {
+        if (!consumed[o] && matches(exp, observed.get(o))) {
           consumed[o] = true;
           matches.add(new Match(e, o));
           break;

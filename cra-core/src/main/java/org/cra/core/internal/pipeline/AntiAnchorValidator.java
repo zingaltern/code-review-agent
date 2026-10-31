@@ -60,7 +60,7 @@ public final class AntiAnchorValidator {
     Set<String> refs = new HashSet<>();
     Matcher m = LINE_REF.matcher(text);
     while (m.find()) {
-      String digits = m.group(1) != null ? m.group(1) : m.group(2);
+      String digits = m.group(m.group(1) != null ? 1 : 2);
       if (digits != null) {
         refs.add("#" + Integer.parseInt(digits));
       }

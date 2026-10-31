@@ -4,9 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.net.http.HttpRequest;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.git.CommentLedger;
 import org.cra.common.git.CommentSource;
@@ -113,21 +113,32 @@ final class GitHubCommentReader implements CommentSource {
         if (!login.equals(c.path("user").path("login").asText())) {
           continue; // 只认 bot 自身评论（账本语义，02§5）
         }
-        out.add(
-            new LedgerComment(
-                c.path("id").asLong(),
-                kind,
-                login,
-                c.path("body").asText(""),
-                DispositionSupport.instantOrEpoch(c.path("created_at")),
-                c.path("commit_id").isMissingNode() || c.path("commit_id").isNull()
-                    ? null
-                    : c.path("commit_id").asText()));
+        out.add(toLedgerComment(c, login, kind));
       }
       if (root.size() < PAGE_SIZE) {
         return;
       }
     }
+  }
+
+  /**
+   * GitHub 评论节点 → 账本评论（commit_id 缺失/空白归一为 null）。
+   *
+   * @param c 评论节点
+   * @param login bot 用户名
+   * @param kind 评论载体类型
+   * @return 账本评论
+   */
+  private static LedgerComment toLedgerComment(JsonNode c, String login, String kind) {
+    return new LedgerComment(
+        c.path("id").asLong(),
+        kind,
+        login,
+        c.path("body").asText(""),
+        DispositionSupport.instantOrEpoch(c.path("created_at")),
+        c.path("commit_id").isMissingNode() || c.path("commit_id").isNull()
+            ? null
+            : c.path("commit_id").asText());
   }
 
   @Override
@@ -190,7 +201,8 @@ final class GitHubCommentReader implements CommentSource {
     List<LedgerComment> out = new ArrayList<>();
     String sinceQuery =
         since == null ? "" : "&since=" + GitHubPayloadSupport.urlEncode(since.toString());
-    for (int page = 1; page <= MAX_PAGES + 1; page++) {
+    boolean done = false;
+    for (int page = 1; page <= MAX_PAGES + 1 && !done; page++) {
       JsonNode root =
           transport.getJson(
               repo,
@@ -203,45 +215,52 @@ final class GitHubCommentReader implements CommentSource {
         if (root.isArray() && !root.isEmpty()) {
           throw new CraIntegrationException("issue 分页超过上限 " + MAX_ITEMS + " 条，无法保证列表完整");
         }
-        break;
+      } else if (!root.isArray() || root.isEmpty()) {
+        done = true;
+      } else {
+        boolean reachedOlder = collectIssuesPage(root, login, since, out);
+        done = root.size() < PAGE_SIZE || reachedOlder;
       }
-      if (!root.isArray() || root.isEmpty()) {
-        break;
+    }
+    return out;
+  }
+
+  /**
+   * 处理一页 issue：只收 bot 发布、窗口内、非 PR 条目；返回是否已越过窗口下界。
+   *
+   * @param root 页数组
+   * @param login bot 用户名
+   * @param since 窗口下界（null = 不限）
+   * @param out 输出
+   * @return true = 本页出现早于窗口的条目（后续页只会更早）
+   */
+  private static boolean collectIssuesPage(
+      JsonNode root, String login, Instant since, List<LedgerComment> out) {
+    boolean reachedOlder = false;
+    for (JsonNode issue : root) {
+      // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体（也不参与窗口下界判定）
+      if (!issue.path("pull_request").isMissingNode()) {
+        continue;
       }
-      boolean reachedOlder = false;
-      for (JsonNode issue : root) {
-        if (!issue.path("pull_request").isMissingNode()) {
-          continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
-        }
-        Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && updated == null) {
-          continue; // 无法判定窗口的条目跳过，但不把后续页截断
-        }
-        if (since != null && updated.isBefore(since)) {
+      Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
+      if (since != null && (updated == null || updated.isBefore(since))) {
+        if (updated != null) {
+          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
-          continue;
         }
-        if (!login.equals(issue.path("user").path("login").asText())) {
-          continue; // 只认 bot 发布的 issue
-        }
-        long number = issue.path("number").asLong(0);
-        if (number <= 0) {
-          continue;
-        }
+      } else if (login.equals(issue.path("user").path("login").asText())
+          && issue.path("number").asLong(0) > 0) {
         out.add(
             new LedgerComment(
-                number,
+                issue.path("number").asLong(0),
                 LedgerComment.KIND_ISSUE,
                 login,
                 issue.path("body").asText(""),
                 DispositionSupport.instantOrEpoch(issue.path("created_at")),
                 null));
       }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
-      }
     }
-    return out;
+    return reachedOlder;
   }
 
   private static boolean marksCommit(ParseOutcome outcome, String commitSha) {
@@ -258,7 +277,8 @@ final class GitHubCommentReader implements CommentSource {
   @Override
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
     List<PullRequestRef> out = new ArrayList<>();
-    for (int page = 1; page <= MAX_PAGES + 1; page++) {
+    boolean done = false;
+    for (int page = 1; page <= MAX_PAGES + 1 && !done; page++) {
       JsonNode root =
           transport.getJson(
               repo,
@@ -270,43 +290,53 @@ final class GitHubCommentReader implements CommentSource {
         if (root.isArray() && !root.isEmpty()) {
           throw new CraIntegrationException("PR 分页超过上限 " + MAX_ITEMS + " 条，无法保证列表完整");
         }
-        break;
-      }
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      boolean reachedOlder = false;
-      for (JsonNode pr : root) {
-        Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
-        if (since != null && updated == null) {
-          continue; // 无法判定窗口的条目跳过，但不把后续页截断
-        }
-        if (since != null && updated.isBefore(since)) {
-          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
-          reachedOlder = true;
-          continue;
-        }
-        String headSha = pr.path("head").path("sha").asText(null);
-        if (headSha == null || headSha.isBlank()) {
-          // 单个 PR 数据残缺不中止整轮列表（对齐 GitLabCommentReader 的 warn+跳过；05§2.5 如实降级）
-          LOG.warn("github PR #{} has no head sha; skipped from window", pr.path("number").asInt());
-          continue;
-        }
-        out.add(
-            new PullRequestRef(
-                pr.path("number").asInt(),
-                headSha,
-                pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
-                pr.path("state").asText(PullRequestRef.STATE_CLOSED),
-                updated == null ? Instant.EPOCH : updated,
-                DispositionSupport.instantOrNull(pr.path("merged_at")),
-                pr.path("base").path("sha").asText(null)));
-      }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
+      } else if (!root.isArray() || root.isEmpty()) {
+        done = true;
+      } else {
+        boolean reachedOlder = collectPullRequestsPage(root, since, out);
+        done = root.size() < PAGE_SIZE || reachedOlder;
       }
     }
     return out;
+  }
+
+  /**
+   * 处理一页 PR：窗口外的 PR 跳过（整页越过下界则停止翻页），缺 head sha 的 PR 如实告警跳过。
+   *
+   * @param root 页数组
+   * @param since 窗口下界（null = 不限）
+   * @param out 输出
+   * @return true = 本页出现早于窗口的条目（后续页只会更早）
+   */
+  private static boolean collectPullRequestsPage(
+      JsonNode root, Instant since, List<PullRequestRef> out) {
+    boolean reachedOlder = false;
+    for (JsonNode pr : root) {
+      Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
+      if (since != null && (updated == null || updated.isBefore(since))) {
+        if (updated != null) {
+          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
+          reachedOlder = true;
+        }
+        continue;
+      }
+      String headSha = pr.path("head").path("sha").asText(null);
+      if (headSha == null || headSha.isBlank()) {
+        // 单个 PR 数据残缺不中止整轮列表（对齐 GitLabCommentReader 的 warn+跳过；05§2.5 如实降级）
+        LOG.warn("github PR #{} has no head sha; skipped from window", pr.path("number").asInt());
+        continue;
+      }
+      out.add(
+          new PullRequestRef(
+              pr.path("number").asInt(),
+              headSha,
+              pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
+              pr.path("state").asText(PullRequestRef.STATE_CLOSED),
+              updated == null ? Instant.EPOCH : updated,
+              DispositionSupport.instantOrNull(pr.path("merged_at")),
+              pr.path("base").path("sha").asText(null)));
+    }
+    return reachedOlder;
   }
 
   /**
@@ -319,20 +349,32 @@ final class GitHubCommentReader implements CommentSource {
   public DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber) {
     String login = botLogin(repo);
     List<JsonNode> reviewComments = getPaged(repo, "/pulls/" + prNumber + "/comments");
-    Set<Long> botCommentIds = new HashSet<>();
-    for (JsonNode c : reviewComments) {
-      if (login.equals(c.path("user").path("login").asText())) {
-        botCommentIds.add(c.path("id").asLong());
-      }
-    }
+    Set<Long> botCommentIds =
+        reviewComments.stream()
+            .filter(c -> login.equals(c.path("user").path("login").asText()))
+            .map(c -> c.path("id").asLong())
+            .collect(Collectors.toSet());
     List<DispositionSignal> out = new ArrayList<>();
+    collectReplySignals(reviewComments, botCommentIds, out);
+    collectIssueReactions(repo, prNumber, login, out);
+    return out.toArray(new DispositionSignal[0]);
+  }
+
+  /**
+   * 采集人类对 bot inline 评论的 reply 标签（06§1.1）。
+   *
+   * @param reviewComments PR 全量 inline 评论
+   * @param botCommentIds bot 评论 id 集
+   * @param out 信号输出
+   */
+  private static void collectReplySignals(
+      List<JsonNode> reviewComments, Set<Long> botCommentIds, List<DispositionSignal> out) {
     for (JsonNode c : reviewComments) {
       long parent = c.path("in_reply_to_id").asLong(0);
-      if (parent <= 0 || !botCommentIds.contains(parent)) {
-        continue; // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
-      }
       String body = c.path("body").asText("");
-      String tag = DispositionSupport.replyTag(body);
+      // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
+      String tag =
+          parent > 0 && botCommentIds.contains(parent) ? DispositionSupport.replyTag(body) : null;
       if (tag == null) {
         continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
       }
@@ -345,32 +387,50 @@ final class GitHubCommentReader implements CommentSource {
               c.path("user").path("login").asText(""),
               DispositionSupport.excerpt(body)));
     }
-    List<JsonNode> issueComments = getPaged(repo, "/issues/" + prNumber + "/comments");
-    for (JsonNode c : issueComments) {
-      if (!login.equals(c.path("user").path("login").asText())) {
+  }
+
+  /**
+   * 采集 bot Summary 评论的 👍/👎 reaction（06§1.1）。
+   *
+   * @param repo 仓库
+   * @param prNumber PR 号
+   * @param login bot 用户名
+   * @param out 信号输出
+   */
+  private void collectIssueReactions(
+      RepoRef repo, int prNumber, String login, List<DispositionSignal> out) {
+    for (JsonNode c : getPaged(repo, "/issues/" + prNumber + "/comments")) {
+      long commentId = c.path("id").asLong(0);
+      if (!login.equals(c.path("user").path("login").asText("")) || commentId <= 0) {
         continue; // 只采 bot 的 Summary 评论 reaction（run 满意度载体，06§1.1）
       }
-      long commentId = c.path("id").asLong(0);
-      if (commentId <= 0) {
+      collectReactionSignals(repo, commentId, out);
+    }
+  }
+
+  /**
+   * 采集单条评论的 reaction 信号（只识别 +1/-1）。
+   *
+   * @param repo 仓库
+   * @param commentId 评论 id
+   * @param out 信号输出
+   */
+  private void collectReactionSignals(RepoRef repo, long commentId, List<DispositionSignal> out) {
+    for (JsonNode r : getPaged(repo, "/issues/comments/" + commentId + "/reactions")) {
+      String content = r.path("content").asText("");
+      if (!DispositionSignal.REACTION_UP.equals(content)
+          && !DispositionSignal.REACTION_DOWN.equals(content)) {
         continue;
       }
-      for (JsonNode r : getPaged(repo, "/issues/comments/" + commentId + "/reactions")) {
-        String content = r.path("content").asText("");
-        if (!DispositionSignal.REACTION_UP.equals(content)
-            && !DispositionSignal.REACTION_DOWN.equals(content)) {
-          continue;
-        }
-        out.add(
-            new DispositionSignal(
-                DispositionSignal.KIND_REACTION,
-                commentId,
-                DispositionSupport.instantOrEpoch(r.path("created_at")),
-                content,
-                r.path("user").path("login").asText(""),
-                ""));
-      }
+      out.add(
+          new DispositionSignal(
+              DispositionSignal.KIND_REACTION,
+              commentId,
+              DispositionSupport.instantOrEpoch(r.path("created_at")),
+              content,
+              r.path("user").path("login").asText(""),
+              ""));
     }
-    return out.toArray(new DispositionSignal[0]);
   }
 
   private List<JsonNode> getPaged(RepoRef repo, String path) {

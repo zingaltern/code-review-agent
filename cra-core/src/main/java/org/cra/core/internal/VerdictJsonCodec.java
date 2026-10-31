@@ -104,42 +104,64 @@ public final class VerdictJsonCodec {
     List<String> errors = new ArrayList<>();
     int index = 0;
     for (JsonNode node : array) {
-      String findingId = textOf(node, "finding_id");
-      String verdict = textOf(node, "verdict");
-      String rationale = textOf(node, "rationale");
-      if (findingId == null || findingId.isBlank()) {
-        // 空串不是合法 id：放行会让整批判定按真实 id 查不到，静默退化为 UNAVAILABLE
-        errors.add("verdicts[" + index + "]: 缺 finding_id");
-      } else if (verdict == null) {
-        errors.add("verdicts[" + index + "]: 缺 verdict");
-      } else if (rationale == null || rationale.isBlank()) {
-        errors.add("verdicts[" + index + "]: 缺 rationale（判定要求附理由）");
-      } else {
-        try {
-          VerifierVerdict parsed = VerifierVerdict.valueOf(verdict.toUpperCase().strip());
-          if (parsed == VerifierVerdict.UNAVAILABLE) {
-            errors.add("verdicts[" + index + "]: UNAVAILABLE 是编排器语义值，不是合法输出");
-          } else if (verdicts.containsKey(findingId)) {
-            errors.add("verdicts[" + index + "]: finding_id 重复: " + findingId);
-          } else {
-            verdicts.put(
-                findingId,
-                new ParsedVerdict(
-                    parsed,
-                    rationale,
-                    textOf(node, "followup_file"),
-                    parseRefutation(node.get("refutation"))));
-            if (node.hasNonNull("followup_file")) {
-              followups.put(findingId, node.get("followup_file").asText());
-            }
-          }
-        } catch (IllegalArgumentException e) {
-          errors.add("verdicts[" + index + "]: 非法 verdict: " + verdict);
-        }
-      }
+      applyVerdict(node, index, verdicts, followups, errors);
       index++;
     }
     return new ParseResult(verdicts, followups, errors);
+  }
+
+  /**
+   * 解析单条 verdict 并登记（非法即记错误，不阻断整批）。
+   *
+   * @param node verdict 节点
+   * @param index 数组下标（错误信息用）
+   * @param verdicts 判定输出
+   * @param followups followup_file 输出
+   * @param errors 错误列表
+   */
+  private static void applyVerdict(
+      JsonNode node,
+      int index,
+      Map<String, ParsedVerdict> verdicts,
+      Map<String, String> followups,
+      List<String> errors) {
+    String findingId = textOf(node, "finding_id");
+    String verdict = textOf(node, "verdict");
+    String rationale = textOf(node, "rationale");
+    if (findingId == null || findingId.isBlank()) {
+      // 空串不是合法 id：放行会让整批判定按真实 id 查不到，静默退化为 UNAVAILABLE
+      errors.add("verdicts[" + index + "]: 缺 finding_id");
+      return;
+    }
+    if (verdict == null) {
+      errors.add("verdicts[" + index + "]: 缺 verdict");
+      return;
+    }
+    if (rationale == null || rationale.isBlank()) {
+      errors.add("verdicts[" + index + "]: 缺 rationale（判定要求附理由）");
+      return;
+    }
+    try {
+      VerifierVerdict parsed = VerifierVerdict.valueOf(verdict.toUpperCase().strip());
+      if (parsed == VerifierVerdict.UNAVAILABLE) {
+        errors.add("verdicts[" + index + "]: UNAVAILABLE 是编排器语义值，不是合法输出");
+      } else if (verdicts.containsKey(findingId)) {
+        errors.add("verdicts[" + index + "]: finding_id 重复: " + findingId);
+      } else {
+        verdicts.put(
+            findingId,
+            new ParsedVerdict(
+                parsed,
+                rationale,
+                textOf(node, "followup_file"),
+                parseRefutation(node.get("refutation"))));
+        if (node.hasNonNull("followup_file")) {
+          followups.put(findingId, node.get("followup_file").asText());
+        }
+      }
+    } catch (IllegalArgumentException e) {
+      errors.add("verdicts[" + index + "]: 非法 verdict: " + verdict);
+    }
   }
 
   /** 解析 refutation 对象；结构不合法返回 malformed 标记（不判错，交机械校验降级）。 */

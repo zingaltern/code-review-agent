@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -327,23 +328,13 @@ final class BuildVerifyRunner {
   }
 
   private static List<String> errorLines(String output) {
-    List<String> errors = new ArrayList<>();
-    for (String line : output.split("\n", -1)) {
-      if (line.strip().startsWith("[ERROR]")) {
-        errors.add(line);
-      }
-    }
-    return errors;
+    return Arrays.stream(output.split("\n", -1))
+        .filter(line -> line.strip().startsWith("[ERROR]"))
+        .toList();
   }
 
   private static List<String> nonBlankLines(String output) {
-    List<String> lines = new ArrayList<>();
-    for (String line : output.split("\n", -1)) {
-      if (!line.isBlank()) {
-        lines.add(line);
-      }
-    }
-    return lines;
+    return Arrays.stream(output.split("\n", -1)).filter(line -> !line.isBlank()).toList();
   }
 
   /** 读线程与主线程共享的输出留存（截断标记与文本在同一把锁内）。 */

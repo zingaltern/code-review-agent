@@ -58,34 +58,65 @@ public final class PathGlobs {
     StringBuilder regex = new StringBuilder("^");
     int i = 0;
     while (i < glob.length()) {
-      char c = glob.charAt(i);
-      if (c == '*') {
-        if (i + 1 < glob.length() && glob.charAt(i + 1) == '*') {
-          if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
-            // `**/` 匹配零或多级目录：**/foo 命中根级 foo，a/**/b 命中 a/b 与 a/x/y/b
-            regex.append("(?:.*/)?");
-            i += 3;
-          } else {
-            regex.append(".*");
-            i += 2;
-          }
-        } else {
-          regex.append("[^/]*");
-          i++;
-        }
-      } else if (c == '?') {
-        // 单段通配（不跨 /）：采纳 jgit 适配器的更严语义（ADR-0016），非字面量 '?'
-        regex.append("[^/]");
-        i++;
-      } else if (c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}'
-          || c == '\\' || c == '^' || c == '$' || c == '+' || c == '|') {
-        regex.append('\\').append(c);
-        i++;
-      } else {
-        regex.append(c);
-        i++;
-      }
+      i = appendToken(glob, i, regex);
     }
     return Pattern.compile(regex.append('$').toString());
+  }
+
+  /**
+   * 追加 {@code glob[i]} 起的一个 glob token 到正则，返回下一个待处理下标。
+   *
+   * @param glob glob 模式
+   * @param i 当前字符下标
+   * @param regex 目标正则
+   * @return 下一个待处理下标
+   */
+  private static int appendToken(String glob, int i, StringBuilder regex) {
+    char c = glob.charAt(i);
+    if (c == '*') {
+      return appendStar(glob, i, regex);
+    }
+    if (c == '?') {
+      // 单段通配（不跨 /）：采纳 jgit 适配器的更严语义（ADR-0016），非字面量 '?'
+      regex.append("[^/]");
+    } else if (isRegexMeta(c)) {
+      regex.append('\\').append(c);
+    } else {
+      regex.append(c);
+    }
+    return i + 1;
+  }
+
+  /**
+   * 追加 {@code *} / {@code **} / {@code **}{@code /} 三种星号形态（ADR-0016 语义）。
+   *
+   * @param glob glob 模式
+   * @param i 星号起始下标
+   * @param regex 目标正则
+   * @return 下一个待处理下标
+   */
+  private static int appendStar(String glob, int i, StringBuilder regex) {
+    if (i + 1 >= glob.length() || glob.charAt(i + 1) != '*') {
+      regex.append("[^/]*");
+      return i + 1;
+    }
+    if (i + 2 < glob.length() && glob.charAt(i + 2) == '/') {
+      // `**/` 匹配零或多级目录：**/foo 命中根级 foo，a/**/b 命中 a/b 与 a/x/y/b
+      regex.append("(?:.*/)?");
+      return i + 3;
+    }
+    regex.append(".*");
+    return i + 2;
+  }
+
+  /**
+   * 是否需要正则转义的 glob 字面字符（与既有转义集合逐字符一致）。
+   *
+   * @param c 字符
+   * @return true 若是正则元字符
+   */
+  private static boolean isRegexMeta(char c) {
+    return c == '.' || c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}'
+        || c == '\\' || c == '^' || c == '$' || c == '+' || c == '|';
   }
 }

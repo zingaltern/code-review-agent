@@ -90,6 +90,31 @@ public final class ChunkPlanner {
     List<String> skipped = new ArrayList<>();
     List<String> notes = new ArrayList<>();
     List<String> skippedTests = new ArrayList<>();
+    List<DiffFile> scoped = partition(files, policy, includeTestFiles, skipped, skippedTests);
+    if (priorityOnly) {
+      scoped = applyPriorityFilter(scoped, policy, notes, skipped);
+    }
+    // 纯测试变更的完整声明由派发侧统一给出（ReviewStage.emptyPlanNote = 原因 + 不派发 + 开关提示），
+    // Plan 只保留可计数的事实，避免 Summary 同一事实重复声明
+    return new Plan(groupByModule(scoped), skipped, notes, skippedTests);
+  }
+
+  /**
+   * 按测试文件策略与 skip_paths 划分评审范围。
+   *
+   * @param files 变更文件
+   * @param policy 评审策略
+   * @param includeTestFiles 是否评审测试文件
+   * @param skipped 被 skip_paths 排除的路径（可变）
+   * @param skippedTests 被测试策略排除的路径（可变）
+   * @return 进入评审范围的文件
+   */
+  private static List<DiffFile> partition(
+      List<DiffFile> files,
+      ReviewPolicy policy,
+      boolean includeTestFiles,
+      List<String> skipped,
+      List<String> skippedTests) {
     List<DiffFile> scoped = new ArrayList<>();
     for (DiffFile file : files) {
       // 测试文件策略先行：默认策略下的排除原因是"测试文件"而非 skip_paths，覆盖声明必须能说出真实原因
@@ -101,24 +126,33 @@ public final class ChunkPlanner {
         scoped.add(file);
       }
     }
-    if (priorityOnly) {
-      if (policy.priorityPaths().isEmpty()) {
-        notes.add("hard-cap 触发但未配置 priority_paths，按全部变更文件评审并在覆盖声明（02§4.4）");
+    return scoped;
+  }
+
+  /**
+   * hard-cap 下的 priority_paths 裁剪（未配置 priority_paths 时全量保留并声明）。
+   *
+   * @param scoped 当前评审范围
+   * @param policy 评审策略
+   * @param notes 覆盖声明（可变）
+   * @param skipped 裁剪记录（可变）
+   * @return 裁剪后范围
+   */
+  private static List<DiffFile> applyPriorityFilter(
+      List<DiffFile> scoped, ReviewPolicy policy, List<String> notes, List<String> skipped) {
+    if (policy.priorityPaths().isEmpty()) {
+      notes.add("hard-cap 触发但未配置 priority_paths，按全部变更文件评审并在覆盖声明（02§4.4）");
+      return scoped;
+    }
+    List<DiffFile> filtered = new ArrayList<>();
+    for (DiffFile file : scoped) {
+      if (PathGlobs.matchesAny(policy.priorityPaths(), file.path())) {
+        filtered.add(file);
       } else {
-        List<DiffFile> filtered = new ArrayList<>();
-        for (DiffFile file : scoped) {
-          if (PathGlobs.matchesAny(policy.priorityPaths(), file.path())) {
-            filtered.add(file);
-          } else {
-            skipped.add(file.path() + "（超出 priority_paths，hard-cap 裁剪）");
-          }
-        }
-        scoped = filtered;
+        skipped.add(file.path() + "（超出 priority_paths，hard-cap 裁剪）");
       }
     }
-    // 纯测试变更的完整声明由派发侧统一给出（ReviewStage.emptyPlanNote = 原因 + 不派发 + 开关提示），
-    // Plan 只保留可计数的事实，避免 Summary 同一事实重复声明
-    return new Plan(groupByModule(scoped), skipped, notes, skippedTests);
+    return filtered;
   }
 
   private static List<Chunk> groupByModule(List<DiffFile> files) {

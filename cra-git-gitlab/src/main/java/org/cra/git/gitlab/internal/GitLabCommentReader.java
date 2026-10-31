@@ -49,26 +49,23 @@ final class GitLabCommentReader implements CommentSource {
     for (JsonNode discussion :
         getPagedArray(repo, "/merge_requests/" + prNumber + "/discussions")) {
       for (JsonNode note : discussion.path("notes")) {
-        if (note.path("system").asBoolean(false)) {
-          continue;
-        }
-        if (!login.equals(note.path("author").path("username").asText(""))) {
-          continue; // 只认 bot 自身评论（账本语义，02§5）
-        }
         long id = note.path("id").asLong(0);
-        if (id <= 0 || !seen.add(id)) {
-          continue;
+        // 只认 bot 自身评论（账本语义，02§5）；id 去重防同一 note 跨 discussion 重复
+        if (!note.path("system").asBoolean(false)
+            && login.equals(note.path("author").path("username").asText(""))
+            && id > 0
+            && seen.add(id)) {
+          JsonNode position = note.path("position");
+          boolean inline = position.isObject();
+          comments.add(
+              new LedgerComment(
+                  id,
+                  inline ? LedgerComment.KIND_INLINE : LedgerComment.KIND_ISSUE,
+                  login,
+                  note.path("body").asText(""),
+                  DispositionSupport.instantOrEpoch(note.path("created_at")),
+                  inline ? GitLabJsonSupport.textOrNull(position, "head_sha") : null));
         }
-        JsonNode position = note.path("position");
-        boolean inline = position.isObject();
-        comments.add(
-            new LedgerComment(
-                id,
-                inline ? LedgerComment.KIND_INLINE : LedgerComment.KIND_ISSUE,
-                login,
-                note.path("body").asText(""),
-                DispositionSupport.instantOrEpoch(note.path("created_at")),
-                inline ? GitLabJsonSupport.textOrNull(position, "head_sha") : null));
       }
     }
     return GitLabLedgerSupport.parse(comments, markerParser);
@@ -115,7 +112,8 @@ final class GitLabCommentReader implements CommentSource {
     String login = botUsername(repo);
     List<LedgerComment> out = new ArrayList<>();
     String page = "1";
-    for (int i = 0; i <= MAX_PAGES; i++) {
+    boolean done = false;
+    for (int i = 0; i <= MAX_PAGES && !done; i++) {
       String query =
           "/issues?state=all&order_by=updated_at&sort=desc&author_username="
               + GitLabPayloadSupport.urlEncode(login)
@@ -129,53 +127,62 @@ final class GitLabCommentReader implements CommentSource {
           throw new CraIntegrationException(
               "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证列表完整: " + query);
         }
-        break;
-      }
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      boolean reachedOlder = false;
-      for (JsonNode issue : root) {
-        Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && updated == null) {
-          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        done = true;
+      } else if (!root.isArray() || root.isEmpty()) {
+        done = true;
+      } else {
+        boolean reachedOlder = collectIssuesPage(root, login, since, out);
+        if (root.size() < PAGE_SIZE || reachedOlder) {
+          done = true;
+        } else {
+          page = nextPage(p, page);
+          done = page == null; // 异常分页头：页号无法递增，按无下一页处理
         }
-        if (since != null && updated.isBefore(since)) {
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 处理一页 issue：窗口外条目跳过（整页越过下界则停止翻页），只收 bot 发布且 iid 合法的条目。
+   *
+   * @param root 页数组
+   * @param login bot 用户名
+   * @param since 窗口下界（null = 不限）
+   * @param out 输出
+   * @return true = 本页出现早于窗口的条目（后续页只会更早）
+   */
+  private static boolean collectIssuesPage(
+      JsonNode root, String login, Instant since, List<LedgerComment> out) {
+    boolean reachedOlder = false;
+    for (JsonNode issue : root) {
+      Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
+      if (since != null && (updated == null || updated.isBefore(since))) {
+        if (updated != null) {
+          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
           reachedOlder = true;
-          continue;
         }
-        if (!login.equals(issue.path("author").path("username").asText(""))) {
-          continue; // 只认 bot 发布的 issue（服务端 author_username 之外的兜底）
-        }
-        long iid = issue.path("iid").asLong(0);
-        if (iid <= 0) {
-          continue;
-        }
+      } else if (login.equals(issue.path("author").path("username").asText(""))
+          && issue.path("iid").asLong(0) > 0) {
         out.add(
             new LedgerComment(
-                iid,
+                issue.path("iid").asLong(0),
                 LedgerComment.KIND_ISSUE,
                 login,
                 issue.path("description").asText(""),
                 DispositionSupport.instantOrEpoch(issue.path("created_at")),
                 null));
       }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
-      }
-      page = nextPage(p, page);
-      if (page == null) {
-        break; // 异常分页头：页号无法递增，按无下一页处理
-      }
     }
-    return out;
+    return reachedOlder;
   }
 
   @Override
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
     List<PullRequestRef> out = new ArrayList<>();
     String page = "1";
-    for (int i = 0; i <= MAX_PAGES; i++) {
+    boolean done = false;
+    for (int i = 0; i <= MAX_PAGES && !done; i++) {
       GitLabHttpTransport.Page p =
           transport.getPage(
               repo, withPage("/merge_requests?state=all&order_by=updated_at&sort=desc", page));
@@ -185,63 +192,88 @@ final class GitLabCommentReader implements CommentSource {
           throw new CraIntegrationException(
               "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证列表完整");
         }
-        break;
-      }
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      boolean reachedOlder = false;
-      for (JsonNode mr : root) {
-        Instant updated = DispositionSupport.instantOrNull(mr.path("updated_at"));
-        if (since != null && updated == null) {
-          continue; // 无法判定窗口的条目跳过，但不把后续页截断
+        done = true;
+      } else if (!root.isArray() || root.isEmpty()) {
+        done = true;
+      } else {
+        boolean reachedOlder = collectMergeRequestsPage(repo, root, since, out);
+        if (root.size() < PAGE_SIZE || reachedOlder) {
+          done = true;
+        } else {
+          page = nextPage(p, page);
+          done = page == null; // 异常分页头：页号无法递增，按无下一页处理
         }
-        if (since != null && updated.isBefore(since)) {
-          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
-          reachedOlder = true;
-          continue;
-        }
-        int iid = mr.path("iid").asInt(0);
-        if (iid <= 0) {
-          continue;
-        }
-        JsonNode full = null;
-        String head = GitLabJsonSupport.textOrNull(mr, "sha");
-        String base = GitLabJsonSupport.textOrNull(mr.path("diff_refs"), "base_sha");
-        if (head == null || base == null) {
-          full = fetchMergeRequest(repo, iid);
-          if (head == null) {
-            head = GitLabJsonSupport.textOrNull(full.path("diff_refs"), "head_sha");
-          }
-          if (base == null) {
-            base = GitLabJsonSupport.textOrNull(full.path("diff_refs"), "base_sha");
-          }
-        }
-        if (head == null || base == null) {
-          LOG.warn("gitlab MR !{} has no head/base sha; skipped from window", iid);
-          continue;
-        }
-        out.add(
-            new PullRequestRef(
-                iid,
-                head,
-                GitLabJsonSupport.textOrNull(mr, "merge_commit_sha"),
-                "opened".equals(mr.path("state").asText(""))
-                    ? PullRequestRef.STATE_OPEN
-                    : PullRequestRef.STATE_CLOSED,
-                updated == null ? Instant.EPOCH : updated,
-                DispositionSupport.instantOrNull(mr.path("merged_at")),
-                base));
-      }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
-      }
-      page = nextPage(p, page);
-      if (page == null) {
-        break; // 异常分页头：页号无法递增，按无下一页处理
       }
     }
     return out;
+  }
+
+  /**
+   * 处理一页 MR：窗口外条目跳过（整页越过下界则停止翻页），缺 head/base sha 的 MR 如实告警跳过。
+   *
+   * @param repo 仓库
+   * @param root 页数组
+   * @param since 窗口下界（null = 不限）
+   * @param out 输出
+   * @return true = 本页出现早于窗口的条目（后续页只会更早）
+   */
+  private boolean collectMergeRequestsPage(
+      RepoRef repo, JsonNode root, Instant since, List<PullRequestRef> out) {
+    boolean reachedOlder = false;
+    for (JsonNode mr : root) {
+      Instant updated = DispositionSupport.instantOrNull(mr.path("updated_at"));
+      if (since != null && (updated == null || updated.isBefore(since))) {
+        if (updated != null) {
+          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
+          reachedOlder = true;
+        }
+        continue;
+      }
+      int iid = mr.path("iid").asInt(0);
+      if (iid > 0) {
+        appendMergeRequest(repo, mr, iid, updated, out);
+      }
+    }
+    return reachedOlder;
+  }
+
+  /**
+   * 追加单条 MR（缺失 sha 时补取详情；仍缺则告警跳过）。
+   *
+   * @param repo 仓库
+   * @param mr MR 摘要节点
+   * @param iid MR iid
+   * @param updated 更新时间
+   * @param out 输出
+   */
+  private void appendMergeRequest(
+      RepoRef repo, JsonNode mr, int iid, Instant updated, List<PullRequestRef> out) {
+    String head = GitLabJsonSupport.textOrNull(mr, "sha");
+    String base = GitLabJsonSupport.textOrNull(mr.path("diff_refs"), "base_sha");
+    if (head == null || base == null) {
+      JsonNode full = fetchMergeRequest(repo, iid);
+      if (head == null) {
+        head = GitLabJsonSupport.textOrNull(full.path("diff_refs"), "head_sha");
+      }
+      if (base == null) {
+        base = GitLabJsonSupport.textOrNull(full.path("diff_refs"), "base_sha");
+      }
+    }
+    if (head == null || base == null) {
+      LOG.warn("gitlab MR !{} has no head/base sha; skipped from window", iid);
+      return;
+    }
+    out.add(
+        new PullRequestRef(
+            iid,
+            head,
+            GitLabJsonSupport.textOrNull(mr, "merge_commit_sha"),
+            "opened".equals(mr.path("state").asText(""))
+                ? PullRequestRef.STATE_OPEN
+                : PullRequestRef.STATE_CLOSED,
+            updated == null ? Instant.EPOCH : updated,
+            DispositionSupport.instantOrNull(mr.path("merged_at")),
+            base));
   }
 
   private static String nextPage(GitLabHttpTransport.Page page, String currentPage) {
@@ -275,14 +307,25 @@ final class GitLabCommentReader implements CommentSource {
     List<JsonNode> discussions =
         getPagedArray(repo, "/merge_requests/" + prNumber + "/discussions");
     List<DispositionSignal> out = new ArrayList<>();
+    collectReplySignals(discussions, login, out);
+    collectReactionSignals(repo, prNumber, discussions, login, out);
+    return out.toArray(new DispositionSignal[0]);
+  }
+
+  /**
+   * 采集人类对 bot discussion 的 reply 标签（06§1.1；线程父 = 该 discussion 首条 bot note）。
+   *
+   * @param discussions discussion 列表
+   * @param login bot 用户名
+   * @param out 信号输出
+   */
+  private static void collectReplySignals(
+      List<JsonNode> discussions, String login, List<DispositionSignal> out) {
     for (JsonNode discussion : discussions) {
       Long parentId = null;
       for (JsonNode note : discussion.path("notes")) {
-        if (note.path("system").asBoolean(false)) {
-          continue;
-        }
         long noteId = note.path("id").asLong(0);
-        if (noteId <= 0) {
+        if (note.path("system").asBoolean(false) || noteId <= 0) {
           continue;
         }
         String author = note.path("author").path("username").asText("");
@@ -290,68 +333,109 @@ final class GitLabCommentReader implements CommentSource {
           if (parentId == null) {
             parentId = noteId;
           }
-          continue;
+        } else if (parentId != null) {
+          // 人类自建线程（parentId == null）不是处置信号
+          appendReplySignal(note, parentId, author, out);
         }
-        if (parentId == null) {
-          continue; // 人类自建线程不是处置信号
-        }
-        String body = note.path("body").asText("");
-        String tag = DispositionSupport.replyTag(body);
-        if (tag == null) {
-          continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
-        }
-        out.add(
-            new DispositionSignal(
-                DispositionSignal.KIND_REPLY_TAG,
-                parentId,
-                DispositionSupport.instantOrEpoch(note.path("created_at")),
-                tag,
-                author,
-                DispositionSupport.excerpt(body)));
       }
     }
+  }
+
+  /**
+   * 追加单条 reply 标签信号（无标签回复不改变处置分类，ignored 口径据此保持噪声语义）。
+   *
+   * @param note 人类 note
+   * @param parentId 线程父 note id
+   * @param author 作者
+   * @param out 信号输出
+   */
+  private static void appendReplySignal(
+      JsonNode note, long parentId, String author, List<DispositionSignal> out) {
+    String body = note.path("body").asText("");
+    String tag = DispositionSupport.replyTag(body);
+    if (tag == null) {
+      return;
+    }
+    out.add(
+        new DispositionSignal(
+            DispositionSignal.KIND_REPLY_TAG,
+            parentId,
+            DispositionSupport.instantOrEpoch(note.path("created_at")),
+            tag,
+            author,
+            DispositionSupport.excerpt(body)));
+  }
+
+  /**
+   * 采集 bot Summary note 的 👍/👎 reaction（06§1.1；inline note 不参与 run 满意度）。
+   *
+   * @param repo 仓库
+   * @param prNumber PR 号
+   * @param discussions discussion 列表
+   * @param login bot 用户名
+   * @param out 信号输出
+   */
+  private void collectReactionSignals(
+      RepoRef repo,
+      int prNumber,
+      List<JsonNode> discussions,
+      String login,
+      List<DispositionSignal> out) {
     for (JsonNode discussion : discussions) {
       for (JsonNode note : discussion.path("notes")) {
-        if (note.path("system").asBoolean(false)) {
-          continue;
-        }
-        if (!login.equals(note.path("author").path("username").asText(""))) {
-          continue; // 只采 bot 的 Summary note reaction（run 满意度载体，06§1.1）
-        }
-        if (note.path("position").isObject()) {
-          continue; // inline note 的 reaction 不参与 run 满意度
-        }
         long noteId = note.path("id").asLong(0);
-        if (noteId <= 0) {
+        if (note.path("system").asBoolean(false)
+            || !login.equals(note.path("author").path("username").asText(""))
+            || note.path("position").isObject()
+            || noteId <= 0) {
           continue;
         }
-        for (JsonNode award :
-            getPagedArray(
-                repo, "/merge_requests/" + prNumber + "/notes/" + noteId + "/award_emoji")) {
-          String name = award.path("name").asText("");
-          String content;
-          if ("thumbsup".equals(name)) {
-            content = DispositionSignal.REACTION_UP;
-          } else if ("thumbsdown".equals(name)) {
-            content = DispositionSignal.REACTION_DOWN;
-          } else {
-            content = null;
-          }
-          if (content == null) {
-            continue;
-          }
-          out.add(
-              new DispositionSignal(
-                  DispositionSignal.KIND_REACTION,
-                  noteId,
-                  DispositionSupport.instantOrEpoch(award.path("created_at")),
-                  content,
-                  award.path("user").path("username").asText(""),
-                  ""));
-        }
+        collectNoteReactions(repo, prNumber, noteId, out);
       }
     }
-    return out.toArray(new DispositionSignal[0]);
+  }
+
+  /**
+   * 采集单条 note 的 award_emoji 反应信号（只识别 thumbsup/thumbsdown）。
+   *
+   * @param repo 仓库
+   * @param prNumber PR 号
+   * @param noteId note id
+   * @param out 信号输出
+   */
+  private void collectNoteReactions(
+      RepoRef repo, int prNumber, long noteId, List<DispositionSignal> out) {
+    for (JsonNode award :
+        getPagedArray(repo, "/merge_requests/" + prNumber + "/notes/" + noteId + "/award_emoji")) {
+      String content = reactionContent(award.path("name").asText(""));
+      if (content == null) {
+        continue;
+      }
+      out.add(
+          new DispositionSignal(
+              DispositionSignal.KIND_REACTION,
+              noteId,
+              DispositionSupport.instantOrEpoch(award.path("created_at")),
+              content,
+              award.path("user").path("username").asText(""),
+              ""));
+    }
+  }
+
+  /**
+   * award_emoji 名称 → 处置信号内容（未知反应返回 null）。
+   *
+   * @param name award_emoji 名称
+   * @return 信号内容或 null
+   */
+  private static String reactionContent(String name) {
+    if ("thumbsup".equals(name)) {
+      return DispositionSignal.REACTION_UP;
+    }
+    if ("thumbsdown".equals(name)) {
+      return DispositionSignal.REACTION_DOWN;
+    }
+    return null;
   }
 
   List<JsonNode> getPagedArray(RepoRef repo, String pathAndQuery) {
@@ -359,7 +443,7 @@ final class GitLabCommentReader implements CommentSource {
     String page = "1";
     boolean exhausted = false;
     // 多探一页：恰好 100 个满页（10k 条）时，第 101 页为空必须视为正常结束，而不是触顶
-    for (int i = 0; i <= MAX_PAGES; i++) {
+    for (int i = 0; i <= MAX_PAGES && !exhausted; i++) {
       GitLabHttpTransport.Page p = transport.getPage(repo, withPage(pathAndQuery, page));
       JsonNode root = p.body();
       if (i == MAX_PAGES) {
@@ -369,26 +453,17 @@ final class GitLabCommentReader implements CommentSource {
               "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
         }
         exhausted = true;
-        break;
-      }
-      if (!root.isArray() || root.isEmpty()) {
+      } else if (!root.isArray() || root.isEmpty()) {
         exhausted = true;
-        break;
-      }
-      root.forEach(out::add);
-      String next = p.nextPage();
-      if (next.isBlank()) {
-        if (root.size() < PAGE_SIZE) {
-          exhausted = true;
-          break;
-        }
-        next = incrementPageOrNull(page);
+      } else {
+        root.forEach(out::add);
+        String next = nextPageOrNull(p, root, page);
         if (next == null) {
-          exhausted = true; // 异常分页头：页号无法递增，按无下一页处理
-          break;
+          exhausted = true; // 无下一页（短页）或异常分页头：按正常结束处理
+        } else {
+          page = next;
         }
       }
-      page = next;
     }
     if (!exhausted) {
       // 触顶仍是满页 = 还有数据未读：返回部分结果会让文件索引/账本"看起来完整"
@@ -396,6 +471,26 @@ final class GitLabCommentReader implements CommentSource {
           "GitLab 分页超过上限 " + (MAX_PAGES * PAGE_SIZE) + " 条，无法保证结果完整: " + pathAndQuery);
     }
     return out;
+  }
+
+  /**
+   * 计算下一页：优先服务端分页头；缺失时短页视为结束，满页按 offset 递增兜底。
+   *
+   * @param p 当前页
+   * @param root 页数组
+   * @param currentPage 当前页号
+   * @return 下一页页号；null = 无下一页
+   */
+  private static String nextPageOrNull(
+      GitLabHttpTransport.Page p, JsonNode root, String currentPage) {
+    String next = p.nextPage();
+    if (!next.isBlank()) {
+      return next;
+    }
+    if (root.size() < PAGE_SIZE) {
+      return null;
+    }
+    return incrementPageOrNull(currentPage);
   }
 
   private static String withPage(String pathAndQuery, String page) {

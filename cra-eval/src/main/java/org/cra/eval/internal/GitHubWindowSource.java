@@ -51,41 +51,65 @@ final class GitHubWindowSource implements ReportWindowSource {
     }
     List<WindowData.PrWindow> prs = new ArrayList<>();
     for (PullRequestRef pull : pulls) {
-      CommentLedger ledger = comments.fetchBotComments(repo, pull.number());
-      List<DispositionSignal> signals =
-          Arrays.asList(comments.fetchDispositionSignals(repo, pull.number()));
-      Map<String, WindowData.TouchFacts> touches = new HashMap<>();
-      if (pull.merged()) {
-        Set<String> commits = new LinkedHashSet<>();
-        ledger
-            .findingMarkers()
-            .forEach(m -> commits.add(m.commitSha() == null ? "" : m.commitSha()));
-        for (String commit : commits) {
-          if (commit.isBlank()) {
-            continue;
-          }
-          if (commit.equalsIgnoreCase(pull.headSha())) {
-            touches.put(commit, WindowData.TouchFacts.EMPTY);
-            continue;
-          }
-          try {
-            touches.put(commit, touchFacts(adapter.fetchDiff(repo, commit, pull.headSha())));
-          } catch (CraException e) {
-            // 单个 commit 的 compare 不可得：该 finding 的 fixed 初判标为不可判定（不猜"未改"）
-            notes.add(
-                "PR #"
-                    + pull.number()
-                    + " commit "
-                    + abbreviate(commit)
-                    + "..head 的 compare 不可得（"
-                    + e.getMessage()
-                    + "）——该评论的 fixed 初判不可用");
-          }
-        }
-      }
-      prs.add(new WindowData.PrWindow(pull, ledger, signals, touches));
+      prs.add(loadPr(repo, pull, notes));
     }
     return new WindowData.Window(repo, label(), prs, List.of(), List.of(), notes);
+  }
+
+  /**
+   * 加载单个 PR 的账本、处置信号与触摸事实。
+   *
+   * @param repo 仓库
+   * @param pull PR
+   * @param notes 说明（compare 不可得等）
+   * @return PR 窗口
+   */
+  private WindowData.PrWindow loadPr(RepoRef repo, PullRequestRef pull, List<String> notes) {
+    CommentLedger ledger = comments.fetchBotComments(repo, pull.number());
+    List<DispositionSignal> signals =
+        Arrays.asList(comments.fetchDispositionSignals(repo, pull.number()));
+    Map<String, WindowData.TouchFacts> touches =
+        pull.merged() ? mergedTouches(repo, pull, ledger, notes) : new HashMap<>();
+    return new WindowData.PrWindow(pull, ledger, signals, touches);
+  }
+
+  /**
+   * 合并 PR 的触摸事实：逐 finding commit 取 compare（等于 head 记 EMPTY；不可得如实记 notes）。
+   *
+   * @param repo 仓库
+   * @param pull PR
+   * @param ledger 账本
+   * @param notes 说明
+   * @return commit → 触摸事实
+   */
+  private Map<String, WindowData.TouchFacts> mergedTouches(
+      RepoRef repo, PullRequestRef pull, CommentLedger ledger, List<String> notes) {
+    Map<String, WindowData.TouchFacts> touches = new HashMap<>();
+    Set<String> commits = new LinkedHashSet<>();
+    ledger.findingMarkers().forEach(m -> commits.add(m.commitSha() == null ? "" : m.commitSha()));
+    for (String commit : commits) {
+      if (commit.isBlank()) {
+        continue;
+      }
+      if (commit.equalsIgnoreCase(pull.headSha())) {
+        touches.put(commit, WindowData.TouchFacts.EMPTY);
+      } else {
+        try {
+          touches.put(commit, touchFacts(adapter.fetchDiff(repo, commit, pull.headSha())));
+        } catch (CraException e) {
+          // 单个 commit 的 compare 不可得：该 finding 的 fixed 初判标为不可判定（不猜"未改"）
+          notes.add(
+              "PR #"
+                  + pull.number()
+                  + " commit "
+                  + abbreviate(commit)
+                  + "..head 的 compare 不可得（"
+                  + e.getMessage()
+                  + "）——该评论的 fixed 初判不可用");
+        }
+      }
+    }
+    return touches;
   }
 
   private static WindowData.TouchFacts touchFacts(DiffResult diff) {

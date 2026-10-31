@@ -164,9 +164,7 @@ final class CrossCheckEventAssembler {
         Comparator.comparing(ProductEvent::occurredAt)
             .reversed()
             .thenComparing(ProductEvent::eventId));
-    return entries.size() > MAX_EVENTS
-        ? List.copyOf(entries.subList(0, MAX_EVENTS))
-        : List.copyOf(entries);
+    return List.copyOf(entries.size() > MAX_EVENTS ? entries.subList(0, MAX_EVENTS) : entries);
   }
 
   /**
@@ -178,6 +176,20 @@ final class CrossCheckEventAssembler {
    */
   static List<String> keywords(Set<String> paths, List<String> messages) {
     Set<String> out = new LinkedHashSet<>();
+    addPathTokens(out, paths);
+    if (messages != null) {
+      addMessageTokens(out, messages);
+    }
+    return List.copyOf(out);
+  }
+
+  /**
+   * 从变更路径派生关键词（文件名 + camel 拆分；上限即停）。
+   *
+   * @param out 关键词输出
+   * @param paths 变更路径
+   */
+  private static void addPathTokens(Set<String> out, Set<String> paths) {
     for (String path : sorted(paths)) {
       String file = path;
       int slash = file.lastIndexOf('/');
@@ -194,23 +206,28 @@ final class CrossCheckEventAssembler {
         break;
       }
     }
-    if (messages != null) {
-      for (String message : messages) {
-        if (message == null) {
-          continue;
-        }
+  }
+
+  /**
+   * 从 commit message / PR 标题派生关键词（上限即停）。
+   *
+   * @param out 关键词输出
+   * @param messages 文本
+   */
+  private static void addMessageTokens(Set<String> out, List<String> messages) {
+    for (String message : messages) {
+      if (message != null && out.size() < MAX_KEYWORDS) {
         for (String token : message.split("\\W+")) {
           addToken(out, token);
           if (out.size() >= MAX_KEYWORDS) {
             break;
           }
         }
-        if (out.size() >= MAX_KEYWORDS) {
-          break;
-        }
+      }
+      if (out.size() >= MAX_KEYWORDS) {
+        break;
       }
     }
-    return List.copyOf(out);
   }
 
   private static void addToken(Set<String> out, String raw) {

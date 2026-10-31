@@ -20,6 +20,28 @@ final class WeeklyReportWriter {
    */
   static List<String> renderText(WeeklyReport report) {
     List<String> lines = new ArrayList<>();
+    appendHeader(lines, report);
+    appendDisposition(lines, report.disposition());
+    appendRefusal(lines, report.refusal());
+    appendFunnel(lines, report.funnel());
+    appendZeroPublish(lines, report.zeroPublish());
+    appendSatisfaction(lines, report.satisfaction());
+    appendDualVerifierGate(lines, report.dualVerifierGate());
+    lines.add("");
+    lines.add("-- 口径与不可得声明");
+    for (String note : report.notes()) {
+      lines.add("- " + note);
+    }
+    return lines;
+  }
+
+  /**
+   * 报告头（仓库/窗口/数据源/PR/run 完成标记）。
+   *
+   * @param lines 输出
+   * @param report 周报
+   */
+  private static void appendHeader(List<String> lines, WeeklyReport report) {
     lines.add("== cra-eval 周报（L1 在线噪声度量，06§1.1） ==");
     lines.add(
         "仓库: "
@@ -39,7 +61,15 @@ final class WeeklyReportWriter {
             + report.mergedPrs()
             + "）  run 完成标记: "
             + report.runCompletions());
-    WeeklyReport.Disposition d = report.disposition();
+  }
+
+  /**
+   * 发布精确率 / 误报率段。
+   *
+   * @param lines 输出
+   * @param d 处置统计
+   */
+  private static void appendDisposition(List<String> lines, WeeklyReport.Disposition d) {
     lines.add("");
     lines.add("-- 发布精确率 / 误报率（06§1.1）");
     lines.add(
@@ -89,8 +119,15 @@ final class WeeklyReportWriter {
               + " → "
               + (Boolean.TRUE.equals(d.meetsFalsePositiveLimit()) ? "达标" : "未达标"));
     }
+  }
 
-    WeeklyReport.Refusal r = report.refusal();
+  /**
+   * 拒真率段。
+   *
+   * @param lines 输出
+   * @param r 拒真统计
+   */
+  private static void appendRefusal(List<String> lines, WeeklyReport.Refusal r) {
     lines.add("");
     lines.add("-- 拒真率（REFUTED 被 Judge/事后推翻）");
     lines.add(
@@ -116,8 +153,15 @@ final class WeeklyReportWriter {
         r.samplesSufficient()
             ? "判定: 推翻率 " + overturnText
             : "⚠ 样本不足，不下结论（拒真池 " + r.pool() + " < " + r.sampleGate() + "）");
+  }
 
-    WeeklyReport.Funnel f = report.funnel();
+  /**
+   * 候选→确认→发布漏斗段。
+   *
+   * @param lines 输出
+   * @param f 漏斗
+   */
+  private static void appendFunnel(List<String> lines, WeeklyReport.Funnel f) {
     lines.add("");
     lines.add("-- 候选→确认→发布漏斗（06§1.1/§1.3）");
     if (f.candidateDataAvailable()) {
@@ -155,8 +199,15 @@ final class WeeklyReportWriter {
               + f.runs()
               + " 个）");
     }
+  }
 
-    WeeklyReport.ZeroPublish z = report.zeroPublish();
+  /**
+   * 零发布率趋势段。
+   *
+   * @param lines 输出
+   * @param z 零发布统计
+   */
+  private static void appendZeroPublish(List<String> lines, WeeklyReport.ZeroPublish z) {
     lines.add("");
     lines.add("-- 零发布率趋势（06§1.1 趋势护栏）");
     lines.add(
@@ -171,14 +222,28 @@ final class WeeklyReportWriter {
             + "  趋势: "
             + z.trend());
     lines.add("  " + z.note());
+  }
 
-    WeeklyReport.Satisfaction s = report.satisfaction();
+  /**
+   * run 满意度段。
+   *
+   * @param lines 输出
+   * @param s 满意度
+   */
+  private static void appendSatisfaction(List<String> lines, WeeklyReport.Satisfaction s) {
     lines.add("");
     lines.add("-- run 满意度（Summary reaction，不参与单 finding 分类）");
     lines.add(
         "👍 " + s.up() + " / 👎 " + s.down() + "（有 reaction 的 run " + s.runsWithReaction() + " 个）");
+  }
 
-    WeeklyReport.DualVerifierGate g = report.dualVerifierGate();
+  /**
+   * 双异构验证者门槛评估段。
+   *
+   * @param lines 输出
+   * @param g 门槛评估
+   */
+  private static void appendDualVerifierGate(List<String> lines, WeeklyReport.DualVerifierGate g) {
     lines.add("");
     lines.add("-- 双异构验证者门槛评估（T3.6：03§4.3 / 07）");
     lines.add("条件 A（拒真池 ≥20 且推翻率 ≥10%）：" + g.refusalCondition().verdict());
@@ -187,13 +252,6 @@ final class WeeklyReportWriter {
     for (String reason : g.reasons()) {
       lines.add("  - " + reason);
     }
-
-    lines.add("");
-    lines.add("-- 口径与不可得声明");
-    for (String note : report.notes()) {
-      lines.add("- " + note);
-    }
-    return lines;
   }
 
   /**

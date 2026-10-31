@@ -72,90 +72,14 @@ public final class SignoffAdvisor {
     }
 
     Map<String, RuleAccumulator> hits = new LinkedHashMap<>();
-    boolean allDocs = true;
-    boolean allFlagOnly = true;
-    List<String> allPaths = new ArrayList<>();
+    FileFlags flags = new FileFlags();
     for (DiffFile file : diff.files()) {
-      List<String> paths = effectivePaths(file);
-      allPaths.addAll(paths);
-      boolean doc = paths.stream().allMatch(this::isDoc);
-      allDocs &= doc;
-      boolean flagOnly = flagOnly(file) && paths.stream().allMatch(this::isFeatureFlagPath);
-      allFlagOnly &= flagOnly;
-      if (!doc) {
-        // 高危规则优先于其余分类（同一文件命中多条时取最高等级）
-        List<String> highRisk = filterMatches(paths, options.highRiskPaths());
-        if (!highRisk.isEmpty()) {
-          add(hits, "high-risk-path", RiskTier.HIGH, "命中核心高危路径（安全/支付/鉴权区域）", highRisk);
-          continue;
-        }
-        List<String> critical = filterMatches(paths, options.criticalConfigPaths());
-        if (!critical.isEmpty()) {
-          add(hits, "critical-config-path", RiskTier.HIGH, "命中难恢复的关键配置（部署/迁移/生产配置）", critical);
-          continue;
-        }
-      }
-      if (paths.stream().anyMatch(this::isReviewPolicy)) {
-        add(hits, "review-policy-change", RiskTier.MEDIUM, "REVIEW.md 评审策略变更", paths);
-        continue;
-      }
-      if (paths.stream().anyMatch(this::isSystemPrompt)) {
-        add(hits, "system-prompt", RiskTier.MEDIUM, "系统提示词变更", paths);
-        continue;
-      }
-      if (doc) {
-        continue;
-      }
-      if (flagOnly) {
-        continue;
-      }
-      add(hits, "business-logic", RiskTier.MEDIUM, "常规业务逻辑变更", paths);
+      classifyFile(file, hits, flags);
     }
-
-    boolean lowCandidate = false;
-    if (hits.isEmpty() && allDocs) {
-      lowCandidate = true;
-      add(hits, "docs-only", RiskTier.LOW, "纯文档变更", allPaths);
-    }
-    if (hits.isEmpty() && allFlagOnly) {
-      lowCandidate = true;
-      add(hits, "feature-flag-only", RiskTier.LOW, "仅功能开关变更", allPaths);
-    }
-    if (lowCandidate) {
-      boolean testsPassed = context.testsStatus() == TestsStatus.PASSED;
-      boolean trustedAuthor = context.authorKnown() && options.isTrustedAuthor(context.author());
-      if (!testsPassed) {
-        add(
-            hits,
-            "low-risk-gate-tests",
-            RiskTier.MEDIUM,
-            "低风险前置条件未满足：测试状态 "
-                + context.testsStatus().name().toLowerCase(Locale.ROOT)
-                + "（需 passed）",
-            List.of());
-      }
-      if (!trustedAuthor) {
-        add(
-            hits,
-            "low-risk-gate-author",
-            RiskTier.MEDIUM,
-            "低风险前置条件未满足：作者 "
-                + (context.authorKnown() ? context.author() : "未知")
-                + " 不在 trusted-authors",
-            List.of(context.authorKnown() ? "author=" + context.author() : "author=unknown"));
-      }
-      if (testsPassed && trustedAuthor) {
-        add(
-            hits,
-            "low-risk-conditions-met",
-            RiskTier.LOW,
-            "测试通过且作者可信（0 人签前提满足）",
-            List.of("author=" + context.author()));
-      }
-    }
+    applyLowRiskGates(hits, context, flags);
     if (hits.isEmpty()) {
       // 兜底：混合形态（如文档 + 开关配置各一）无法归入低风险，按常规变更处理
-      add(hits, "unclassified-change", RiskTier.MEDIUM, "未能归入低/高风险的常规变更", allPaths);
+      add(hits, "unclassified-change", RiskTier.MEDIUM, "未能归入低/高风险的常规变更", flags.allPaths);
     }
 
     RiskTier tier =
@@ -210,6 +134,101 @@ public final class SignoffAdvisor {
   }
 
   /**
+   * 单个文件的规则分类（高危优先，其次策略/提示词，最后常规业务逻辑）。
+   *
+   * @param file 变更文件
+   * @param hits 规则命中（可变）
+   * @param flags 全量文件形态标记（可变）
+   */
+  private void classifyFile(DiffFile file, Map<String, RuleAccumulator> hits, FileFlags flags) {
+    List<String> paths = effectivePaths(file);
+    flags.allPaths.addAll(paths);
+    boolean doc = paths.stream().allMatch(this::isDoc);
+    flags.allDocs &= doc;
+    boolean flagOnly = flagOnly(file) && paths.stream().allMatch(this::isFeatureFlagPath);
+    flags.allFlagOnly &= flagOnly;
+    if (!doc) {
+      // 高危规则优先于其余分类（同一文件命中多条时取最高等级）
+      List<String> highRisk = filterMatches(paths, options.highRiskPaths());
+      if (!highRisk.isEmpty()) {
+        add(hits, "high-risk-path", RiskTier.HIGH, "命中核心高危路径（安全/支付/鉴权区域）", highRisk);
+        return;
+      }
+      List<String> critical = filterMatches(paths, options.criticalConfigPaths());
+      if (!critical.isEmpty()) {
+        add(hits, "critical-config-path", RiskTier.HIGH, "命中难恢复的关键配置（部署/迁移/生产配置）", critical);
+        return;
+      }
+    }
+    if (paths.stream().anyMatch(this::isReviewPolicy)) {
+      add(hits, "review-policy-change", RiskTier.MEDIUM, "REVIEW.md 评审策略变更", paths);
+    } else if (paths.stream().anyMatch(this::isSystemPrompt)) {
+      add(hits, "system-prompt", RiskTier.MEDIUM, "系统提示词变更", paths);
+    } else if (!doc && !flagOnly) {
+      add(hits, "business-logic", RiskTier.MEDIUM, "常规业务逻辑变更", paths);
+    }
+  }
+
+  /**
+   * 低风险形态（纯文档 / 仅功能开关）的前置条件闸门。
+   *
+   * @param hits 规则命中（可变）
+   * @param context 签字上下文
+   * @param flags 全量文件形态标记
+   */
+  private void applyLowRiskGates(
+      Map<String, RuleAccumulator> hits, SignoffContext context, FileFlags flags) {
+    boolean lowCandidate = false;
+    if (hits.isEmpty() && flags.allDocs) {
+      lowCandidate = true;
+      add(hits, "docs-only", RiskTier.LOW, "纯文档变更", flags.allPaths);
+    }
+    if (hits.isEmpty() && flags.allFlagOnly) {
+      lowCandidate = true;
+      add(hits, "feature-flag-only", RiskTier.LOW, "仅功能开关变更", flags.allPaths);
+    }
+    if (!lowCandidate) {
+      return;
+    }
+    boolean testsPassed = context.testsStatus() == TestsStatus.PASSED;
+    boolean trustedAuthor = context.authorKnown() && options.isTrustedAuthor(context.author());
+    if (testsPassed && trustedAuthor) {
+      add(
+          hits,
+          "low-risk-conditions-met",
+          RiskTier.LOW,
+          "测试通过且作者可信（0 人签前提满足）",
+          List.of("author=" + context.author()));
+      return;
+    }
+    if (!testsPassed) {
+      add(
+          hits,
+          "low-risk-gate-tests",
+          RiskTier.MEDIUM,
+          "低风险前置条件未满足：测试状态 " + context.testsStatus().name().toLowerCase(Locale.ROOT) + "（需 passed）",
+          List.of());
+    }
+    if (!trustedAuthor) {
+      add(
+          hits,
+          "low-risk-gate-author",
+          RiskTier.MEDIUM,
+          "低风险前置条件未满足：作者 "
+              + (context.authorKnown() ? context.author() : "未知")
+              + " 不在 trusted-authors",
+          List.of(context.authorKnown() ? "author=" + context.author() : "author=unknown"));
+    }
+  }
+
+  /** 全量文件形态累计（纯文档 / 仅开关 / 全部路径）。 */
+  private static final class FileFlags {
+    private boolean allDocs = true;
+    private boolean allFlagOnly = true;
+    private final List<String> allPaths = new ArrayList<>();
+  }
+
+  /**
    * 路径 glob 匹配（带前导 / 的变体：`**&#47;auth&#47;**` 同时命中根级 `auth/Foo.java`）。
    *
    * @param globs 模式列表
@@ -238,19 +257,16 @@ public final class SignoffAdvisor {
     }
     boolean sawChange = false;
     for (String line : patch.split("\n")) {
-      if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) {
-        continue;
-      }
-      if (!line.startsWith("+") && !line.startsWith("-")) {
-        continue;
-      }
-      String content = line.substring(1).strip();
-      if (content.isEmpty() || content.startsWith("#") || content.startsWith("//")) {
-        continue;
-      }
-      sawChange = true;
-      if (!FLAG_LINE.matcher(content).find()) {
-        return false;
+      boolean header = line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@");
+      boolean changed = line.startsWith("+") || line.startsWith("-");
+      if (!header && changed) {
+        String content = line.substring(1).strip();
+        if (!content.isEmpty() && !content.startsWith("#") && !content.startsWith("//")) {
+          sawChange = true;
+          if (!FLAG_LINE.matcher(content).find()) {
+            return false;
+          }
+        }
       }
     }
     return sawChange;

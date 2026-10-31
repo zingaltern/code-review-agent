@@ -145,25 +145,22 @@ public final class JgitLocalRepoContext implements LocalRepoContext {
         TreeFilter filter = PathFilterGroup.createFromStrings(paths);
         for (RevCommit commit : walk) {
           // 时间窗口以 head 的 committer time 为锚（确定性）；COMMIT_TIME_DESC 下可提前结束
-          if (commit.getCommitterIdent() == null
+          if (++scanned > MAX_HISTORY_SCAN
+              || commit.getCommitterIdent() == null
               || commit.getCommitterIdent().getWhenAsInstant().isBefore(since)) {
             break;
           }
-          if (++scanned > MAX_HISTORY_SCAN) {
-            break;
-          }
-          if (commit.getParentCount() == 0) {
-            continue;
-          }
-          try (DiffFormatter formatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
-            formatter.setRepository(repository);
-            formatter.setPathFilter(filter);
-            if (!formatter.scan(commit.getParent(0), commit).isEmpty()) {
-              entries.add(
-                  new CommitHistoryEntry(
-                      commit.getName(),
-                      commit.getFullMessage(),
-                      commit.getCommitterIdent().getWhenAsInstant()));
+          if (commit.getParentCount() != 0) {
+            try (DiffFormatter formatter = new DiffFormatter(DisabledOutputStream.INSTANCE)) {
+              formatter.setRepository(repository);
+              formatter.setPathFilter(filter);
+              if (!formatter.scan(commit.getParent(0), commit).isEmpty()) {
+                entries.add(
+                    new CommitHistoryEntry(
+                        commit.getName(),
+                        commit.getFullMessage(),
+                        commit.getCommitterIdent().getWhenAsInstant()));
+              }
             }
           }
         }

@@ -40,24 +40,16 @@ final class RunArgsParser {
     Path datasetPath = Path.of(dataset);
     String set = named.getOrDefault("--set", "all");
     int k = EvalArgsSupport.parsePositive(named.get("--k"), "--k", 1);
-    String depth = named.getOrDefault("--depth", "quick");
-    if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
-      throw new CraConfigException("depth 非法: " + depth + "（评测默认 quick，04§2.4）");
-    }
+    String depth = validateDepth(named.getOrDefault("--depth", "quick"));
     String jsonOut = named.get("--json");
     String sha256Out = named.get("--sha256-out");
-    if (sha256Out != null && !sha256Out.isBlank() && (jsonOut == null || jsonOut.isBlank())) {
-      throw new CraConfigException("--sha256-out 需与 --json 同用（哈希绑定 JSON 报告；单独给出会被静默忽略，04§2.4）");
-    }
+    validateShaOutput(jsonOut, sha256Out);
     Path cliJar = CliJarLocator.locate(named.get("--cli-jar"));
     Path workDir = Path.of(named.getOrDefault("--work-dir", "cra-eval-work"));
     long timeout = EvalArgsSupport.parsePositive(named.get("--timeout-sec"), "--timeout-sec", 900);
     List<String> only =
         named.containsKey("--case") ? List.of(named.get("--case").split(",")) : List.of();
-    String tier = named.getOrDefault("--tier", "auto");
-    if (!"auto".equals(tier) && !"l1".equals(tier) && !"l2".equals(tier) && !"l3".equals(tier)) {
-      throw new CraConfigException("--tier 非法: " + tier + "（auto|l1|l2|l3，04§2.4）");
-    }
+    String tier = validateTier(named.getOrDefault("--tier", "auto"));
     String commit = named.get("--commit");
     if (commit == null || commit.isBlank()) {
       commit = env.get("GITHUB_SHA");
@@ -81,5 +73,43 @@ final class RunArgsParser {
         sha256Out == null ? null : Path.of(sha256Out),
         crosschecker,
         semanticContext);
+  }
+
+  /**
+   * 校验 depth（quick|standard|deep）。
+   *
+   * @param depth 原值
+   * @return depth
+   */
+  private static String validateDepth(String depth) {
+    if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
+      throw new CraConfigException("depth 非法: " + depth + "（评测默认 quick，04§2.4）");
+    }
+    return depth;
+  }
+
+  /**
+   * --sha256-out 必须与 --json 同用（否则会被静默忽略）。
+   *
+   * @param jsonOut --json 值
+   * @param sha256Out --sha256-out 值
+   */
+  private static void validateShaOutput(String jsonOut, String sha256Out) {
+    if (sha256Out != null && !sha256Out.isBlank() && (jsonOut == null || jsonOut.isBlank())) {
+      throw new CraConfigException("--sha256-out 需与 --json 同用（哈希绑定 JSON 报告；单独给出会被静默忽略，04§2.4）");
+    }
+  }
+
+  /**
+   * 校验 tier（auto|l1|l2|l3）。
+   *
+   * @param tier 原值
+   * @return tier
+   */
+  private static String validateTier(String tier) {
+    if (!"auto".equals(tier) && !"l1".equals(tier) && !"l2".equals(tier) && !"l3".equals(tier)) {
+      throw new CraConfigException("--tier 非法: " + tier + "（auto|l1|l2|l3，04§2.4）");
+    }
+    return tier;
   }
 }

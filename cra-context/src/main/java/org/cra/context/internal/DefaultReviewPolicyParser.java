@@ -70,22 +70,34 @@ public final class DefaultReviewPolicyParser implements ReviewPolicyParser {
         // 重复标题复用首个段落：putIfAbsent 会让 current 指向不在 map 里的孤儿 Section，
         // 其后所有列表项被静默丢弃（Skip paths/Conventions 丢失会直接改变评审范围）
         current = out.computeIfAbsent(normalizeKey(heading), key -> new Section(heading));
-        continue;
-      }
-      if (line.startsWith("#")) {
-        continue; // 一级/三级及更深标题不构成段落边界（### 是列表内常见强调形态）
-      }
-      if (current != null && line.strip().startsWith("- ")) {
-        current.items.add(line.strip().substring(2).strip());
-      } else if (current != null && !line.isBlank() && !line.strip().startsWith("- ")) {
-        // 非列表正文（如 Nit budget 的裸数值行）保留为杂项文本
-        current.freeText.add(line.strip());
+      } else if (!line.startsWith("#")) {
+        // 一级/三级及更深标题不构成段落边界（### 是列表内常见强调形态）
+        addSectionLine(current, line);
       }
     }
     if (out.isEmpty() && !markdown.isBlank()) {
       warnings.add("REVIEW.md 无二级标题结构，无法解析策略段落，按最小默认策略执行（04§3.2）");
     }
     return out;
+  }
+
+  /**
+   * 把非标题行归入当前段落：列表项进 items，其余非空文本进 freeText。
+   *
+   * @param current 当前段落（null = 尚未遇到二级标题）
+   * @param line 原始行
+   */
+  private static void addSectionLine(Section current, String line) {
+    if (current == null) {
+      return;
+    }
+    String stripped = line.strip();
+    if (stripped.startsWith("- ")) {
+      current.items.add(stripped.substring(2).strip());
+    } else if (!stripped.isEmpty()) {
+      // 非列表正文（如 Nit budget 的裸数值行）保留为杂项文本
+      current.freeText.add(stripped);
+    }
   }
 
   private Integer parseNitBudget(Section section, List<String> warnings) {

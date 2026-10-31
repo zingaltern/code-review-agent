@@ -82,27 +82,26 @@ public final class RunStatsReader {
       try {
         node = Json.MAPPER.readTree(line);
       } catch (IOException e) {
-        continue;
+        continue; // 坏行不参与判定（与既有"末个合法 run_end 生效"语义一致）
       }
-      if (node == null || !"run_end".equals(node.path("event").asText())) {
-        continue;
+      if (node != null && "run_end".equals(node.path("event").asText())) {
+        JsonNode tokensIn = node.path("tokens_in");
+        JsonNode tokensOut = node.path("tokens_out");
+        JsonNode latencyMs = node.path("latency_ms");
+        if (!tokensIn.isNumber()
+            || !tokensOut.isNumber()
+            || !latencyMs.isNumber()
+            || tokensIn.isMissingNode()
+            || tokensOut.isMissingNode()
+            || latencyMs.isMissingNode()) {
+          // run_end 存在但统计不全：宁可不可用，也不以 0 值进均值分母（掩盖采集缺陷）
+          found = CaseObservation.RunStats.EMPTY;
+        } else {
+          found =
+              new CaseObservation.RunStats(
+                  tokensIn.asInt(), tokensOut.asInt(), latencyMs.asLong(), true);
+        }
       }
-      JsonNode tokensIn = node.path("tokens_in");
-      JsonNode tokensOut = node.path("tokens_out");
-      JsonNode latencyMs = node.path("latency_ms");
-      if (!tokensIn.isNumber()
-          || !tokensOut.isNumber()
-          || !latencyMs.isNumber()
-          || tokensIn.isMissingNode()
-          || tokensOut.isMissingNode()
-          || latencyMs.isMissingNode()) {
-        // run_end 存在但统计不全：宁可不可用，也不以 0 值进均值分母（掩盖采集缺陷）
-        found = CaseObservation.RunStats.EMPTY;
-        continue;
-      }
-      found =
-          new CaseObservation.RunStats(
-              tokensIn.asInt(), tokensOut.asInt(), latencyMs.asLong(), true);
     }
     return found;
   }

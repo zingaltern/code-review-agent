@@ -140,18 +140,76 @@ public record ServerConfig(
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
-    platform = platform == null ? "" : platform.strip();
-    if (!"github".equals(platform) && !"gitlab".equals(platform)) {
-      throw new CraConfigException(
-          "CRA_SERVER_PLATFORM 非法: " + platform + "（github|gitlab，小写；默认 github）");
-    }
-    if ("gitlab".equals(platform)) {
-      requireText(gitlabToken, "CRA_GITLAB_TOKEN");
-      gitlabBaseUrl = normalizeGitLabApiBase(gitlabBaseUrl);
-    }
+    platform = normalizePlatform(platform);
+    gitlabBaseUrl = normalizeGitlabBase(platform, gitlabToken, gitlabBaseUrl);
     requireText(apiToken, "CRA_SERVER_API_TOKEN");
     requireText(signingKey, "CRA_SERVER_SIGNING_KEY");
     requireText(signingKeyId, "CRA_SERVER_SIGNING_KEY_ID");
+    validateServerLimits(queueCapacity, workerCount, crossCheckerHistoryWeeks, drainTimeoutSeconds);
+    reviewDepth = normalizeDepth(reviewDepth);
+    validateTokenLimits(runTotalTokens, llmMaxConcurrency);
+    validateReviewBudget(
+        reviewLargeDiffLines,
+        reviewHardCapLines,
+        reviewNitBudget,
+        reviewDegradeAtFirst,
+        reviewDegradeAtSecond,
+        reviewSpotCheckPercent);
+    reviewPublishUnverified = normalizePublishUnverified(reviewPublishUnverified);
+    validateEventHistoryLimits(
+        eventHistoryLookbackDays,
+        eventHistoryOverlapHours,
+        eventHistoryMaxAttempts,
+        eventHistoryRetryBackoffMillis,
+        eventHistoryMaxBytes,
+        eventHistoryMaxEvents);
+    eventHistorySource = normalizeEventHistorySource(eventHistoryEnabled, eventHistorySource);
+    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
+    eventHistoryCron = normalizeCron(eventHistoryCron);
+  }
+
+  /**
+   * 平台取值归一（CRA_SERVER_PLATFORM：github|gitlab，小写）。
+   *
+   * @param platform 原始平台
+   * @return 归一化平台
+   */
+  private static String normalizePlatform(String platform) {
+    String normalized = platform == null ? "" : platform.strip();
+    if (!"github".equals(normalized) && !"gitlab".equals(normalized)) {
+      throw new CraConfigException(
+          "CRA_SERVER_PLATFORM 非法: " + normalized + "（github|gitlab，小写；默认 github）");
+    }
+    return normalized;
+  }
+
+  /**
+   * GitLab 形态的令牌与 base-url 归一（非 gitlab 平台原样返回）。
+   *
+   * @param platform 平台
+   * @param gitlabToken GitLab 令牌
+   * @param gitlabBaseUrl GitLab API base
+   * @return 归一化 base-url
+   */
+  private static String normalizeGitlabBase(
+      String platform, String gitlabToken, String gitlabBaseUrl) {
+    if (!"gitlab".equals(platform)) {
+      return gitlabBaseUrl;
+    }
+    requireText(gitlabToken, "CRA_GITLAB_TOKEN");
+    return normalizeGitLabApiBase(gitlabBaseUrl);
+  }
+
+  /**
+   * 服务常驻资源限值（队列/工作线程/历史窗口/停机排空）。
+   *
+   * @param queueCapacity 队列容量
+   * @param workerCount 工作线程数
+   * @param crossCheckerHistoryWeeks CrossChecker 历史周数
+   * @param drainTimeoutSeconds 停机排空秒数
+   */
+  private static void validateServerLimits(
+      int queueCapacity, int workerCount, int crossCheckerHistoryWeeks, int drainTimeoutSeconds) {
     if (queueCapacity <= 0 || queueCapacity > 100_000) {
       throw new CraConfigException("CRA_SERVER_QUEUE_CAPACITY 必须在 1..100000: " + queueCapacity);
     }
@@ -166,11 +224,29 @@ public record ServerConfig(
       throw new CraConfigException(
           "CRA_SERVER_DRAIN_TIMEOUT_SECONDS 必须在 1..600: " + drainTimeoutSeconds);
     }
+  }
+
+  /**
+   * 评审深度归一（quick|standard|deep）。
+   *
+   * @param reviewDepth 原始深度
+   * @return 归一化深度
+   */
+  private static String normalizeDepth(String reviewDepth) {
     String depth = reviewDepth == null ? "" : reviewDepth.strip().toLowerCase(Locale.ROOT);
     if (!"quick".equals(depth) && !"standard".equals(depth) && !"deep".equals(depth)) {
       throw new CraConfigException("CRA_SERVER_REVIEW_DEPTH 非法: " + reviewDepth);
     }
-    reviewDepth = depth;
+    return depth;
+  }
+
+  /**
+   * token 预算配置限值。
+   *
+   * @param runTotalTokens 单 run 总预算
+   * @param llmMaxConcurrency LLM 并发上限
+   */
+  private static void validateTokenLimits(long runTotalTokens, int llmMaxConcurrency) {
     if (runTotalTokens <= 0) {
       throw new CraConfigException("CRA_SERVER_RUN_TOTAL_TOKENS 必须为正: " + runTotalTokens);
     }
@@ -181,6 +257,25 @@ public record ServerConfig(
               + ": "
               + llmMaxConcurrency);
     }
+  }
+
+  /**
+   * 评审预算配置限值（大 diff 降档、Nit 预算、降档阈值、秒检比例）。
+   *
+   * @param reviewLargeDiffLines 大 diff 阈值
+   * @param reviewHardCapLines 硬上限
+   * @param reviewNitBudget Nit 预算
+   * @param reviewDegradeAtFirst 一级降档阈值
+   * @param reviewDegradeAtSecond 二级降档阈值
+   * @param reviewSpotCheckPercent 秒检比例
+   */
+  private static void validateReviewBudget(
+      int reviewLargeDiffLines,
+      int reviewHardCapLines,
+      int reviewNitBudget,
+      double reviewDegradeAtFirst,
+      double reviewDegradeAtSecond,
+      int reviewSpotCheckPercent) {
     if (reviewLargeDiffLines <= 0 || reviewHardCapLines <= reviewLargeDiffLines) {
       throw new CraConfigException(
           "CRA_REVIEW_LARGE_DIFF_LINES / CRA_REVIEW_HARD_CAP_LINES 非法（必须为正且 hard cap > large）: "
@@ -204,52 +299,100 @@ public record ServerConfig(
       throw new CraConfigException(
           "CRA_REVIEW_SPOT_CHECK_PERCENT 必须在 [0,100]: " + reviewSpotCheckPercent);
     }
-    reviewPublishUnverified =
-        reviewPublishUnverified == null ? "" : reviewPublishUnverified.strip();
-    if (!"never".equals(reviewPublishUnverified) && !"labeled".equals(reviewPublishUnverified)) {
+  }
+
+  /**
+   * 未验证发现发布口径归一（never|labeled）。
+   *
+   * @param reviewPublishUnverified 原始口径
+   * @return 归一化口径
+   */
+  private static String normalizePublishUnverified(String reviewPublishUnverified) {
+    String normalized = reviewPublishUnverified == null ? "" : reviewPublishUnverified.strip();
+    if (!"never".equals(normalized) && !"labeled".equals(normalized)) {
       throw new CraConfigException(
-          "CRA_REVIEW_PUBLISH_UNVERIFIED 非法: " + reviewPublishUnverified + "（never|labeled）");
+          "CRA_REVIEW_PUBLISH_UNVERIFIED 非法: " + normalized + "（never|labeled）");
     }
-    if (eventHistoryLookbackDays <= 0 || eventHistoryLookbackDays > 365) {
+    return normalized;
+  }
+
+  /**
+   * 事件史采集配置限值（窗口/重试/体积/条数）。
+   *
+   * @param lookbackDays 回看天数
+   * @param overlapHours 重叠小时
+   * @param maxAttempts 最大尝试次数
+   * @param retryBackoffMillis 重试退避毫秒
+   * @param maxBytes 单次最大字节
+   * @param maxEvents 单次最大事件数
+   */
+  private static void validateEventHistoryLimits(
+      int lookbackDays,
+      int overlapHours,
+      int maxAttempts,
+      long retryBackoffMillis,
+      long maxBytes,
+      int maxEvents) {
+    if (lookbackDays <= 0 || lookbackDays > 365) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS 必须在 1..365: " + eventHistoryLookbackDays);
+          "CRA_SERVER_EVENT_HISTORY_LOOKBACK_DAYS 必须在 1..365: " + lookbackDays);
     }
-    if (eventHistoryOverlapHours < 0 || eventHistoryOverlapHours > 720) {
+    if (overlapHours < 0 || overlapHours > 720) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_OVERLAP_HOURS 必须在 0..720: " + eventHistoryOverlapHours);
+          "CRA_SERVER_EVENT_HISTORY_OVERLAP_HOURS 必须在 0..720: " + overlapHours);
     }
-    if (eventHistoryMaxAttempts <= 0 || eventHistoryMaxAttempts > 10) {
+    if (maxAttempts <= 0 || maxAttempts > 10) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_MAX_ATTEMPTS 必须在 1..10: " + eventHistoryMaxAttempts);
+          "CRA_SERVER_EVENT_HISTORY_MAX_ATTEMPTS 必须在 1..10: " + maxAttempts);
     }
-    if (eventHistoryRetryBackoffMillis < 0 || eventHistoryRetryBackoffMillis > 60_000) {
+    if (retryBackoffMillis < 0 || retryBackoffMillis > 60_000) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS 必须在 0..60000: "
-              + eventHistoryRetryBackoffMillis);
+          "CRA_SERVER_EVENT_HISTORY_RETRY_BACKOFF_MS 必须在 0..60000: " + retryBackoffMillis);
     }
-    if (eventHistoryMaxBytes <= 0 || eventHistoryMaxBytes > 1_073_741_824L) {
+    if (maxBytes <= 0 || maxBytes > 1_073_741_824L) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_MAX_BYTES 必须在 1..1073741824: " + eventHistoryMaxBytes);
+          "CRA_SERVER_EVENT_HISTORY_MAX_BYTES 必须在 1..1073741824: " + maxBytes);
     }
-    if (eventHistoryMaxEvents <= 0 || eventHistoryMaxEvents > 100_000) {
+    if (maxEvents <= 0 || maxEvents > 100_000) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS 必须在 1..100000: " + eventHistoryMaxEvents);
+          "CRA_SERVER_EVENT_HISTORY_MAX_EVENTS 必须在 1..100000: " + maxEvents);
     }
-    eventHistorySource = eventHistorySource == null ? "" : eventHistorySource.strip();
-    if (eventHistoryEnabled && eventHistorySource.isBlank()) {
+  }
+
+  /**
+   * 事件史来源归一（开启采集时必须提供）。
+   *
+   * @param eventHistoryEnabled 是否开启
+   * @param eventHistorySource 原始来源
+   * @return 归一化来源
+   */
+  private static String normalizeEventHistorySource(
+      boolean eventHistoryEnabled, String eventHistorySource) {
+    String normalized = eventHistorySource == null ? "" : eventHistorySource.strip();
+    if (eventHistoryEnabled && normalized.isBlank()) {
       throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_SOURCE 未设置（事件史采集开启时必须提供 JSONL 来源）");
     }
+    return normalized;
+  }
+
+  /**
+   * 事件史 cron 归一与语法校验。
+   *
+   * @param eventHistoryCron 原始 cron
+   * @return 归一化 cron
+   */
+  private static String normalizeCron(String eventHistoryCron) {
     if (eventHistoryCron == null || eventHistoryCron.isBlank()) {
       throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_CRON 不能为空");
     }
-    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
-    eventHistoryCron = eventHistoryCron.strip();
+    String normalized = eventHistoryCron.strip();
     try {
-      CronExpression.parse(eventHistoryCron);
+      CronExpression.parse(normalized);
     } catch (IllegalArgumentException e) {
       throw new CraConfigException(
-          "CRA_SERVER_EVENT_HISTORY_CRON 非法: " + eventHistoryCron + "（" + e.getMessage() + "）");
+          "CRA_SERVER_EVENT_HISTORY_CRON 非法: " + normalized + "（" + e.getMessage() + "）");
     }
+    return normalized;
   }
 
   /**

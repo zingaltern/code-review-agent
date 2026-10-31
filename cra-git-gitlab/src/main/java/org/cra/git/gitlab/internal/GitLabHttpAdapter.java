@@ -90,37 +90,62 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     }
     List<DiffFile> files = new ArrayList<>();
     for (JsonNode d : root.path("diffs")) {
-      String path = GitLabJsonSupport.textOrNull(d, "new_path");
-      String oldPath = GitLabJsonSupport.textOrNull(d, "old_path");
-      String effective = path != null ? path : oldPath;
-      if (effective == null) {
-        LOG.warn("gitlab compare returned a diff without new_path/old_path; skipped");
-        continue;
+      DiffFile file = toDiffFile(d);
+      if (file != null) {
+        files.add(file);
       }
-      boolean renamed = d.path("renamed_file").asBoolean(false);
-      String patch =
-          d.path("too_large").asBoolean(false) ? null : GitLabJsonSupport.textOrNull(d, "diff");
-      files.add(
-          new DiffFile(
-              effective,
-              renamed ? oldPath : null,
-              statusOf(d),
-              patch,
-              patch == null ? List.of() : DiffHunk.parseAll(patch)));
     }
     List<CommitSummary> commits = new ArrayList<>();
     for (JsonNode c : root.path("commits")) {
-      String sha = GitLabJsonSupport.textOrNull(c, "id");
-      if (sha == null) {
-        continue;
+      CommitSummary commit = toCommitSummary(c);
+      if (commit != null) {
+        commits.add(commit);
       }
-      String message = GitLabJsonSupport.textOrNull(c, "message");
-      if (message == null) {
-        message = GitLabJsonSupport.textOrNull(c, "title");
-      }
-      commits.add(new CommitSummary(sha, message == null ? "" : message));
     }
     return new DiffResult(baseSha, headSha, files, commits);
+  }
+
+  /**
+   * 单条 compare diff → DiffFile（缺 new_path/old_path 时告警并返回 null）。
+   *
+   * @param d compare diff 节点
+   * @return DiffFile；无法定位路径时 null
+   */
+  private static DiffFile toDiffFile(JsonNode d) {
+    String path = GitLabJsonSupport.textOrNull(d, "new_path");
+    String oldPath = GitLabJsonSupport.textOrNull(d, "old_path");
+    String effective = path != null ? path : oldPath;
+    if (effective == null) {
+      LOG.warn("gitlab compare returned a diff without new_path/old_path; skipped");
+      return null;
+    }
+    boolean renamed = d.path("renamed_file").asBoolean(false);
+    String patch =
+        d.path("too_large").asBoolean(false) ? null : GitLabJsonSupport.textOrNull(d, "diff");
+    return new DiffFile(
+        effective,
+        renamed ? oldPath : null,
+        statusOf(d),
+        patch,
+        patch == null ? List.of() : DiffHunk.parseAll(patch));
+  }
+
+  /**
+   * 单条 compare commit → CommitSummary（缺 id 时跳过；message 缺省回退 title）。
+   *
+   * @param c commit 节点
+   * @return CommitSummary；缺 id 时 null
+   */
+  private static CommitSummary toCommitSummary(JsonNode c) {
+    String sha = GitLabJsonSupport.textOrNull(c, "id");
+    if (sha == null) {
+      return null;
+    }
+    String message = GitLabJsonSupport.textOrNull(c, "message");
+    if (message == null) {
+      message = GitLabJsonSupport.textOrNull(c, "title");
+    }
+    return new CommitSummary(sha, message == null ? "" : message);
   }
 
   private static String statusOf(JsonNode diff) {
@@ -179,33 +204,46 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     if (!cmd.inlineComments().isEmpty()) {
       DiffRefs refs = resolveDiffRefs(cmd);
       for (InlineComment c : cmd.inlineComments()) {
-        if (refs == null) {
-          items.add(fallback(c, "GitLab MR diff_refs unavailable; cannot anchor inline comment"));
-          continue;
-        }
-        try {
-          long noteId = createDiscussion(cmd, refs, c);
-          items.add(
-              new ReviewItemResult(
-                  c.findingId(),
-                  c.path(),
-                  c.line(),
-                  PublishStatus.PUBLISHED,
-                  AnchorStatus.INLINE,
-                  noteId > 0 ? noteId : null,
-                  ""));
-        } catch (CraIntegrationException e) {
-          if (!GitLabHttpTransport.isUnprocessable(e)) {
-            throw e; // 非锚定错误不降级，交由 run 级失败处置（02§4.2）
-          }
-          items.add(fallback(c, e.getMessage()));
-        }
+        publishInlineComment(cmd, refs, c, items);
       }
     }
     // Summary 最后发：其 DONE 标记是"完整发布"证据；失败 = 无标记 = 重跑走指纹级补发（02§4.1）
     Optional<Long> summaryId = postSummary(cmd);
     // GitLab 无 review 聚合对象：reviewId 显式缺省（ADR-0011 决策 5）
     return new PrReviewResult(cmd.prNumber(), Optional.empty(), summaryId, items);
+  }
+
+  /**
+   * 发布单条 inline comment：diff_refs 不可得或锚定失败（422）转 Summary 回退，其它故障上抛。
+   *
+   * @param cmd 发布命令
+   * @param refs diff_refs（null = 不可得）
+   * @param c inline 评论
+   * @param items 结果输出
+   */
+  private void publishInlineComment(
+      PostReviewCommand cmd, DiffRefs refs, InlineComment c, List<ReviewItemResult> items) {
+    if (refs == null) {
+      items.add(fallback(c, "GitLab MR diff_refs unavailable; cannot anchor inline comment"));
+      return;
+    }
+    try {
+      long noteId = createDiscussion(cmd, refs, c);
+      items.add(
+          new ReviewItemResult(
+              c.findingId(),
+              c.path(),
+              c.line(),
+              PublishStatus.PUBLISHED,
+              AnchorStatus.INLINE,
+              noteId > 0 ? noteId : null,
+              ""));
+    } catch (CraIntegrationException e) {
+      if (!GitLabHttpTransport.isUnprocessable(e)) {
+        throw e; // 非锚定错误不降级，交由 run 级失败处置（02§4.2）
+      }
+      items.add(fallback(c, e.getMessage()));
+    }
   }
 
   private static ReviewItemResult fallback(InlineComment c, String reason) {

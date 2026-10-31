@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.LedgerComment;
 import org.cra.common.git.LedgerFindingMarker;
@@ -234,6 +235,40 @@ final class WeeklyReportBuilder {
 
   private static WeeklyReport.ZeroPublish zeroPublish(
       List<WindowData.PrWindow> prs, List<WeeklyReport> previous) {
+    ZeroCounts counts = countZeroPublish(prs);
+    Double ratio = counts.runs() == 0 ? null : (double) counts.zero() / counts.runs();
+    List<WeeklyReport> history =
+        previous.stream()
+            .sorted(Comparator.comparing(r -> r.windowEnd() == null ? "" : r.windowEnd()))
+            .toList();
+    List<Double> series =
+        history.stream()
+            .filter(r -> r.zeroPublish() != null && r.zeroPublish().ratio() != null)
+            .map(r -> r.zeroPublish().ratio())
+            .collect(Collectors.toCollection(ArrayList::new));
+    Double previousRatio = series.isEmpty() ? null : series.get(series.size() - 1);
+    if (ratio != null) {
+      series.add(ratio);
+    }
+    Trend trend = zeroPublishTrend(series, ratio);
+    return new WeeklyReport.ZeroPublish(
+        counts.runs(),
+        counts.zero(),
+        ratio,
+        previousRatio,
+        series,
+        trend.consecutiveRise(),
+        trend.trend(),
+        trend.note());
+  }
+
+  /**
+   * 统计窗口内 run 完成标记数与零发布标记数。
+   *
+   * @param prs 窗口 PR
+   * @return 计数
+   */
+  private static ZeroCounts countZeroPublish(List<WindowData.PrWindow> prs) {
     int runs = 0;
     int zero = 0;
     for (WindowData.PrWindow pr : prs) {
@@ -244,51 +279,54 @@ final class WeeklyReportBuilder {
         }
       }
     }
-    Double ratio = runs == 0 ? null : (double) zero / runs;
-    List<WeeklyReport> history =
-        previous.stream()
-            .sorted(Comparator.comparing(r -> r.windowEnd() == null ? "" : r.windowEnd()))
-            .toList();
-    List<Double> series = new ArrayList<>();
-    for (WeeklyReport report : history) {
-      if (report.zeroPublish() != null && report.zeroPublish().ratio() != null) {
-        series.add(report.zeroPublish().ratio());
-      }
-    }
-    Double previousRatio = series.isEmpty() ? null : series.get(series.size() - 1);
-    if (ratio != null) {
-      series.add(ratio);
-    }
-    String trend;
-    boolean consecutiveRise = false;
-    String note;
-    if (ratio == null) {
-      trend = "insufficient";
-      note = "窗口内无 run 完成标记，零发布率不可判定";
-    } else if (series.size() >= 3) {
-      int n = series.size();
-      consecutiveRise =
-          series.get(n - 3) < series.get(n - 2) && series.get(n - 2) < series.get(n - 1);
-      if (consecutiveRise) {
-        trend = "rising";
-        note = "连续两周上行 → 触发复盘（06§1.1 趋势护栏）";
-      } else if (series.get(n - 1) > series.get(n - 2)) {
-        trend = "rising";
-        note = "较上期上行，但未构成连续两周（需 ≥3 期数据）";
-      } else if (series.get(n - 1) < series.get(n - 2)) {
-        trend = "falling";
-        note = "较上期下行";
-      } else {
-        trend = "flat";
-        note = "与上期持平";
-      }
-    } else {
-      trend = "insufficient";
-      note = "历史报告不足（需本期 + 至少两期历史才判定连续两周趋势）";
-    }
-    return new WeeklyReport.ZeroPublish(
-        runs, zero, ratio, previousRatio, series, consecutiveRise, trend, note);
+    return new ZeroCounts(runs, zero);
   }
+
+  /**
+   * 零发布率趋势判定（06§1.1 趋势护栏：连续两周上行触发复盘）。
+   *
+   * @param series 历史比率序列（末尾已含本期）
+   * @param ratio 本期比率（null = 不可判定）
+   * @return 趋势
+   */
+  private static Trend zeroPublishTrend(List<Double> series, Double ratio) {
+    if (ratio == null) {
+      return new Trend(false, "insufficient", "窗口内无 run 完成标记，零发布率不可判定");
+    }
+    if (series.size() < 3) {
+      return new Trend(false, "insufficient", "历史报告不足（需本期 + 至少两期历史才判定连续两周趋势）");
+    }
+    int n = series.size();
+    boolean consecutiveRise =
+        series.get(n - 3) < series.get(n - 2) && series.get(n - 2) < series.get(n - 1);
+    if (consecutiveRise) {
+      return new Trend(true, "rising", "连续两周上行 → 触发复盘（06§1.1 趋势护栏）");
+    }
+    if (series.get(n - 1) > series.get(n - 2)) {
+      return new Trend(false, "rising", "较上期上行，但未构成连续两周（需 ≥3 期数据）");
+    }
+    if (series.get(n - 1) < series.get(n - 2)) {
+      return new Trend(false, "falling", "较上期下行");
+    }
+    return new Trend(false, "flat", "与上期持平");
+  }
+
+  /**
+   * 零发布计数。
+   *
+   * @param runs run 完成标记数
+   * @param zero 零发布标记数
+   */
+  private record ZeroCounts(int runs, int zero) {}
+
+  /**
+   * 零发布趋势。
+   *
+   * @param consecutiveRise 是否连续两周上行
+   * @param trend 趋势标签
+   * @param note 说明
+   */
+  private record Trend(boolean consecutiveRise, String trend, String note) {}
 
   // ---------- run 满意度 ----------
 
@@ -297,10 +335,10 @@ final class WeeklyReportBuilder {
     int down = 0;
     Set<Long> reactedComments = new LinkedHashSet<>();
     for (WindowData.PrWindow pr : prs) {
-      Set<Long> summaryIds = new LinkedHashSet<>();
-      for (LedgerRunMarker marker : pr.ledger().runMarkers()) {
-        summaryIds.add(marker.commentId());
-      }
+      Set<Long> summaryIds =
+          pr.ledger().runMarkers().stream()
+              .map(LedgerRunMarker::commentId)
+              .collect(Collectors.toCollection(LinkedHashSet::new));
       for (DispositionSignal signal : pr.signals()) {
         if (!DispositionSignal.KIND_REACTION.equals(signal.kind())
             || !summaryIds.contains(signal.commentId())) {
@@ -322,63 +360,9 @@ final class WeeklyReportBuilder {
 
   private static WeeklyReport.DualVerifierGate gate(
       WeeklyReport.Refusal refusal, WeeklyReport.Disposition disposition) {
-    boolean refusalSampleOk = refusal.samplesSufficient();
-    boolean refusalMet =
-        refusalSampleOk
-            && refusal.overturnRate() != null
-            && refusal.overturnRate() >= REFUSAL_OVERTURN_TRIGGER;
-    String refusalVerdict;
-    if (!refusalSampleOk) {
-      refusalVerdict = "拒真池 " + refusal.pool() + " < " + REFUSAL_SAMPLE_GATE + "，样本不足，不下结论";
-    } else if (refusal.overturnRate() == null) {
-      refusalVerdict = "拒真池无可用判定，不下结论";
-    } else {
-      refusalVerdict =
-          "推翻率 "
-              + percent(refusal.overturnRate())
-              + (refusalMet ? " ≥ 10% → 条件满足" : " < 10% → 条件不满足");
-    }
-    WeeklyReport.GateCondition refusalCondition =
-        new WeeklyReport.GateCondition(
-            refusalSampleOk,
-            refusal.pool(),
-            REFUSAL_SAMPLE_GATE,
-            refusal.overturnRate(),
-            REFUSAL_OVERTURN_TRIGGER,
-            "gte",
-            refusalMet,
-            refusalVerdict);
-
-    boolean dispositionSampleOk = disposition.samplesSufficient();
-    Double precision = disposition.precision() == null ? null : disposition.precision().rate();
-    boolean dispositionMet =
-        dispositionSampleOk && precision != null && precision < PRECISION_TARGET;
-    String dispositionVerdict;
-    if (!dispositionSampleOk) {
-      dispositionVerdict =
-          "处置主口径样本 "
-              + disposition.samplesIncludingIgnored()
-              + " < "
-              + DISPOSITION_SAMPLE_GATE
-              + "，样本不足，不下结论";
-    } else if (precision == null) {
-      dispositionVerdict = "处置样本无可用精确率，不下结论";
-    } else {
-      dispositionVerdict =
-          "发布精确率 " + percent(precision) + (dispositionMet ? " < 80% → 条件满足" : " ≥ 80% → 条件不满足");
-    }
-    WeeklyReport.GateCondition dispositionCondition =
-        new WeeklyReport.GateCondition(
-            dispositionSampleOk,
-            disposition.samplesIncludingIgnored(),
-            DISPOSITION_SAMPLE_GATE,
-            precision,
-            PRECISION_TARGET,
-            "lt",
-            dispositionMet,
-            dispositionVerdict);
-
-    boolean triggered = refusalMet || dispositionMet;
+    RefusalGate refusalGate = refusalGate(refusal);
+    DispositionGate dispositionGate = dispositionGate(disposition);
+    boolean triggered = refusalGate.met() || dispositionGate.met();
     List<String> reasons = new ArrayList<>();
     if (triggered) {
       reasons.add("满足开启条件：需先实施 require-distinct-model-family 硬校验 + 语义去重（03§4.3/05§5）");
@@ -390,10 +374,96 @@ final class WeeklyReportBuilder {
     return new WeeklyReport.DualVerifierGate(
         triggered,
         triggered ? "满足开启条件（需实施 dual-vote 硬校验 + 语义去重）" : "不开启（继续单验证者 + 抽查）",
-        refusalCondition,
-        dispositionCondition,
+        refusalGate.condition(),
+        dispositionGate.condition(),
         reasons);
   }
+
+  /**
+   * 拒真池开启条件（样本充足且推翻率 ≥ 阈值）。
+   *
+   * @param refusal 拒真池统计
+   * @return 条件与判定
+   */
+  private static RefusalGate refusalGate(WeeklyReport.Refusal refusal) {
+    boolean sampleOk = refusal.samplesSufficient();
+    boolean met =
+        sampleOk
+            && refusal.overturnRate() != null
+            && refusal.overturnRate() >= REFUSAL_OVERTURN_TRIGGER;
+    String verdict;
+    if (!sampleOk) {
+      verdict = "拒真池 " + refusal.pool() + " < " + REFUSAL_SAMPLE_GATE + "，样本不足，不下结论";
+    } else if (refusal.overturnRate() == null) {
+      verdict = "拒真池无可用判定，不下结论";
+    } else {
+      verdict =
+          "推翻率 " + percent(refusal.overturnRate()) + (met ? " ≥ 10% → 条件满足" : " < 10% → 条件不满足");
+    }
+    return new RefusalGate(
+        new WeeklyReport.GateCondition(
+            sampleOk,
+            refusal.pool(),
+            REFUSAL_SAMPLE_GATE,
+            refusal.overturnRate(),
+            REFUSAL_OVERTURN_TRIGGER,
+            "gte",
+            met,
+            verdict),
+        met);
+  }
+
+  /**
+   * 处置精确率开启条件（样本充足且精确率 &lt; 阈值）。
+   *
+   * @param disposition 处置统计
+   * @return 条件与判定
+   */
+  private static DispositionGate dispositionGate(WeeklyReport.Disposition disposition) {
+    boolean sampleOk = disposition.samplesSufficient();
+    Double precision = disposition.precision() == null ? null : disposition.precision().rate();
+    boolean met = sampleOk && precision != null && precision < PRECISION_TARGET;
+    String verdict;
+    if (!sampleOk) {
+      verdict =
+          "处置主口径样本 "
+              + disposition.samplesIncludingIgnored()
+              + " < "
+              + DISPOSITION_SAMPLE_GATE
+              + "，样本不足，不下结论";
+    } else if (precision == null) {
+      verdict = "处置样本无可用精确率，不下结论";
+    } else {
+      verdict = "发布精确率 " + percent(precision) + (met ? " < 80% → 条件满足" : " ≥ 80% → 条件不满足");
+    }
+    return new DispositionGate(
+        new WeeklyReport.GateCondition(
+            sampleOk,
+            disposition.samplesIncludingIgnored(),
+            DISPOSITION_SAMPLE_GATE,
+            precision,
+            PRECISION_TARGET,
+            "lt",
+            met,
+            verdict),
+        met);
+  }
+
+  /**
+   * 拒真池门禁条件。
+   *
+   * @param condition 门禁条件
+   * @param met 是否满足开启条件
+   */
+  private record RefusalGate(WeeklyReport.GateCondition condition, boolean met) {}
+
+  /**
+   * 处置精确率门禁条件。
+   *
+   * @param condition 门禁条件
+   * @param met 是否满足开启条件
+   */
+  private record DispositionGate(WeeklyReport.GateCondition condition, boolean met) {}
 
   // ---------- 通用 ----------
 

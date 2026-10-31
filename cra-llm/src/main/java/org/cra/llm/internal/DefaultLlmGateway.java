@@ -81,24 +81,7 @@ public final class DefaultLlmGateway implements LlmGateway {
         LlmResponse response =
             retryLoop(config.models().get(tier), request, start, tier, attemptFailures);
         if (response.status() == LlmStatus.OK) {
-          String degradation = null;
-          if (tier != requested) {
-            // 语义区分按真实尝试史：请求档位尝试过且失败后换端点 = model-fallback（02§4.2 降级链）；
-            // 从未尝试（未配置回落）= tier-unconfigured（回落而非降级，指标可区分）
-            String kind = requestedAttempted ? "model-fallback:" : "tier-unconfigured:";
-            degradation =
-                kind
-                    + requested.name().toLowerCase(Locale.ROOT)
-                    + "→"
-                    + tier.name().toLowerCase(Locale.ROOT);
-          }
-          return LlmResponse.ok(
-              response.content(),
-              response.tokensIn() + consumed,
-              response.tokensOut(),
-              response.latencyMs(),
-              response.model(),
-              degradation);
+          return successResult(response, requested, tier, requestedAttempted, consumed);
         }
         consumed += response.tokensIn();
       }
@@ -111,6 +94,52 @@ public final class DefaultLlmGateway implements LlmGateway {
         "llm unavailable on all endpoints: " + String.join("; ", attemptFailures),
         consumed,
         System.currentTimeMillis() - start);
+  }
+
+  /**
+   * 成功出口：拼装累计 token 与降级注记。
+   *
+   * @param response 端点响应
+   * @param requested 请求档位
+   * @param tier 实际成功档位
+   * @param requestedAttempted 请求档位是否真的被尝试过
+   * @param consumed 降级链上先前端点已消耗的输入 token
+   * @return 成功响应
+   */
+  private static LlmResponse successResult(
+      LlmResponse response,
+      ModelTier requested,
+      ModelTier tier,
+      boolean requestedAttempted,
+      long consumed) {
+    return LlmResponse.ok(
+        response.content(),
+        response.tokensIn() + consumed,
+        response.tokensOut(),
+        response.latencyMs(),
+        response.model(),
+        degradationNote(requested, tier, requestedAttempted));
+  }
+
+  /**
+   * 降级/回落注记（02§4.2）：语义区分按真实尝试史——请求档位尝试过且失败后换端点 = model-fallback； 从未尝试（未配置回落）=
+   * tier-unconfigured（回落而非降级，指标可区分）。
+   *
+   * @param requested 请求档位
+   * @param tier 实际成功档位
+   * @param requestedAttempted 请求档位是否真的被尝试过
+   * @return 注记（null = 未发生档位切换）
+   */
+  private static String degradationNote(
+      ModelTier requested, ModelTier tier, boolean requestedAttempted) {
+    if (tier == requested) {
+      return null;
+    }
+    String kind = requestedAttempted ? "model-fallback:" : "tier-unconfigured:";
+    return kind
+        + requested.name().toLowerCase(Locale.ROOT)
+        + "→"
+        + tier.name().toLowerCase(Locale.ROOT);
   }
 
   /**
@@ -166,67 +195,119 @@ public final class DefaultLlmGateway implements LlmGateway {
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
       }
-      LlmTransport.TransportResponse response;
+      PostOutcome outcome;
       try {
-        boolean slot =
-            rpmLimiter.awaitSlot(
-                new RpmLimiter.EndpointIdentity(base, endpoint.model()),
-                config.rpmOf(tier),
-                config.queueTimeoutMs());
-        if (!slot) {
-          // RPM 预算内无槽：请求未发出，不占配额（与并发排队超时同语义）
-          String failure = tierName(tier) + ": rpm queue timeout";
-          attemptFailures.add(failure);
-          return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
-        }
-        response =
-            transport.post(
-                url,
-                endpoint.apiKey(),
-                body,
-                Duration.ofMillis(config.requestTimeoutMs()),
-                config.extraHeaders());
-      } catch (IllegalArgumentException e) {
-        // 非法 URL/请求头（组装期本应拒绝）：边界内收敛为不可得，不抛穿编排层（09§4）
-        String failure = tierName(tier) + ": llm request invalid: " + e.getMessage();
-        attemptFailures.add(failure);
-        return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
-      } catch (IOException e) {
-        // 网络/超时：与 429/5xx 同类可重试故障；耗尽后换降级链下一端点（09§4 边界转换）。
-        // 本次尝试计 0（连接失败与服务端已处理不可区分），但先前 5xx 尝试的已确认消耗保留
-        if (attempt == config.maxRetries()) {
-          String failure =
-              tierName(tier) + ": llm transport failed after retries: " + e.getMessage();
-          attemptFailures.add(failure);
-          return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
-        }
-        continue;
+        outcome = postOnce(base, url, endpoint, body, tier);
       } finally {
         concurrency.release();
       }
+      if (outcome.failure() != null) {
+        String failure = outcome.failure();
+        if (outcome.retryable() && attempt < config.maxRetries()) {
+          continue;
+        }
+        if (outcome.retryable()) {
+          failure = tierName(tier) + ": llm transport failed after retries: " + failure;
+        }
+        attemptFailures.add(failure);
+        return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
+      }
+      LlmTransport.TransportResponse response = outcome.response();
       if (response.statusCode() == 200) {
         return parseOk(response.body(), estimatedInput, start, consumed, attemptFailures);
       }
-      if (isRetryable(response.statusCode())) {
-        if (response.statusCode() >= 500) {
-          // 5xx：服务端已接收并处理请求后失败，输入 token 确定消耗（429 被拒未计费，不计）
-          consumed += estimatedInput;
-        }
-        continue; // 429/5xx：指数退避后重试（02§4.5）
+      if (!isRetryable(response.statusCode())) {
+        String failure =
+            tierName(tier)
+                + ": llm http "
+                + response.statusCode()
+                + ": "
+                + Texts.truncate(response.body(), 200);
+        attemptFailures.add(failure);
+        // 4xx 本次请求被拒未计费，但先前 5xx 尝试的已确认消耗保留（不因换出口清零）
+        return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
       }
-      String failure =
-          tierName(tier)
-              + ": llm http "
-              + response.statusCode()
-              + ": "
-              + Texts.truncate(response.body(), 200);
-      attemptFailures.add(failure);
-      // 4xx 本次请求被拒未计费，但先前 5xx 尝试的已确认消耗保留（不因换出口清零）
-      return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
+      if (response.statusCode() >= 500) {
+        // 5xx：服务端已接收并处理请求后失败，输入 token 确定消耗（429 被拒未计费，不计）
+        consumed += estimatedInput;
+      }
     }
     String failure = tierName(tier) + ": llm retries exhausted (" + config.maxRetries() + ")";
     attemptFailures.add(failure);
     return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
+  }
+
+  /**
+   * 单次 HTTP 尝试（RPM 取槽 + 请求），失败以结果对象返回（09§4 边界内收敛，不抛穿编排层）。
+   *
+   * @param base 归一化端点根地址
+   * @param url 完整请求地址
+   * @param endpoint 端点配置
+   * @param body 请求体
+   * @param tier 档位（失败信息前缀）
+   * @return 响应或失败结果
+   * @throws InterruptedException RPM 等待被中断
+   */
+  private PostOutcome postOnce(
+      String base, String url, LlmGatewayConfig.ModelEndpoint endpoint, String body, ModelTier tier)
+      throws InterruptedException {
+    try {
+      boolean slot =
+          rpmLimiter.awaitSlot(
+              new RpmLimiter.EndpointIdentity(base, endpoint.model()),
+              config.rpmOf(tier),
+              config.queueTimeoutMs());
+      if (!slot) {
+        // RPM 预算内无槽：请求未发出，不占配额（与并发排队超时同语义）
+        return PostOutcome.failed(tierName(tier) + ": rpm queue timeout", false);
+      }
+      return PostOutcome.received(
+          transport.post(
+              url,
+              endpoint.apiKey(),
+              body,
+              Duration.ofMillis(config.requestTimeoutMs()),
+              config.extraHeaders()));
+    } catch (IllegalArgumentException e) {
+      // 非法 URL/请求头（组装期本应拒绝）：边界内收敛为不可得，不抛穿编排层（09§4）
+      return PostOutcome.failed(tierName(tier) + ": llm request invalid: " + e.getMessage(), false);
+    } catch (IOException e) {
+      // 网络/超时：与 429/5xx 同类可重试故障；耗尽后由调用方换降级链下一端点（09§4 边界转换）。
+      // 本次尝试计 0（连接失败与服务端已处理不可区分），但先前 5xx 尝试的已确认消耗保留
+      return PostOutcome.failed(e.getMessage(), true);
+    }
+  }
+
+  /**
+   * 单次尝试结果（失败信息 + 是否可重试）。
+   *
+   * @param response HTTP 响应（失败时为 null）
+   * @param failure 失败信息（成功时为 null）
+   * @param retryable 失败是否可重试
+   */
+  private record PostOutcome(
+      LlmTransport.TransportResponse response, String failure, boolean retryable) {
+
+    /**
+     * 成功结果。
+     *
+     * @param response HTTP 响应
+     * @return 结果
+     */
+    static PostOutcome received(LlmTransport.TransportResponse response) {
+      return new PostOutcome(response, null, false);
+    }
+
+    /**
+     * 失败结果。
+     *
+     * @param failure 失败信息
+     * @param retryable 是否可重试
+     * @return 结果
+     */
+    static PostOutcome failed(String failure, boolean retryable) {
+      return new PostOutcome(null, failure, retryable);
+    }
   }
 
   private LlmResponse parseOk(

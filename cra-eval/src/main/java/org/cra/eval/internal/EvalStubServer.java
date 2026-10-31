@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.StreamSupport;
 
 /**
  * 评测用 GitHub REST v3 stub 服务器（JDK 自带 httpserver，无新依赖）：以 fixture 的 diff.patch 与解包快照为数据面离线驱动被测
@@ -200,15 +201,16 @@ public final class EvalStubServer implements AutoCloseable {
       return;
     }
     if (path.matches("/repos/[^/]+/[^/]+/pulls/\\d+/reviews")) {
-      List<CapturedComment> comments = new ArrayList<>();
-      for (JsonNode c : payload.path("comments")) {
-        comments.add(
-            new CapturedComment(
-                c.path("path").asText(),
-                c.path("line").asInt(),
-                c.path("side").asText("RIGHT"),
-                c.path("body").asText()));
-      }
+      List<CapturedComment> comments =
+          StreamSupport.stream(payload.path("comments").spliterator(), false)
+              .map(
+                  c ->
+                      new CapturedComment(
+                          c.path("path").asText(),
+                          c.path("line").asInt(),
+                          c.path("side").asText("RIGHT"),
+                          c.path("body").asText()))
+              .toList();
       reviews.add(
           new CapturedReview(
               payload.path("commit_id").asText(), payload.path("body").asText(), comments));

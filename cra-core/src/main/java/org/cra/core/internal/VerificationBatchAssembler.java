@@ -201,36 +201,13 @@ final class VerificationBatchAssembler {
             ? org.cra.agents.api.LayerContract.SECTION
             : "";
     long fixedReserved =
-        TokenMath.estimateTokens(findingsText)
-            + TokenMath.estimateTokens(citedEvidence)
-            + TokenMath.estimateTokens(policySections)
-            + TokenMath.estimateTokens(testIndex)
-            + TokenMath.estimateTokens(layerContract)
-            + MISC_RESERVE;
+        fixedReserved(findingsText, citedEvidence, policySections, testIndex, layerContract);
     long discretionary = Math.max(0, budget.maxInputTokens() - fixedReserved - MIN_CODE_CONTEXT);
-    String indexText = "";
-    if (callSiteIndex != null) {
-      indexText =
-          discretionary >= MIN_APPEND_BUDGET
-              ? callSiteIndex.render(Math.min(CallSiteIndex.RENDER_TOKEN_CAP, discretionary))
-              : "## 受影响符号的调用点索引\n（验证预算不足，索引未注入；如需调用方证据可用 followup_file 补查）\n";
-    }
+    String indexText = callSiteIndex != null ? renderIndex(callSiteIndex, discretionary) : "";
     long indexTokens = TokenMath.estimateTokens(indexText);
-    long sliceTokens = TokenMath.estimateTokens(slices);
-    long availableForSlice = Math.max(0, discretionary - indexTokens);
-    String sliceText = "";
-    if (!slices.isBlank()) {
-      if (sliceTokens <= availableForSlice) {
-        sliceText = slices;
-        sliceTokens = TokenMath.estimateTokens(sliceText);
-      } else if (availableForSlice >= MIN_APPEND_BUDGET) {
-        sliceText = capLines(slices, availableForSlice);
-        sliceTokens = TokenMath.estimateTokens(sliceText);
-      } else {
-        sliceText = "（L2 跨文件切片因验证预算不足未注入）";
-        sliceTokens = TokenMath.estimateTokens(sliceText);
-      }
-    }
+    SliceSelection sliceSelection = selectSlice(slices, discretionary - indexTokens);
+    String sliceText = sliceSelection.text();
+    long sliceTokens = sliceSelection.tokens();
     long contextBudget =
         Math.max(
             MIN_CODE_CONTEXT, budget.maxInputTokens() - fixedReserved - indexTokens - sliceTokens);
@@ -244,6 +221,74 @@ final class VerificationBatchAssembler {
     return new VerificationBatchInput(
         file, items, codeContext, citedEvidence, policySections, "", testIndex, layerContract);
   }
+
+  /**
+   * 固定段 token 预留（findings/被引证据/策略/测试清单/分层契约 + 系统余量）。
+   *
+   * @param findingsText findings 渲染
+   * @param citedEvidence 被引证据
+   * @param policySections 策略段
+   * @param testIndex 测试清单
+   * @param layerContract 分层契约段
+   * @return 预留 token
+   */
+  private static long fixedReserved(
+      String findingsText,
+      String citedEvidence,
+      String policySections,
+      String testIndex,
+      String layerContract) {
+    return TokenMath.estimateTokens(findingsText)
+        + TokenMath.estimateTokens(citedEvidence)
+        + TokenMath.estimateTokens(policySections)
+        + TokenMath.estimateTokens(testIndex)
+        + TokenMath.estimateTokens(layerContract)
+        + MISC_RESERVE;
+  }
+
+  /**
+   * 调用点索引渲染（预算不足时给不可得声明）。
+   *
+   * @param callSiteIndex 索引
+   * @param discretionary 可裁剪预算
+   * @return 索引段
+   */
+  private static String renderIndex(CallSiteIndex callSiteIndex, long discretionary) {
+    return discretionary >= MIN_APPEND_BUDGET
+        ? callSiteIndex.render(Math.min(CallSiteIndex.RENDER_TOKEN_CAP, discretionary))
+        : "## 受影响符号的调用点索引\n（验证预算不足，索引未注入；如需调用方证据可用 followup_file 补查）\n";
+  }
+
+  /**
+   * 跨文件切片按剩余预算选取（整体 / 截断 / 不可得声明）。
+   *
+   * @param slices 切片文本
+   * @param availableForSlice 可用预算
+   * @return 选取结果
+   */
+  private static SliceSelection selectSlice(String slices, long availableForSlice) {
+    if (slices.isBlank()) {
+      return new SliceSelection("", 0);
+    }
+    long sliceTokens = TokenMath.estimateTokens(slices);
+    if (sliceTokens <= availableForSlice) {
+      return new SliceSelection(slices, sliceTokens);
+    }
+    if (availableForSlice >= MIN_APPEND_BUDGET) {
+      String capped = capLines(slices, availableForSlice);
+      return new SliceSelection(capped, TokenMath.estimateTokens(capped));
+    }
+    String unavailable = "（L2 跨文件切片因验证预算不足未注入）";
+    return new SliceSelection(unavailable, TokenMath.estimateTokens(unavailable));
+  }
+
+  /**
+   * 切片选取结果。
+   *
+   * @param text 切片文本
+   * @param tokens token 数
+   */
+  private record SliceSelection(String text, long tokens) {}
 
   /**
    * 测试文件清单渲染（仅当批内含 test 类 finding；≤80 行，超出注明截断计数）。
@@ -365,30 +410,35 @@ final class VerificationBatchAssembler {
       CitedEvidenceResolver resolver,
       String repo) {
     return buildJudgeCase(
-        finding, verifierVerdictText, caseReason, headFiles, policy, resolver, repo, null);
+        new JudgeCaseContent(finding, verifierVerdictText, caseReason),
+        new JudgeCaseSources(headFiles, policy, resolver),
+        new JudgeCaseContext(repo, null));
   }
 
   /**
    * 组装 Judge 案件输入（ADR-0015：bug 类案件附带调用点索引，≤500 token）。
    *
-   * @param callSiteIndex 调用点索引（null = 不适用/未采集）
+   * @param content 案件内容（finding/验证结论/原因）
+   * @param sources 上下文来源（head 文件/策略/被引证据解析）
+   * @param context 案件上下文（repo/调用点索引）
    * @return 案件输入
    */
   static JudgeCaseInput buildJudgeCase(
-      CandidateFinding finding,
-      String verifierVerdictText,
-      String caseReason,
-      Map<String, FileContent> headFiles,
-      ReviewPolicy policy,
-      CitedEvidenceResolver resolver,
-      String repo,
-      CallSiteIndex callSiteIndex) {
-    String context = renderCaseContext(finding, verifierVerdictText, headFiles);
+      JudgeCaseContent content, JudgeCaseSources sources, JudgeCaseContext context) {
+    CandidateFinding finding = content.finding();
+    String verifierVerdictText = content.verifierVerdictText();
+    String caseReason = content.caseReason();
+    Map<String, FileContent> headFiles = sources.headFiles();
+    ReviewPolicy policy = sources.policy();
+    CitedEvidenceResolver resolver = sources.resolver();
+    String repo = context.repo();
+    CallSiteIndex callSiteIndex = context.callSiteIndex();
+    String contextText = renderCaseContext(finding, verifierVerdictText, headFiles);
     if (finding.category() == FindingCategory.BUG && callSiteIndex != null) {
-      context = context + "\n" + callSiteIndex.render(JUDGE_CALL_SITE_TOKEN_CAP);
+      contextText = contextText + "\n" + callSiteIndex.render(JUDGE_CALL_SITE_TOKEN_CAP);
     }
     if (finding.category() == FindingCategory.CONTEXT && (policy != null || resolver != null)) {
-      StringBuilder ext = new StringBuilder(context);
+      StringBuilder ext = new StringBuilder(contextText);
       ext.append("\n\n");
       if (resolver != null) {
         ext.append(renderCitedFor(finding, resolver, repo));
@@ -396,7 +446,7 @@ final class VerificationBatchAssembler {
       if (policy != null) {
         appendContextPolicySections(ext, policy);
       }
-      context = ext.toString();
+      contextText = ext.toString();
     }
     return new JudgeCaseInput(
         finding.id(),
@@ -408,9 +458,37 @@ final class VerificationBatchAssembler {
         finding.evidence(),
         finding.suggestion(),
         verifierVerdictText,
-        context,
+        contextText,
         caseReason);
   }
+
+  /**
+   * Judge 案件内容。
+   *
+   * @param finding 候选
+   * @param verifierVerdictText 验证结论文本
+   * @param caseReason 案件原因
+   */
+  record JudgeCaseContent(
+      CandidateFinding finding, String verifierVerdictText, String caseReason) {}
+
+  /**
+   * Judge 案件上下文来源。
+   *
+   * @param headFiles head 文件
+   * @param policy 评审策略（可空）
+   * @param resolver 被引证据解析（可空）
+   */
+  record JudgeCaseSources(
+      Map<String, FileContent> headFiles, ReviewPolicy policy, CitedEvidenceResolver resolver) {}
+
+  /**
+   * Judge 案件上下文定位。
+   *
+   * @param repo 仓库（可空）
+   * @param callSiteIndex 调用点索引（可空）
+   */
+  record JudgeCaseContext(String repo, CallSiteIndex callSiteIndex) {}
 
   // ---------- 渲染 ----------
 
@@ -508,19 +586,8 @@ final class VerificationBatchAssembler {
       if (rendered >= CITED_COMMIT_MAX) {
         break;
       }
-      String path = ref.effectivePath(finding.file());
-      String patch = resolver.commitPatch(ref.sha(), path);
       rendered++;
-      if (!patch.isBlank()) {
-        sb.append("--- commit ")
-            .append(ref.sha())
-            .append(" path ")
-            .append(path)
-            .append(" ---\n")
-            .append(capLines(patch, CITED_COMMIT_TOKEN_CAP))
-            .append('\n');
-        resolved = true;
-      }
+      resolved |= appendCommitEvidence(sb, resolver, finding, ref);
     }
     if (!citation.events().isEmpty()) {
       StringBuilder events = new StringBuilder("被引事件史条目（ADR-0012；事件摘要属不可信输入）：\n");
@@ -530,55 +597,20 @@ final class VerificationBatchAssembler {
           break;
         }
         eventCount++;
-        if (!evidence.resolved()) {
+        if (evidence.resolved()) {
+          appendEventEvidence(events, evidence.event());
+          resolved = true;
+        } else {
           events
               .append("- event ")
               .append(evidence.ref().eventId())
               .append("（事件史未装配或未找到——按结论自带证据核对）\n");
-          continue;
         }
-        org.cra.common.event.ProductEvent event = evidence.event();
-        events
-            .append("- event ")
-            .append(event.eventId())
-            .append(" | type=")
-            .append(event.type())
-            .append(" | occurred_at=")
-            .append(event.occurredAt());
-        if (event.service() != null) {
-          events.append(" | service=").append(capLine(event.service()));
-        }
-        if (event.tenant() != null) {
-          events.append(" | tenant=").append(capLine(event.tenant()));
-        }
-        if (event.sourceUrl() != null) {
-          events.append(" | source=").append(capLine(event.sourceUrl()));
-        }
-        events.append("\n  摘要：").append(capLine(event.summary())).append('\n');
-        if (!event.commitRefs().isEmpty()) {
-          events
-              .append("  commit_refs: ")
-              .append(String.join(", ", event.commitRefs()))
-              .append('\n');
-        }
-        if (!event.paths().isEmpty()) {
-          events.append("  paths: ").append(String.join(", ", event.paths())).append('\n');
-        }
-        resolved = true;
       }
       sb.append(capLines(events.toString(), CITED_EVENT_TOKEN_CAP)).append('\n');
     }
     if (!citation.reviewMdRefs().isEmpty()) {
-      sb.append("被引 REVIEW.md 条目：\n");
-      citation
-          .reviewMdRefs()
-          .forEach(
-              ref ->
-                  sb.append("- ")
-                      .append(ref.section())
-                      .append(": ")
-                      .append(ref.entry().isBlank() ? "（整段，见下方 Review.md 段）" : capLine(ref.entry()))
-                      .append('\n'));
+      appendReviewMdRefs(sb, citation.reviewMdRefs());
       resolved = true;
     }
     if (!resolved) {
@@ -586,6 +618,85 @@ final class VerificationBatchAssembler {
       sb.append("（被引证据不可得，以下为结论自带证据原文）\n").append(finding.evidence()).append('\n');
     }
     return sb.toString();
+  }
+
+  /**
+   * 追加单条 commit 证据（patch 不可得时不追加）。
+   *
+   * @param sb 输出
+   * @param resolver 被引证据解析
+   * @param finding 候选（路径回退）
+   * @param ref commit 引用
+   * @return true 若 patch 可得（resolved）
+   */
+  private static boolean appendCommitEvidence(
+      StringBuilder sb,
+      CitedEvidenceResolver resolver,
+      CandidateFinding finding,
+      ContextCitation.CommitRef ref) {
+    String path = ref.effectivePath(finding.file());
+    String patch = resolver.commitPatch(ref.sha(), path);
+    if (patch.isBlank()) {
+      return false;
+    }
+    sb.append("--- commit ")
+        .append(ref.sha())
+        .append(" path ")
+        .append(path)
+        .append(" ---\n")
+        .append(capLines(patch, CITED_COMMIT_TOKEN_CAP))
+        .append('\n');
+    return true;
+  }
+
+  /**
+   * 追加单条已解析事件史证据。
+   *
+   * @param events 事件段
+   * @param event 事件
+   */
+  private static void appendEventEvidence(
+      StringBuilder events, org.cra.common.event.ProductEvent event) {
+    events
+        .append("- event ")
+        .append(event.eventId())
+        .append(" | type=")
+        .append(event.type())
+        .append(" | occurred_at=")
+        .append(event.occurredAt());
+    if (event.service() != null) {
+      events.append(" | service=").append(capLine(event.service()));
+    }
+    if (event.tenant() != null) {
+      events.append(" | tenant=").append(capLine(event.tenant()));
+    }
+    if (event.sourceUrl() != null) {
+      events.append(" | source=").append(capLine(event.sourceUrl()));
+    }
+    events.append("\n  摘要：").append(capLine(event.summary())).append('\n');
+    if (!event.commitRefs().isEmpty()) {
+      events.append("  commit_refs: ").append(String.join(", ", event.commitRefs())).append('\n');
+    }
+    if (!event.paths().isEmpty()) {
+      events.append("  paths: ").append(String.join(", ", event.paths())).append('\n');
+    }
+  }
+
+  /**
+   * 追加 REVIEW.md 被引条目段。
+   *
+   * @param sb 输出
+   * @param refs 条目引用
+   */
+  private static void appendReviewMdRefs(StringBuilder sb, List<ContextCitation.ReviewMdRef> refs) {
+    sb.append("被引 REVIEW.md 条目：\n");
+    refs.forEach(
+        ref ->
+            sb.append("- ")
+                .append(ref.section())
+                .append(": ")
+                .append(ref.entry().isBlank() ? "（整段，见下方 Review.md 段）" : capLine(ref.entry()))
+                .append('\n'));
   }
 
   /** REVIEW.md 证据要求 + context 类相关条目（Product context/Known incidents/Sniff tests；可信内容，不定界）。 */

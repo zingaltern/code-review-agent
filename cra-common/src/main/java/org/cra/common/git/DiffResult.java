@@ -29,24 +29,31 @@ public record DiffResult(
   public int totalPatchLines() {
     int total = 0;
     for (DiffFile f : files) {
-      if (f.patch() == null) {
-        continue;
-      }
-      boolean inHunk = false;
-      for (String line : f.patch().split("\n", -1)) {
-        if (line.startsWith("@@")) {
-          inHunk = true;
-          continue;
-        }
-        if (!inHunk) {
-          continue; // 文件头/元数据（--- a/、+++ b/、diff --git…）只在首个 hunk 之前
-        }
-        if (line.startsWith("\\")) {
-          continue; // "\ No newline at end of file"
-        }
-        if (line.startsWith("+") || line.startsWith("-")) {
-          total++;
-        }
+      total += patchLines(f.patch());
+    }
+    return total;
+  }
+
+  /**
+   * 单个文件 patch 的 +/- 内容行数（不含 hunk 头、上下文行与文件头）。
+   *
+   * @param patch 文件 patch（null 计 0）
+   * @return 内容行数
+   */
+  private static int patchLines(String patch) {
+    if (patch == null) {
+      return 0;
+    }
+    int total = 0;
+    boolean inHunk = false;
+    for (String line : patch.split("\n", -1)) {
+      if (line.startsWith("@@")) {
+        inHunk = true;
+      } else if (inHunk
+          && !line.startsWith("\\") // "\ No newline at end of file"
+          && (line.startsWith("+") || line.startsWith("-"))) {
+        // 文件头/元数据（--- a/、+++ b/、diff --git…）只在首个 hunk 之前
+        total++;
       }
     }
     return total;
