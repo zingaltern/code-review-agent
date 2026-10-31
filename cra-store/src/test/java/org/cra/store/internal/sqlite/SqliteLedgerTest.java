@@ -4,9 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.cra.common.git.LedgerRunMarker;
 import org.cra.store.api.ReviewLedger;
 import org.cra.store.api.ReviewLedgerContractTest;
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,34 @@ class SqliteLedgerTest extends ReviewLedgerContractTest {
     assertThatThrownBy(() -> new SqliteLedger("o", "r", null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("dbFile");
+  }
+
+  @Test
+  void completedRunsOrdersLegacyAndFixedTimestampFormats() throws Exception {
+    // 升级前的行是变长小数（Instant.toString），新行固定 9 位；TEXT 字典序会反转（.5Z 排在 .550000000Z 之后），
+    // 查询必须按 julianday 排序（SQLite 日期函数按毫秒精度解析两种格式）
+    Path db = tempDir.resolve("legacy.db");
+    SqliteLedger ledger = new SqliteLedger("o", "r", db);
+    assertThat(ledger.completedRuns(7)).isEmpty(); // 首次读触发 schema 初始化
+    try (var conn = DriverManager.getConnection("jdbc:sqlite:" + db.toAbsolutePath());
+        var ps =
+            conn.prepareStatement(
+                "INSERT INTO review_run(run_id, repo, pr_number, commit_sha, status, findings,"
+                    + " suppressed, summary_comment_id, created_at)"
+                    + " VALUES (?, 'o/r', 7, ?, 'DONE', 1, 0, NULL, ?)")) {
+      ps.setString(1, "run_legacy");
+      ps.setString(2, "sha1");
+      ps.setString(3, "2026-01-01T00:00:00.5Z");
+      ps.executeUpdate();
+      ps.setString(1, "run_fixed");
+      ps.setString(2, "sha2");
+      ps.setString(3, "2026-01-01T00:00:00.550000000Z");
+      ps.executeUpdate();
+    }
+
+    assertThat(ledger.completedRuns(7))
+        .extracting(LedgerRunMarker::runId)
+        .containsExactly("run_legacy", "run_fixed");
   }
 
   @Test

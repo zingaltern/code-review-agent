@@ -41,7 +41,7 @@ public final class SqliteLedger implements ReviewLedger {
 
   private static final String COMPLETION_STATUSES = "('DONE','DEGRADED')";
 
-  /** 固定 9 位小数：created_at 是 TEXT 且按字典序排序，变长小数（Instant.toString）会让同秒内顺序反转。 */
+  /** 固定 9 位小数写入；查询按 julianday 排序——TEXT 字典序在变长小数（旧行 Instant.toString）与新格式混存时会反转。 */
   private static final DateTimeFormatter SQLITE_INSTANT =
       new DateTimeFormatterBuilder().appendInstant(9).toFormatter();
 
@@ -122,7 +122,7 @@ public final class SqliteLedger implements ReviewLedger {
                 + " review_run WHERE repo = ? AND pr_number = ? AND UPPER(commit_sha) = UPPER(?)"
                 + " AND status IN "
                 + COMPLETION_STATUSES
-                + " ORDER BY created_at, run_id LIMIT 1",
+                + " ORDER BY julianday(created_at), run_id LIMIT 1",
             prNumber,
             commitSha);
     return hits.stream().findFirst();
@@ -134,7 +134,7 @@ public final class SqliteLedger implements ReviewLedger {
         "SELECT run_id, commit_sha, status, findings, suppressed, summary_comment_id FROM"
             + " review_run WHERE repo = ? AND pr_number = ? AND status IN "
             + COMPLETION_STATUSES
-            + " ORDER BY created_at, run_id",
+            + " ORDER BY julianday(created_at), run_id",
         prNumber,
         null);
   }
@@ -143,7 +143,7 @@ public final class SqliteLedger implements ReviewLedger {
   public List<LedgerFindingMarker> publishedFindings(int prNumber) {
     String sql =
         "SELECT finding_id, fingerprint, file, line, category, run_id, commit_sha, comment_id FROM"
-            + " finding WHERE repo = ? AND pr_number = ? ORDER BY created_at, finding_id";
+            + " finding WHERE repo = ? AND pr_number = ? ORDER BY julianday(created_at), finding_id";
     return query(
         sql,
         ps -> {
