@@ -65,7 +65,7 @@ public final class DefaultReviewPolicyParser implements ReviewPolicyParser {
     Section current = null;
     for (String rawLine : markdown.split("\n", -1)) {
       String line = rawLine.stripTrailing();
-      if (line.startsWith("## ") && !line.startsWith("###")) {
+      if (line.startsWith("## ")) {
         String heading = line.substring(3).strip();
         // 重复标题复用首个段落：putIfAbsent 会让 current 指向不在 map 里的孤儿 Section，
         // 其后所有列表项被静默丢弃（Skip paths/Conventions 丢失会直接改变评审范围）
@@ -101,14 +101,19 @@ public final class DefaultReviewPolicyParser implements ReviewPolicyParser {
       warnings.add("Nit budget 段未提供数值，按未配置处理");
       return null;
     }
-    try {
-      int value = Integer.parseInt(source.strip());
-      if (value < 0) {
-        throw new NumberFormatException();
-      }
-      return value;
-    } catch (NumberFormatException e) {
+    Integer value = parseBudgetValue(source);
+    if (value == null || value < 0) {
       warnings.add("Nit budget 数值非法: " + source.strip() + "，按未配置处理");
+      return null;
+    }
+    return value;
+  }
+
+  /** 数值行解析（null = 非数值；负数判留调用方，不借异常分支产生警告）。 */
+  private static Integer parseBudgetValue(String source) {
+    try {
+      return Integer.parseInt(source.strip());
+    } catch (NumberFormatException e) {
       return null;
     }
   }

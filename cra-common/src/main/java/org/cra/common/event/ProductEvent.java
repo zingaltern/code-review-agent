@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 /**
  * 产品事件史条目（M4f-full，ADR-0012；03§3.1 CrossChecker 模式 A 的外部证据面）。
  *
- * <p>数据来源是 owner 维护的 JSONL（本地文件或对象存储 HTTP(S) URL），只覆盖**已文档化**的工单 / 事故复盘 / 变更记录；tribal
+ * <p>数据来源是 owner 维护的 JSONL（本地文件或对象存储 HTTP(S) URL），只覆盖<strong>已文档化</strong>的工单 / 事故复盘 / 变更记录；tribal
  * knowledge（口头约定、未记录的事故）不可见是硬边界（01§3.4），本模型不假装覆盖。
  *
  * <p>字段与 05§1.6 表 {@code product_event} 一一对应；{@code paths} 是可选扩展（事件源声明的仓库相对路径或目录前缀）， 用于按变更路径检索。幂等键

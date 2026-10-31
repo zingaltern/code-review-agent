@@ -27,7 +27,8 @@ import java.util.regex.Pattern;
  * <p>解析规则（本类即唯一实现，跨模块共用）：
  *
  * <ol>
- *   <li>结构化 commit 引用优先：{@code commit <sha> path <path>}（path 可省，省略时调用方以 finding.file 兜底）；
+ *   <li>结构化 commit 引用优先：{@code commit <sha> path <path>}（path 可省，省略时调用方以 finding.file 兜底；sha
+ *       后仍为十六进制字符的超长串不命中，不截前 40 位——与规则 2 的 {@code \b} 语义对齐）；
  *   <li>无结构化引用时退回裸 hex 引用（M2 兼容语义：{@code \b[0-9a-f]{7,40}\b}，每处按 finding.file 解析）；
  *   <li>事件引用：{@code event <event_id>}（行首或列表项；M4f-full 事件史，验证层按事件 id 预取条目）；
  *   <li>REVIEW.md 条目锚：{@code REVIEW.md <段名>: <条目>}，段名 ∈ Known incidents / Product context / Sniff
@@ -47,7 +48,7 @@ public final class ContextCitation {
 
   private static final Pattern COMMIT_REF =
       Pattern.compile(
-          "(?i)\\bcommit\\s*[:：=]?\\s*([0-9a-f]{7,40})"
+          "(?i)\\bcommit\\s*[:：=]?\\s*([0-9a-f]{7,40})(?![0-9a-f])"
               + "(?:\\s+(?:path|file)\\s*[:：=]?\\s*([^\\s,;，；()（）\\[\\]]+))?");
 
   private static final Pattern BARE_SHA = Pattern.compile("\\b[0-9a-f]{7,40}\\b");
