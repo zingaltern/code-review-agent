@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.function.LongConsumer;
 import java.util.regex.Pattern;
+import java.util.stream.StreamSupport;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -97,12 +98,38 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
               patch,
               DiffHunk.parseAll(patch)));
     }
-    List<CommitSummary> commits = new ArrayList<>();
-    for (JsonNode c : root.path("commits")) {
-      commits.add(
-          new CommitSummary(c.path("sha").asText(), c.path("commit").path("message").asText("")));
-    }
+    List<CommitSummary> commits =
+        StreamSupport.stream(root.path("commits").spliterator(), false)
+            .map(
+                c ->
+                    new CommitSummary(
+                        c.path("sha").asText(), c.path("commit").path("message").asText("")))
+            .toList();
     return new DiffResult(baseSha, headSha, files, commits);
+  }
+
+  /**
+   * 追加已整包发布的 inline 评论结果（评论 id 与 finding 按序对齐）。
+   *
+   * @param inline 提交的 inline 评论
+   * @param ids 平台返回的评论 id
+   * @param items 结果输出
+   */
+  private static void appendPublishedItems(
+      List<InlineComment> inline, List<Long> ids, List<ReviewItemResult> items) {
+    for (int i = 0; i < inline.size(); i++) {
+      InlineComment c = inline.get(i);
+      long commentId = i < ids.size() ? ids.get(i) : 0;
+      items.add(
+          new ReviewItemResult(
+              c.findingId(),
+              c.path(),
+              c.line(),
+              PublishStatus.PUBLISHED,
+              AnchorStatus.INLINE,
+              commentId > 0 ? commentId : null,
+              ""));
+    }
   }
 
   @Override
@@ -154,20 +181,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
       try {
         PostedReview posted = postInlineReview(cmd, cmd.inlineComments());
         reviewId = posted.reviewId().isBlank() ? Optional.empty() : Optional.of(posted.reviewId());
-        List<Long> ids = posted.commentIds();
-        for (int i = 0; i < cmd.inlineComments().size(); i++) {
-          InlineComment c = cmd.inlineComments().get(i);
-          long commentId = i < ids.size() ? ids.get(i) : 0;
-          items.add(
-              new ReviewItemResult(
-                  c.findingId(),
-                  c.path(),
-                  c.line(),
-                  PublishStatus.PUBLISHED,
-                  AnchorStatus.INLINE,
-                  commentId > 0 ? commentId : null,
-                  ""));
-        }
+        appendPublishedItems(cmd.inlineComments(), posted.commentIds(), items);
       } catch (CraIntegrationException e) {
         if (!GitHubHttpTransport.isUnprocessable(e)) {
           throw e; // 非 422 故障不降级，交由 run 级失败处置（02§4.2）
@@ -196,10 +210,10 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     JsonNode response =
         transport.postJson(
             cmd.repoOwner(), cmd.repoName(), "/pulls/" + cmd.prNumber() + "/reviews", payload);
-    List<Long> ids = new ArrayList<>();
-    for (JsonNode c : response.path("comments")) {
-      ids.add(c.path("id").asLong(0));
-    }
+    List<Long> ids =
+        StreamSupport.stream(response.path("comments").spliterator(), false)
+            .map(c -> c.path("id").asLong(0))
+            .toList();
     JsonNode id = response.path("id");
     String reviewId = id.isMissingNode() || id.isNull() ? "" : id.asText("");
     return new PostedReview(reviewId, ids);
