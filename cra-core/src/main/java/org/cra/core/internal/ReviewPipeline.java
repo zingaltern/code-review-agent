@@ -286,8 +286,6 @@ public final class ReviewPipeline implements Orchestrator {
    * @return 门禁数据
    */
   private LedgerGate parseLedgerGate(ReviewRequest request, TraceWriter trace) {
-    Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
-    trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
     // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）+ 账本解析分层（05§1.3 规则 5）
     List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.key());
     List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.key());
@@ -319,7 +317,7 @@ public final class ReviewPipeline implements Orchestrator {
             roundPlan.breached(),
             "review_base",
             roundPlan.lastReviewedHead().map(ReviewBodyRenderer::shortSha).orElse("pr-base")));
-    return new LedgerGate(completion, publishedMarkers, suspectWarning, roundPlan);
+    return new LedgerGate(publishedMarkers, suspectWarning, roundPlan);
   }
 
   /**
@@ -354,13 +352,11 @@ public final class ReviewPipeline implements Orchestrator {
   /**
    * 账本门禁数据。
    *
-   * @param completion commit 级完成标记（存在即跳过）
    * @param publishedMarkers 已发布指纹
    * @param suspectWarning 可疑标记告警（空串 = 无）
    * @param roundPlan 收敛轮次计划
    */
   private record LedgerGate(
-      Optional<LedgerRunMarker> completion,
       List<LedgerFindingMarker> publishedMarkers,
       String suspectWarning,
       ConvergenceGuard.RoundPlan roundPlan) {}
@@ -384,11 +380,8 @@ public final class ReviewPipeline implements Orchestrator {
 
       // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
       // 保持历史原样，避免 CI 重跑反复 PATCH 旧评论；更新语义如有需要随流水线线统一加）
-      LedgerGate ledgerGate = parseLedgerGate(request, trace);
-      Optional<LedgerRunMarker> completion = ledgerGate.completion();
-      List<LedgerFindingMarker> publishedMarkers = ledgerGate.publishedMarkers();
-      String suspectWarning = ledgerGate.suspectWarning();
-      ConvergenceGuard.RoundPlan roundPlan = ledgerGate.roundPlan();
+      Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
+      trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
       if (completion.isPresent()) {
         return ReviewRunFinisher.finish(
             trace,
@@ -402,6 +395,10 @@ public final class ReviewPipeline implements Orchestrator {
                 + completion.get().status()
                 + "），全量跳过");
       }
+      LedgerGate ledgerGate = parseLedgerGate(request, trace);
+      List<LedgerFindingMarker> publishedMarkers = ledgerGate.publishedMarkers();
+      String suspectWarning = ledgerGate.suspectWarning();
+      ConvergenceGuard.RoundPlan roundPlan = ledgerGate.roundPlan();
 
       DiffResult diff = dataLoader.fetchDiff(request);
       // 07§5 M4a：风险分级与签字建议（确定性规则，不依赖 LLM；绑定本次 head commit）
