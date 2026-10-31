@@ -27,6 +27,7 @@ import org.cra.common.git.DiffResult;
 import org.cra.common.git.DispositionSignal;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
+import org.cra.common.git.LedgerComment;
 import org.cra.common.git.PostCommitReviewCommand;
 import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
@@ -36,7 +37,6 @@ import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
 import org.cra.common.git.ReviewItemResult;
 import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,11 +70,6 @@ class GitHubHttpAdapterWireMockTest {
     adapter =
         new GitHubHttpAdapter(
             wm.baseUrl(), "test-token", HttpClient.newBuilder().build(), sleeps::add);
-  }
-
-  @AfterEach
-  void tearDown() {
-    // 无残留
   }
 
   private static String reviewRequestBody() {
@@ -369,6 +364,27 @@ class GitHubHttpAdapterWireMockTest {
   }
 
   @Test
+  void listPullRequestsSkipsEntryWithoutHeadShaInsteadOfFailingWholeList() {
+    // 修复前：head.sha 缺失 → asText("") → PullRequestRef 构造 IAE → 整轮列表中止；
+    // 修复后：warn + 跳过该条，不截断后续条目（对齐 GitLab 适配器语义）
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":8,\"state\":\"closed\",\"head\":{},"
+                        + "\"base\":{\"sha\":\"b8\"},"
+                        + "\"updated_at\":\"2026-10-25T00:00:00Z\"},"
+                        + "{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},\"updated_at\":\"2026-10-24T00:00:00Z\"}]")));
+    List<PullRequestRef> pulls =
+        adapter.listPullRequests(REPO, Instant.parse("2026-10-18T00:00:00Z"));
+    assertThat(pulls).hasSize(1);
+    assertThat(pulls.get(0).number()).isEqualTo(7);
+    assertThat(pulls.get(0).headSha()).isEqualTo("h1");
+  }
+
+  @Test
   void fetchDispositionSignalsReadsBotRepliesAndSummaryReactions() {
     wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
     wm.stubFor(
@@ -477,8 +493,7 @@ class GitHubHttpAdapterWireMockTest {
     assertThat(ledger.runMarkers()).hasSize(1);
     assertThat(ledger.runMarkers().get(0).commentId()).isEqualTo(31L);
     assertThat(ledger.comments()).hasSize(1);
-    assertThat(ledger.comments().get(0).kind())
-        .isEqualTo(org.cra.common.git.LedgerComment.KIND_COMMIT);
+    assertThat(ledger.comments().get(0).kind()).isEqualTo(LedgerComment.KIND_COMMIT);
   }
 
   @Test
@@ -526,7 +541,7 @@ class GitHubHttpAdapterWireMockTest {
                         + "\"created_at\":\"2026-10-26T01:00:00Z\"},"
                         + "{\"number\":17,\"user\":{\"login\":\"human\"},\"body\":\"human\","
                         + "\"created_at\":\"2026-10-26T02:00:00Z\"}]")));
-    List<org.cra.common.git.LedgerComment> issues = adapter.listBotIssues(REPO, null);
+    List<LedgerComment> issues = adapter.listBotIssues(REPO, null);
     assertThat(issues).hasSize(1);
     assertThat(issues.get(0).id()).isEqualTo(15L);
     assertThat(issues.get(0).body()).isEqualTo("issue-bot");
@@ -567,6 +582,173 @@ class GitHubHttpAdapterWireMockTest {
     assertThatThrownBy(() -> adapter.fetchBotComments(REPO, 7))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("评论分页超过上限");
+  }
+
+  @Test
+  void encodePathPercentEncodesSpacesNotPlus() {
+    assertThat(GitHubPayloadSupport.encodePath("src/main/My File.java"))
+        .isEqualTo("src/main/My%20File.java");
+    assertThat(GitHubPayloadSupport.encodePath("a+b/c d.java")).isEqualTo("a%2Bb/c%20d.java");
+  }
+
+  @Test
+  void readFileWithSpaceInPathUsesEncodedUrl() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/contents/src/My%20File.java?ref=head2"))
+            .willReturn(aResponse().withStatus(200).withBody("ok")));
+    assertThat(adapter.readFile(REPO, "head2", "src/My File.java").text()).isEqualTo("ok");
+  }
+
+  @Test
+  void dispositionPagingOverflowFailsLoudly() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=" + page))
+              .willReturn(okJson(commentPage(page))));
+    }
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=101"))
+            .willReturn(okJson(commentPage(101))));
+
+    assertThatThrownBy(() -> adapter.fetchDispositionSignals(REPO, 7))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("分页超过上限");
+  }
+
+  @Test
+  void malformedCreatedAtDoesNotCrashLedger() {
+    wm.stubFor(get(urlEqualTo("/user")).willReturn(okJson("{\"login\":\"cra-bot\"}")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/pulls/7/comments?per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"id\":1,\"user\":{\"login\":\"cra-bot\"},\"body\":\"c\","
+                        + "\"created_at\":\"not-a-timestamp\"}]")));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/issues/7/comments?per_page=100&page=1"))
+            .willReturn(okJson("[]")));
+
+    CommentLedger ledger = adapter.fetchBotComments(REPO, 7);
+
+    assertThat(ledger.comments()).hasSize(1);
+    assertThat(ledger.comments().get(0).createdAt()).isEqualTo(Instant.EPOCH);
+  }
+
+  @Test
+  void listPullRequestsAcceptsNullSince() {
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},\"merge_commit_sha\":null,"
+                        + "\"updated_at\":\"2026-10-24T00:00:00Z\"}]")));
+    assertThat(adapter.listPullRequests(REPO, null)).hasSize(1);
+  }
+
+  @Test
+  void perItemAuthFailurePropagatesInsteadOfSummaryFallback() {
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .inScenario("auth")
+            .whenScenarioStateIs("Started")
+            .willReturn(aResponse().withStatus(422).withBody("{\"message\":\"Validation Failed\"}"))
+            .willSetStateTo("item"));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .inScenario("auth")
+            .whenScenarioStateIs("item")
+            .willReturn(aResponse().withStatus(401).withBody("{\"message\":\"Bad credentials\"}")));
+
+    assertThatThrownBy(() -> adapter.postReview(command(1)))
+        .isInstanceOf(CraIntegrationException.class)
+        .hasMessageContaining("401");
+  }
+
+  @Test
+  void postReviewWithoutReviewIdReturnsEmptyReviewId() {
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
+            .willReturn(okJson("{\"id\":null,\"comments\":[{\"id\":8001}]}")));
+    wm.stubFor(
+        post(urlEqualTo("/repos/o/r/issues/7/comments")).willReturn(okJson("{\"id\":9500}")));
+
+    PrReviewResult result = adapter.postReview(command(1));
+
+    assertThat(result.reviewId()).isEmpty();
+    assertThat(result.items()).hasSize(1);
+  }
+
+  @Test
+  void retryAfterIsCapped() {
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .inScenario("huge-retry-after")
+            .whenScenarioStateIs("Started")
+            .willReturn(
+                aResponse()
+                    .withStatus(429)
+                    .withBody("rate limited")
+                    .withHeader("Retry-After", "999999999"))
+            .willSetStateTo("recovered"));
+    wm.stubFor(
+        get(urlEqualTo("/repos/o/r/compare/base1...head2"))
+            .inScenario("huge-retry-after")
+            .whenScenarioStateIs("recovered")
+            .willReturn(okJson(reviewRequestBody())));
+
+    adapter.fetchDiff(REPO, "base1", "head2");
+
+    assertThat(sleeps).containsExactly(60_000L);
+  }
+
+  @Test
+  void listPullRequestsFallsBackToEpochForMissingUpdatedAt() {
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=1"))
+            .willReturn(
+                okJson(
+                    "[{\"number\":7,\"state\":\"closed\",\"head\":{\"sha\":\"h1\"},"
+                        + "\"base\":{\"sha\":\"b1\"},\"merge_commit_sha\":null}]")));
+
+    assertThat(adapter.listPullRequests(REPO, null))
+        .singleElement()
+        .satisfies(pr -> assertThat(pr.updatedAt()).isEqualTo(Instant.EPOCH));
+  }
+
+  @Test
+  void listPullRequestsAllowsExactlyTenThousandAndProbesNextPage() {
+    for (int page = 1; page <= 100; page++) {
+      wm.stubFor(
+          get(urlEqualTo(
+                  "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page="
+                      + page))
+              .willReturn(okJson(pullPage(page))));
+    }
+    wm.stubFor(
+        get(urlEqualTo(
+                "/repos/o/r/pulls?state=all&sort=updated&direction=desc&per_page=100&page=101"))
+            .willReturn(okJson("[]")));
+
+    assertThat(adapter.listPullRequests(REPO, null)).hasSize(10_000);
+  }
+
+  private static String pullPage(int page) {
+    StringBuilder sb = new StringBuilder("[");
+    for (int i = 0; i < 100; i++) {
+      if (i > 0) {
+        sb.append(',');
+      }
+      sb.append("{\"number\":")
+          .append(page * 1_000 + i)
+          .append(",\"state\":\"closed\",\"head\":{\"sha\":\"h\"},")
+          .append("\"base\":{\"sha\":\"b\"},\"merge_commit_sha\":null,")
+          .append("\"updated_at\":\"2026-10-24T00:00:00Z\"}");
+    }
+    return sb.append(']').toString();
   }
 
   private static String commentPage(int page) {

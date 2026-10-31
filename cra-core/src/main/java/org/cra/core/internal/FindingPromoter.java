@@ -10,6 +10,7 @@ import org.cra.common.context.ReviewPolicy;
 import org.cra.common.finding.CandidateFinding;
 import org.cra.common.git.FileContent;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.internal.pipeline.CallSiteIndex;
 import org.cra.core.internal.pipeline.FindingAggregator;
 import org.cra.core.internal.pipeline.PromotionEngine;
 import org.cra.core.internal.pipeline.RunBudgetTracker;
@@ -83,7 +84,7 @@ final class FindingPromoter {
       RunBudgetTracker budget,
       TraceWriter trace,
       String repo,
-      Map<String, org.cra.core.internal.pipeline.CallSiteIndex> callSiteIndexByFinding) {
+      Map<String, CallSiteIndex> callSiteIndexByFinding) {
     boolean publishUnverified = "labeled".equals(options.publishUnverified());
     JudgeArbiter arbiter = new JudgeArbiter(judge, agentRunner, trace);
     List<FindingAggregator.Scored> confirmedCandidates = new ArrayList<>();
@@ -185,7 +186,7 @@ final class FindingPromoter {
       ReviewPolicy policy,
       String runId,
       String repo,
-      org.cra.core.internal.pipeline.CallSiteIndex callSiteIndex) {
+      CallSiteIndex callSiteIndex) {
     String verdictText =
         verifierOutcome != null && verifierOutcome.verdict() != null
             ? verifierOutcome.verdict().verdict().name()

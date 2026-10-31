@@ -6,11 +6,12 @@ import java.util.List;
  * ContextAssembler 组装结果（04§1：L0 永不丢弃；丢弃决策记入 trace 并反映到 Summary 覆盖声明）。
  *
  * @param diffText L0 变更 diff（unified，带 hunk 头与行号；永不丢弃）
- * @param windowText L1 上下文（hunk 窗口/条件全文组装文本；可被裁剪为空）
+ * @param windowText L1 上下文（hunk 窗口/条件全文组装文本；可被裁剪为空；注入形态由段落标题"（全文，N 行）/（hunk 窗口 ±N）"自述）
  * @param filesChanged 本批变更文件数（覆盖声明输入，05§1.2 coverage）
- * @param filesReviewed 实际进入 brief 的变更文件数
+ * @param filesReviewed 实际进入 brief 的变更文件数（M1 形态：L0 diff 全量保底，等于 filesChanged；无 head 内容无法组 L1 的文件记入
+ *     skippedFiles）
  * @param skippedFiles 被跳过的文件路径（策略 skip 或无 diff 内容等，含原因后缀）
- * @param coverageNotes 覆盖声明备注（窗口/全文注入形态、切片未注入等如实说明）
+ * @param coverageNotes 覆盖声明备注（如实说明，宁缺勿谎；M1 形态恒空——注入形态由 windowText 段落标题说明，切片未注入在 M1 无该形态）
  * @param estimatedTokens 组装结果估算 token（字符数 / 3.5，04§2.1）
  * @param trimDecisions 裁剪决策列表（窗口收窄/整段丢弃，逐条如实记录）
  */

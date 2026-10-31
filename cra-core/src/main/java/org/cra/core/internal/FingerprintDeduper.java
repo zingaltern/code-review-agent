@@ -99,7 +99,8 @@ final class FingerprintDeduper {
   }
 
   /**
-   * 锚行内容（与发布侧 fingerprintOf 同语义）：行号越界为空串，保留其余字符由指纹计算去首尾空白。
+   * 锚行内容（与发布侧指纹计算 FingerprintCalculator.fingerprint 的 anchorLineContent
+   * 入参同语义）：行号越界为空串，保留其余字符由指纹计算去首尾空白。
    *
    * @param lines 文件行（0 基下标）
    * @param line 1 基行号
@@ -110,7 +111,7 @@ final class FingerprintDeduper {
   }
 
   /**
-   * 锚行 ±2 行上下文窗口（与发布侧 fingerprintOf 同语义，行不足时截取可用部分）。
+   * 锚行 ±2 行上下文窗口（与 FingerprintCalculator.fingerprint 的 contextLines 入参同语义，行不足时截取可用部分）。
    *
    * @param lines 文件行（0 基下标）
    * @param line 1 基锚行号

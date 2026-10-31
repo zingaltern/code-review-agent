@@ -40,6 +40,7 @@ class VerificationAgentDefinitionTest {
                 "## Evidence requirements\n- 必须给出触发输入",
                 ""));
     assertThat(brief.role().id()).isEqualTo("verifier");
+    assertThat(brief.modelTier()).isEqualTo(AgentTier.STRONG);
     assertThat(brief.systemPrompt())
         .contains("CONFIRMED")
         .contains("REFUTED")
@@ -71,21 +72,18 @@ class VerificationAgentDefinitionTest {
 
   @Test
   void verifierAndJudgeUseStrongTierPerSpecTable() {
-    // 03§6 速查表：VerifierAgent / JudgeAgent 均为「强」档——T2.9 路由落地后档位从未回填，
-    // 验证层长期跑在 standard 模型上（M3 验收 409 修复）
-    org.assertj.core.api.Assertions.assertThat(
-            new VerifierAgentDefinition(new TemplateLoader()).modelTier())
+    // 03§6 速查表：VerifierAgent / JudgeAgent 均为「强」档；档位经 brief 透传到 AgentRunner 路由
+    assertThat(new VerifierAgentDefinition(new TemplateLoader()).modelTier())
         .isEqualTo(AgentTier.STRONG);
-    org.assertj.core.api.Assertions.assertThat(
-            new JudgeAgentDefinition(new TemplateLoader()).modelTier())
+    assertThat(new JudgeAgentDefinition(new TemplateLoader()).modelTier())
         .isEqualTo(AgentTier.STRONG);
   }
 
   @Test
   void verifierBudgetMatchesSpecRow() {
     // 03§6（AI Coding 放宽档，ADR-0015 §2.2 修订）：VerifierAgent ≤16k 输入 / ≤2k 输出 / 2 轮
-    assertThat(verifier.budget().maxInputTokens()).isEqualTo(16_000);
-    assertThat(verifier.budget().maxOutputTokens()).isEqualTo(2_000);
+    assertThat(verifier.budget().maxInputTokens()).isEqualTo(32_000);
+    assertThat(verifier.budget().maxOutputTokens()).isEqualTo(4_000);
     assertThat(verifier.budget().maxTurns()).isEqualTo(2);
     assertThat(verifier.tools().tools()).isEmpty();
   }
@@ -107,20 +105,33 @@ class VerificationAgentDefinitionTest {
                 "public class Foo { … }",
                 "情形：复核员无法判定，请你仲裁。"));
     assertThat(brief.role().id()).isEqualTo("judge");
+    assertThat(brief.modelTier()).isEqualTo(AgentTier.STRONG);
     assertThat(brief.systemPrompt()).contains("终裁仲裁员").contains("不折中").contains("REJECTED");
     // 案件、验证者判定、代码上下文三段都在 UNTRUSTED 定界内（04§4.3：验证输出同样不可信）
     long opens =
         brief.userPrompt().lines().filter(l -> l.contains(TemplateSupport.UNTRUSTED_OPEN)).count();
     assertThat(opens).isGreaterThanOrEqualTo(3);
+    assertThat(insideUntrusted(brief.userPrompt(), "REFUTED。理由")).isTrue();
+    assertThat(insideUntrusted(brief.userPrompt(), "情形：复核员无法判定")).isFalse();
     assertThat(brief.userPrompt()).contains("L3 已有防护").contains("情形：复核员无法判定");
     assertThat(brief.userPrompt()).doesNotContain("{{");
+  }
+
+  private static boolean insideUntrusted(String text, String needle) {
+    int at = text.indexOf(needle);
+    if (at < 0) {
+      return false;
+    }
+    int open = text.lastIndexOf(TemplateSupport.UNTRUSTED_OPEN, at);
+    int close = text.lastIndexOf(TemplateSupport.UNTRUSTED_CLOSE, at);
+    return open > close;
   }
 
   @Test
   void judgeBudgetMatchesSpecRow() {
     // 03§6（AI Coding 放宽档）：JudgeAgent ≤20k 输入 / ≤1.5k 输出 / 2 轮
-    assertThat(judge.budget().maxInputTokens()).isEqualTo(20_000);
-    assertThat(judge.budget().maxOutputTokens()).isEqualTo(1_500);
+    assertThat(judge.budget().maxInputTokens()).isEqualTo(40_000);
+    assertThat(judge.budget().maxOutputTokens()).isEqualTo(3_000);
     assertThat(judge.budget().maxTurns()).isEqualTo(2);
   }
 

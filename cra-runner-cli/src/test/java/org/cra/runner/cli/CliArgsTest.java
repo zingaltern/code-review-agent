@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.llm.api.LlmGatewayConfig;
 import org.junit.jupiter.api.Test;
 
 /** 05§3 CLI 契约：参数解析（参数优先于环境变量；密钥只认环境变量；缺项拒绝启动）。 */
@@ -23,12 +24,12 @@ class CliArgsTest {
 
   @Test
   void m1ReviewAndBudgetOptionsWithDefaults() {
-    // 05§5 review.* 与 agents.budget：缺省即文档基准值（AI Coding 放宽档：4000/16000/800k）
+    // 05§5 review.* 与 agents.budget：缺省即文档基准值（4000/16000/1.6M；2026-10-31 预算翻倍）
     CraConfig config = CliArgs.parse(baseArgs(), ENV);
     assertThat(config.largeDiffLines()).isEqualTo(4_000);
     assertThat(config.hardCapLines()).isEqualTo(16_000);
     assertThat(config.nitBudget()).isEqualTo(3);
-    assertThat(config.runTotalTokens()).isEqualTo(800_000L);
+    assertThat(config.runTotalTokens()).isEqualTo(1_600_000L);
     assertThat(config.degradeAtFirst()).isEqualTo(0.70);
     assertThat(config.degradeAtSecond()).isEqualTo(0.85);
     assertThat(config.publishUnverified()).isEqualTo("never");
@@ -159,6 +160,50 @@ class CliArgsTest {
   }
 
   @Test
+  void blankSemanticContextEnvFallsBackToDefaults() {
+    // GitHub Actions 空 input 会以 "" 注入 env：空白环境变量等同未设置，不得因 parseInt("") 拒绝启动
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_SEMANTIC_CONTEXT_MAX_FILES", "");
+    env.put("CRA_SEMANTIC_CONTEXT_MAX_FILE_BYTES", "  ");
+    env.put("CRA_SEMANTIC_CONTEXT_SLICE_TOKENS", "");
+    CraConfig config = CliArgs.parse(baseArgs(), env);
+    assertThat(config.semanticContext().enabled()).isFalse();
+    assertThat(config.semanticContext().maxFiles()).isEqualTo(2_000);
+    assertThat(config.semanticContext().maxFileBytes()).isEqualTo(262_144L);
+    assertThat(config.semanticContext().sliceTokens()).isEqualTo(6_000L);
+  }
+
+  @Test
+  void spotCheckPercentAcceptsZeroAndHundred() {
+    // 0 = 关闭抽查保险丝，100 = 全量抽查（PipelineOptions/SpotCheckFuse 契约允许 [0,100]）
+    assertThat(
+            CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "0"), ENV).spotCheckPercent())
+        .isZero();
+    assertThat(
+            CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "100"), ENV)
+                .spotCheckPercent())
+        .isEqualTo(100);
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "101"), ENV))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("[0,100]");
+    assertThatThrownBy(() -> CliArgs.parse(concat(baseArgs(), "--spot-check-percent", "-1"), ENV))
+        .isInstanceOf(CraConfigException.class);
+  }
+
+  @Test
+  void localModeIgnoresGitlabTokenFile() {
+    // 05§3：本地形态与平台无关——残留 CRA_GITLAB_TOKEN_FILE 不得拖垮本地启动
+    Map<String, String> env = Map.of("CRA_GITLAB_TOKEN_FILE", "/no/such/token-file");
+    CraConfig config =
+        CliArgs.parse(
+            new String[] {"--local", "--platform", "gitlab", "--gitlab-project", "g/p"}, env);
+    assertThat(config.local()).isTrue();
+    assertThat(config.isGitlab()).isTrue();
+    assertThat(config.gitlab().token()).isNull();
+    assertThat(config.githubToken()).isNull();
+  }
+
+  @Test
   void localModeExplicitOverrides() {
     CraConfig config =
         CliArgs.parse(
@@ -245,6 +290,89 @@ class CliArgsTest {
                 "CRA_LLM_MODEL_LIGHT", "  "));
     assertThat(config.llmModelStrong()).isNull();
     assertThat(config.llmModelLight()).isNull();
+  }
+
+  @Test
+  void llmMaxConcurrencyDefaultsAndEnvOverride() {
+    // 05§5 max-concurrency：CRA_LLM_MAX_CONCURRENCY（只走环境变量）；默认 8，合法域 1..64
+    assertThat(CliArgs.parse(baseArgs(), ENV).llmMaxConcurrency())
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_LLM_MAX_CONCURRENCY", "16");
+    assertThat(CliArgs.parse(baseArgs(), env).llmMaxConcurrency()).isEqualTo(16);
+
+    // GitHub Actions 空 input = ""：等同于未设置（回落默认值，不拒绝启动）
+    Map<String, String> blank = new java.util.HashMap<>(ENV);
+    blank.put("CRA_LLM_MAX_CONCURRENCY", "  ");
+    assertThat(CliArgs.parse(baseArgs(), blank).llmMaxConcurrency())
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+
+    for (String invalid : new String[] {"0", "65", "abc"}) {
+      Map<String, String> bad = new java.util.HashMap<>(ENV);
+      bad.put("CRA_LLM_MAX_CONCURRENCY", invalid);
+      assertThatThrownBy(() -> CliArgs.parse(baseArgs(), bad))
+          .isInstanceOf(CraConfigException.class)
+          .hasMessageContaining("CRA_LLM_MAX_CONCURRENCY 必须在 1..64");
+    }
+  }
+
+  @Test
+  void reviewPolicyEnvOverridesAndFlagWins() {
+    // 05§5 review.*：flag > CRA_REVIEW_* env > 基准值（与 sweep/server 共用同一组键）
+    Map<String, String> env = new java.util.HashMap<>(ENV);
+    env.put("CRA_REVIEW_LARGE_DIFF_LINES", "3000");
+    env.put("CRA_REVIEW_HARD_CAP_LINES", "9000");
+    env.put("CRA_REVIEW_NIT_BUDGET", "7");
+    env.put("CRA_REVIEW_DEGRADE_AT", "0.60,0.80");
+    env.put("CRA_REVIEW_SPOT_CHECK_PERCENT", "50");
+    env.put("CRA_REVIEW_PUBLISH_UNVERIFIED", "labeled");
+    CraConfig fromEnv = CliArgs.parse(baseArgs(), env);
+    assertThat(fromEnv.largeDiffLines()).isEqualTo(3_000);
+    assertThat(fromEnv.hardCapLines()).isEqualTo(9_000);
+    assertThat(fromEnv.nitBudget()).isEqualTo(7);
+    assertThat(fromEnv.degradeAtFirst()).isEqualTo(0.60);
+    assertThat(fromEnv.degradeAtSecond()).isEqualTo(0.80);
+    assertThat(fromEnv.spotCheckPercent()).isEqualTo(50);
+    assertThat(fromEnv.publishUnverified()).isEqualTo("labeled");
+
+    CraConfig flagWins =
+        CliArgs.parse(
+            concat(
+                baseArgs(),
+                "--large-diff-lines",
+                "2500",
+                "--nit-budget",
+                "1",
+                "--publish-unverified",
+                "never"),
+            env);
+    assertThat(flagWins.largeDiffLines()).isEqualTo(2_500);
+    assertThat(flagWins.nitBudget()).isEqualTo(1);
+    assertThat(flagWins.publishUnverified()).isEqualTo("never");
+
+    // 非法 env 值按来源 key 报错（GitHub Actions 空 input 仍等同未设置，见 llmMaxConcurrency 用例）
+    Map<String, String> bad = new java.util.HashMap<>(ENV);
+    bad.put("CRA_REVIEW_LARGE_DIFF_LINES", "0");
+    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), bad))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_REVIEW_LARGE_DIFF_LINES");
+  }
+
+  @Test
+  void degradeAtParsingMatchesServerSemantics() {
+    // 与 cra-server ServerConfig.parseDegradeAt 同语义：段内空白忽略、尾逗号按空段丢弃
+    Map<String, String> tolerant = new java.util.HashMap<>(ENV);
+    tolerant.put("CRA_REVIEW_DEGRADE_AT", " 0.60 , 0.80 ,");
+    CraConfig config = CliArgs.parse(baseArgs(), tolerant);
+    assertThat(config.degradeAtFirst()).isEqualTo(0.60);
+    assertThat(config.degradeAtSecond()).isEqualTo(0.80);
+
+    Map<String, String> blankSegment = new java.util.HashMap<>(ENV);
+    blankSegment.put("CRA_REVIEW_DEGRADE_AT", "0.60,,0.80");
+    assertThatThrownBy(() -> CliArgs.parse(baseArgs(), blankSegment))
+        .isInstanceOf(CraConfigException.class)
+        .hasMessageContaining("CRA_REVIEW_DEGRADE_AT 形如 0.70,0.85");
   }
 
   @Test

@@ -49,7 +49,7 @@ services:
       CRA_SERVER_RUN_ROOT: /var/lib/cra/runs
       # 服务端无 checkout：pre-existing 检测降级声明（05§2.1）
       CRA_SERVER_WORKSPACE: /workspace
-      CRA_SERVER_RUN_TOTAL_TOKENS: ${CRA_SERVER_RUN_TOTAL_TOKENS:-500000}
+      CRA_SERVER_RUN_TOTAL_TOKENS: ${CRA_SERVER_RUN_TOTAL_TOKENS:-1600000}
       # --- 平台选择（M4e 第二半，ADR-0012） ---
       CRA_SERVER_PLATFORM: ${CRA_SERVER_PLATFORM:-github}
       # --- GitHub ---

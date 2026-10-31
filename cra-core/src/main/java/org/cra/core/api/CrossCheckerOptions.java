@@ -7,7 +7,7 @@ import java.util.Set;
  * CrossChecker 触发配置（05§5 {@code agents.crosschecker}：enabled / mode / history-weeks）。
  *
  * <p>默认关闭（enabled=false，M4f-lite 起可开）——关闭时不改变 Standard 基线算术（04§2.2）；开启时 每次 run 增量 ≈20k token（330k →
- * ≈350k，逼近 70% 降档线，04§2.2 建议同步上调预算或降一档视角）。
+ * ≈350k，按 500k 预算时代测算曾逼近 70% 降档线；预算 2026-10-31 翻倍至 1.6M 后余量更大）。
  *
  * @param enabled 总开关（false = 编排器不派发，Quick/Standard/Deep 一致）
  * @param modes 模式开关（03§3.1：ASSUMPTION 模式 A / SNIFF 模式 B；空集 = 开了总开关也不触发）

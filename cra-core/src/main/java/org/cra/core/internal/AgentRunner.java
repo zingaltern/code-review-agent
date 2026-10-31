@@ -1,5 +1,6 @@
 package org.cra.core.internal;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.ArrayList;
@@ -57,27 +58,13 @@ public final class AgentRunner {
      */
     Parsed<T> parse(String json, String model);
 
-    /** 解析结果。 */
+    /** 解析结果（{@code errors} 非空 = 校验失败，与 {@link #parse} 契约一致）。 */
     record Parsed<T>(T value, List<String> errors) {
 
-      /**
-       * 成功。
-       *
-       * @param value 解析值
-       * @param <T> 值类型
-       * @return 成功结果
-       */
       public static <T> Parsed<T> of(T value) {
         return new Parsed<>(value, List.of());
       }
 
-      /**
-       * 失败。
-       *
-       * @param errors 逐条错误
-       * @param <T> 值类型
-       * @return 失败结果
-       */
       public static <T> Parsed<T> invalid(List<String> errors) {
         return new Parsed<>(null, List.copyOf(errors));
       }
@@ -420,7 +407,7 @@ public final class AgentRunner {
     }
     try {
       return MAPPER.readTree(content);
-    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+    } catch (JsonProcessingException e) {
       return null;
     }
   }

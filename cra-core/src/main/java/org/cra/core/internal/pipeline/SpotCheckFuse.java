@@ -19,22 +19,22 @@ public final class SpotCheckFuse {
    *
    * @param runId run 标识
    * @param findingId finding 标识
-   * @param percentPercent 抽查百分比（0–100；03§4.3 默认 20，对应 important-refuted-spotcheck=0.20）
+   * @param spotCheckPercent 抽查百分比（0–100；03§4.3 默认 20，对应 important-refuted-spotcheck=0.20）
    * @return true 命中（进 Judge 复核）
    */
-  public static boolean hit(String runId, String findingId, int percentPercent) {
+  public static boolean hit(String runId, String findingId, int spotCheckPercent) {
     Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(findingId, "findingId");
-    if (percentPercent <= 0) {
+    if (spotCheckPercent <= 0) {
       return false;
     }
-    if (percentPercent >= 100) {
+    if (spotCheckPercent >= 100) {
       return true;
     }
     return new BigInteger(1, sha256(runId + "|" + findingId))
             .mod(BigInteger.valueOf(100))
             .intValue()
-        < percentPercent;
+        < spotCheckPercent;
   }
 
   private static byte[] sha256(String input) {

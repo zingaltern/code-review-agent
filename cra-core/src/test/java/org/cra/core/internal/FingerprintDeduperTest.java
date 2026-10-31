@@ -147,7 +147,7 @@ class FingerprintDeduperTest {
 
   @Test
   void lineAtAndContextWindowMirrorPublisherSemantics() {
-    // 越界锚行 → 空串；上下文窗口 = 锚行 ±2（行不足截取可用部分）——与 ReviewPipeline.fingerprintOf 一致
+    // 越界锚行 → 空串；上下文窗口 = 锚行 ±2（行不足截取可用部分）——与 FingerprintCalculator.fingerprint 入参同语义
     assertThat(FingerprintDeduper.lineAt(OLD_LINES, 0)).isEmpty();
     assertThat(FingerprintDeduper.lineAt(OLD_LINES, 99)).isEmpty();
     assertThat(FingerprintDeduper.lineAt(OLD_LINES, 3)).isEqualTo(ANCHOR);

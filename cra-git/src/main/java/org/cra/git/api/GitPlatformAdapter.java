@@ -13,8 +13,8 @@ import org.cra.common.git.PrReviewResult;
 import org.cra.common.git.RepoRef;
 
 /**
- * Git 平台适配 SPI（05§2.1；11§4：只加 default 方法，入参出参只允许 cra-common 纯 POJO）。 平台实现见 cra-git-github；blame
- * 不在本接口——走 {@link LocalRepoContext}（05§2.1）。
+ * Git 平台适配 SPI（05§2.1；11§4：只加 default 方法，入参出参只允许 cra-common 纯 POJO）。 平台实现见 cra-git-github /
+ * cra-git-gitlab；blame 不在本接口——走 {@link LocalRepoContext}（05§2.1）。
  */
 public interface GitPlatformAdapter {
 
@@ -39,11 +39,13 @@ public interface GitPlatformAdapter {
   FileContent readFile(RepoRef repo, String sha, String path);
 
   /**
-   * 列出指定 sha 下匹配 glob 的文件路径（上下文组装切片用；M0 未消费，02§2 步骤 3）。
+   * 列出指定 sha 下匹配 glob 的文件路径（编排器消费：调用点索引扫描域 ADR-0015 + 测试文件清单采集 v1.3.2；语义单一事实源 = {@link
+   * org.cra.common.context.PathGlobs}，05§2.1）。
    *
    * @param repo 仓库引用
    * @param sha commit sha
-   * @param pathGlob glob 模式（** 跨目录，* 单段）
+   * @param pathGlob glob 模式（双星号加斜杠匹配零或多级目录，裸双星号跨段，单星号单段，问号单段通配；详见 {@link
+   *     org.cra.common.context.PathGlobs#compile}）
    * @return 匹配的文件路径列表
    */
   List<String> listFiles(RepoRef repo, String sha, String pathGlob);

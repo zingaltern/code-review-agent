@@ -14,16 +14,19 @@ import java.util.Objects;
  * 属不可信输入，UNTRUSTED 定界（04§3.3）。brief 槽位映射：diffText = 精简视图， extraSection = 变更史（不可信），
  * reviewPolicySection = 产品段（可信）。
  *
- * <p>预算对齐 03§6 速查表 CrossChecker 行（≤16k 输入 = diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k；≤1.5k 输出；2
- * 轮；标准档；read_file(scoped)）。
+ * <p>预算对齐 03§6 速查表 CrossChecker 行（≤32k 输入；材料分项沿用 diff 精简视图 ~8k + 变更史摘要 ≤4k + 产品段 ≤2k，2026-10-31
+ * 预算翻倍后组合占比放宽；≤8k 输出；2 轮；标准档；read_file(scoped)）。
  */
 public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> {
+
+  /** scoped 路径清单上限（避免清单挤占 brief 输入预算）。 */
+  private static final int MAX_SCOPED_PATHS = 40;
 
   /** 预算（03§6 CrossChecker 行）。 */
   private static final AgentBudget BUDGET =
       // v1.3.2：输出 1.5k→4k——context finding 的 JSON（含矛盾来源引用）每条 ≈700-1k token，
       // M3 官方 L3 实测 cross-checker 输出 2122/2255 被 1.5k 截断（budget_exceeded，0 产出）
-      new AgentBudget(16_000, 4_000, 2, 240_000);
+      new AgentBudget(32_000, 8_000, 2, 240_000);
 
   /** 角色（kebab-case，05§1.1）。 */
   public static final AgentRole ROLE = new AgentRole("cross-checker", "上下文对齐评审");
@@ -64,7 +67,8 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(
+        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
   }
 
   @Override
@@ -84,6 +88,7 @@ public final class CrossCheckerDefinition implements SubAgent<ReviewAgentInput> 
   }
 
   private static String scopedPathsNote(ReviewAgentInput input) {
-    return TemplateSupport.scopedPathsNote(input.scopedPaths(), "read_file", 40);
+    return TemplateSupport.scopedPathsNote(
+        input.scopedPaths(), ToolWhitelist.READ_FILE_NAME, MAX_SCOPED_PATHS);
   }
 }

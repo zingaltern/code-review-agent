@@ -1,7 +1,9 @@
 package org.cra.runner.cli;
 
+import java.util.Locale;
 import java.util.Map;
 import org.cra.common.exception.CraConfigException;
+import org.cra.core.api.CrossCheckerOptions;
 import org.cra.llm.api.LlmParsing;
 
 /**
@@ -15,6 +17,7 @@ final class PlatformArgs {
 
   static final String GITHUB = "github";
   static final String GITLAB = "gitlab";
+  static final String DEFAULT_GITHUB_API_BASE = "https://api.github.com";
   static final String DEFAULT_GITLAB_API_BASE = "https://gitlab.com/api/v4";
 
   private PlatformArgs() {}
@@ -28,7 +31,7 @@ final class PlatformArgs {
    */
   static String platform(Map<String, String> named, Map<String, String> env) {
     String raw = firstNonBlank(named.get("--platform"), env.get("CRA_GIT_PLATFORM"), GITHUB);
-    String platform = raw.strip().toLowerCase(java.util.Locale.ROOT);
+    String platform = raw.strip().toLowerCase(Locale.ROOT);
     if (!GITHUB.equals(platform) && !GITLAB.equals(platform)) {
       throw new CraConfigException("--platform / CRA_GIT_PLATFORM 非法: " + raw + "（github|gitlab）");
     }
@@ -78,30 +81,30 @@ final class PlatformArgs {
    * @return 仓库标识；未配置为 null
    */
   static String repoOrProject(Map<String, String> named, Map<String, String> env, boolean gitlab) {
-    String repo = named.get("--repo");
     if (gitlab) {
-      return firstNonBlank(
-          named.get("--gitlab-project"),
-          env.get("CRA_GITLAB_PROJECT"),
-          env.get("CI_PROJECT_PATH"),
-          repo);
+      return blankToNull(
+          firstNonBlank(
+              named.get("--gitlab-project"),
+              env.get("CRA_GITLAB_PROJECT"),
+              env.get("CI_PROJECT_PATH"),
+              named.get("--repo")));
     }
-    return repo == null || repo.isBlank() ? env.get("GITHUB_REPOSITORY") : repo;
+    return blankToNull(firstNonBlank(named.get("--repo"), env.get("GITHUB_REPOSITORY")));
   }
 
   /**
-   * 仓库标识解析为 `[owner, name]`，缺失即拒绝（R5 共享；CI 必填形态与 sweep 用）。
+   * 仓库标识解析为 `owner/name`，缺失即拒绝（R5 共享；CI 必填形态与 sweep 用）。
    *
    * @param named 命令行命名参数
    * @param env 环境变量
    * @param gitlab 是否 GitLab 平台
-   * @return `[owner, name]`
+   * @return `owner/name`
    * @throws CraConfigException 仓库标识缺失（文案见 {@link #missingRepoMessage}）或格式非法
    */
-  static String[] requireOwnerRepo(
+  static OwnerRepo requireOwnerRepo(
       Map<String, String> named, Map<String, String> env, boolean gitlab) {
     String repo = repoOrProject(named, env, gitlab);
-    if (repo == null || repo.isBlank()) {
+    if (repo == null) {
       throw new CraConfigException(missingRepoMessage(gitlab));
     }
     return splitRepo(repo, gitlab);
@@ -132,8 +135,7 @@ final class PlatformArgs {
       }
       return gitlabToken(env);
     }
-    String token = named.get("--token");
-    return token == null || token.isBlank() ? env.get("GITHUB_TOKEN") : token;
+    return blankToNull(firstNonBlank(named.get("--token"), env.get("GITHUB_TOKEN")));
   }
 
   /**
@@ -145,17 +147,17 @@ final class PlatformArgs {
    * @return 三键原始值（未配置项为 null）
    */
   static LlmEnvTriple llmEnvTriple(Map<String, String> env, boolean required) {
-    String apiKey = env.get("CRA_LLM_API_KEY");
-    String baseUrl = env.get("CRA_LLM_BASE_URL");
-    String model = env.get("CRA_LLM_MODEL");
+    String apiKey = blankToNull(env.get("CRA_LLM_API_KEY"));
+    String baseUrl = blankToNull(env.get("CRA_LLM_BASE_URL"));
+    String model = blankToNull(env.get("CRA_LLM_MODEL"));
     if (required) {
-      if (apiKey == null || apiKey.isBlank()) {
+      if (apiKey == null) {
         throw new CraConfigException("CRA_LLM_API_KEY 未设置（密钥只从环境变量读，05§6）");
       }
-      if (baseUrl == null || baseUrl.isBlank()) {
+      if (baseUrl == null) {
         throw new CraConfigException("CRA_LLM_BASE_URL 未设置");
       }
-      if (model == null || model.isBlank()) {
+      if (model == null) {
         throw new CraConfigException("CRA_LLM_MODEL 未设置");
       }
     }
@@ -196,7 +198,7 @@ final class PlatformArgs {
         continue;
       }
       try {
-        org.cra.core.api.CrossCheckerOptions.Mode.parse(part);
+        CrossCheckerOptions.Mode.parse(part);
       } catch (IllegalArgumentException e) {
         throw new CraConfigException("--crosschecker-modes 非法: " + modes + "（assumption|sniff）");
       }
@@ -234,9 +236,9 @@ final class PlatformArgs {
    *
    * @param full `owner/name` 或 `group/subgroup/project`
    * @param allowNestedGroup GitLab = true
-   * @return `[owner, name]`
+   * @return 拆分的属主与仓库名
    */
-  static String[] splitRepo(String full, boolean allowNestedGroup) {
+  static OwnerRepo splitRepo(String full, boolean allowNestedGroup) {
     int lastSlash = full.lastIndexOf('/');
     if (lastSlash <= 0 || lastSlash == full.length() - 1) {
       throw new CraConfigException(
@@ -248,8 +250,11 @@ final class PlatformArgs {
     if (!allowNestedGroup && owner.contains("/")) {
       throw new CraConfigException("--repo 形如 owner/name: " + full);
     }
-    return new String[] {owner, name};
+    return new OwnerRepo(owner, name);
   }
+
+  /** 仓库标识（owner + name；GitLab 嵌套 group 时 owner 含 `/`）。 */
+  record OwnerRepo(String owner, String name) {}
 
   /**
    * API 根归一：接受实例根或已含 `/api/v4` 的地址（公共体见 {@link LlmParsing#normalizeGitLabApiBase}）。
@@ -276,12 +281,25 @@ final class PlatformArgs {
     return LlmParsing.readGitLabTokenFile(blankToNull(env.get("CRA_GITLAB_TOKEN_FILE")));
   }
 
-  /** 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""，不是 null）。 */
+  /**
+   * 环境变量读取：空白值等同未设置（GitHub Actions 空 input 是 ""，不是 null），非空白值去除首尾空白。
+   *
+   * @param env 环境变量
+   * @param key 键
+   * @param defaultValue 未配置时的默认值
+   * @return 归一后的值
+   */
   static String envOr(Map<String, String> env, String key, String defaultValue) {
-    String value = env.get(key);
-    return value == null || value.isBlank() ? defaultValue : value;
+    String value = blankToNull(env.get(key));
+    return value == null ? defaultValue : value;
   }
 
+  /**
+   * 首个非空白值（不去除首尾空白，调用方按需归一）。
+   *
+   * @param values 候选值
+   * @return 首个非空白值；全空白为 null
+   */
   static String firstNonBlank(String... values) {
     for (String value : values) {
       if (value != null && !value.isBlank()) {
@@ -291,7 +309,178 @@ final class PlatformArgs {
     return null;
   }
 
+  /**
+   * 空白值归一为 null：空白 = 未设置（GitHub Actions 空 input 是 ""）；非空白值去除首尾空白。
+   *
+   * @param value 原始值
+   * @return 去空白后的值或 null
+   */
   static String blankToNull(String value) {
     return value == null || value.isBlank() ? null : value.strip();
+  }
+
+  /**
+   * 正整数解析（flag/env 共用）：null 取默认值，非正整数拒绝（退出码 2）。
+   *
+   * @param key 参数名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 解析结果
+   */
+  static int positiveInt(String key, String value, int defaultValue) {
+    if (value == null) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed <= 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为正整数: " + value);
+    }
+  }
+
+  /**
+   * 布尔解析（R5 共享）：空/空白 = 默认值；true/false（另接受 1/0、yes/no，大小写不敏感）， 其余拒绝（fail fast，与 cra-server
+   * 环境变量绑定同语义）。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 布尔值
+   */
+  static boolean bool(String key, String value, boolean defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    String normalized = value.strip().toLowerCase(Locale.ROOT);
+    if ("true".equals(normalized) || "1".equals(normalized) || "yes".equals(normalized)) {
+      return true;
+    }
+    if ("false".equals(normalized) || "0".equals(normalized) || "no".equals(normalized)) {
+      return false;
+    }
+    throw new CraConfigException(key + " 必须为布尔值（true|false）: " + value);
+  }
+
+  /** 策略值来源（flag 优先、env 次之）：value 为 null 表示未配置；key 是实际来源键名，错误文案按来源保留 flag/env 名。 */
+  record Sourced(String value, String key) {}
+
+  /**
+   * review 策略取值（R5 共享：CLI 参数优先、环境变量次之；空白 env 等同未设置）。
+   *
+   * @param named 命令行命名参数
+   * @param env 环境变量
+   * @param flag 旗标名
+   * @param envKey 环境变量键（05§5 review.* 策略组，review/sweep/server 共用）
+   * @return 原始值 + 来源键名
+   */
+  static Sourced policyValue(
+      Map<String, String> named, Map<String, String> env, String flag, String envKey) {
+    String flagValue = named.get(flag);
+    if (flagValue != null) {
+      return new Sourced(flagValue, flag);
+    }
+    return new Sourced(blankToNull(env.get(envKey)), envKey);
+  }
+
+  /** 降级阈值对（0 &lt; first &lt; second &lt;= 1）。 */
+  record DegradeAt(double first, double second) {}
+
+  /**
+   * 降级阈值解析（R5 共享）：null/空白 = 默认值；形如 {@code 0.70,0.85}（段内空白忽略； 尾逗号按空段丢弃，与 fallback-chain/RPM
+   * 的“空段跳过”约定一致；段数 ≠2 拒绝）。与 cra-server 的 {@code ServerConfig.parseDegradeAt} 逐条同语义。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 阈值对
+   */
+  static DegradeAt degradeAt(String key, String value, DegradeAt defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    String[] parts = value.split(",");
+    if (parts.length != 2) {
+      throw new CraConfigException(key + " 形如 0.70,0.85: " + value);
+    }
+    try {
+      double first = Double.parseDouble(parts[0].strip());
+      double second = Double.parseDouble(parts[1].strip());
+      if (!Double.isFinite(first)
+          || !Double.isFinite(second)
+          || first <= 0
+          || second <= first
+          || second > 1.0) {
+        throw new NumberFormatException();
+      }
+      return new DegradeAt(first, second);
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 阈值非法（0 < first < second <= 1）: " + value);
+    }
+  }
+
+  /**
+   * nit 预算解析（R5 共享）：0 = 禁止 nit，是合法配置（04§3.1）；null/空白 = 默认值。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 非负整数
+   */
+  static int nitBudget(String key, String value, int defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 0) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须为非负整数（0 = 禁止）: " + value);
+    }
+  }
+
+  /**
+   * 百分比解析（R5 共享）：0–100（0 = 关闭抽查保险丝，与 PipelineOptions/SpotCheckFuse 契约一致）。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return 百分比
+   */
+  static int percent(String key, String value, int defaultValue) {
+    if (value == null || value.isBlank()) {
+      return defaultValue;
+    }
+    try {
+      int parsed = Integer.parseInt(value.strip());
+      if (parsed < 0 || parsed > 100) {
+        throw new NumberFormatException();
+      }
+      return parsed;
+    } catch (NumberFormatException e) {
+      throw new CraConfigException(key + " 必须在 [0,100]: " + value);
+    }
+  }
+
+  /**
+   * UNVERIFIED 发布策略解析（R5 共享）：never|labeled；null/空白 = 默认值。
+   *
+   * @param key 来源键名（错误文案）
+   * @param value 原始值
+   * @param defaultValue 缺省值
+   * @return never 或 labeled
+   */
+  static String publishUnverified(String key, String value, String defaultValue) {
+    String resolved = value == null || value.isBlank() ? defaultValue : value.strip();
+    if (!"never".equals(resolved) && !"labeled".equals(resolved)) {
+      throw new CraConfigException(key + " 非法: " + resolved + "（never|labeled）");
+    }
+    return resolved;
   }
 }

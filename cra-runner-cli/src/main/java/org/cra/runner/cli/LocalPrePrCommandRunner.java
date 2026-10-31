@@ -6,6 +6,8 @@ import org.cra.common.exception.CraException;
 import org.cra.common.run.ReviewRequest;
 import org.cra.common.run.ReviewResult;
 import org.cra.common.run.RunStatus;
+import org.cra.common.signoff.SignoffContext;
+import org.cra.common.signoff.TestsStatus;
 import org.cra.common.text.Texts;
 import org.cra.core.api.Orchestrator;
 import org.cra.git.api.GitAssembly;
@@ -26,12 +28,12 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
  *       security-block）。评审段故障在报告中如实声明。
  * </ol>
  */
-final class LocalPrePrCommand {
+final class LocalPrePrCommandRunner {
 
   /** 实跑构建/测试失败（05§3 退出码 4，v1.3.2 定点修订）。 */
   static final int EXIT_BUILD_FAILED = 4;
 
-  private static final Logger LOG = LoggerFactory.getLogger(LocalPrePrCommand.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LocalPrePrCommandRunner.class);
 
   /**
    * 执行本地 pre-PR 流程。
@@ -64,12 +66,8 @@ final class LocalPrePrCommand {
       String reviewSkipReason = null;
       String reviewError = null;
       // M4a：本地实跑给出真实测试状态（低风险 0 人签的前提之一）；作者仍来自 --pr-author/GITHUB_ACTOR
-      org.cra.common.signoff.TestsStatus testsStatus =
-          exec.failed()
-              ? org.cra.common.signoff.TestsStatus.FAILED
-              : org.cra.common.signoff.TestsStatus.PASSED;
-      org.cra.common.signoff.SignoffContext signoffContext =
-          new org.cra.common.signoff.SignoffContext(config.signoff().author(), testsStatus);
+      TestsStatus testsStatus = exec.failed() ? TestsStatus.FAILED : TestsStatus.PASSED;
+      SignoffContext signoffContext = new SignoffContext(config.signoff().author(), testsStatus);
       if (config.llmApiKey() == null || config.llmApiKey().isBlank()) {
         reviewSkipReason = "未配置 CRA_LLM_API_KEY（密钥只从环境变量读，05§6）——LLM 评审未运行，本报告仅含构建/测试实跑结果";
       } else {
@@ -78,7 +76,11 @@ final class LocalPrePrCommand {
         } catch (CraException e) {
           // 评审段自身故障（配置/账本/网关）：不掩盖实跑结论，报告中如实声明
           LOG.error("本地评审段失败: {}", e.getMessage());
-          reviewError = e.getMessage();
+          reviewError = failureMessage(e);
+        } catch (RuntimeException e) {
+          // 组合根装配/网关构造的非预期故障：同样保住已完成的实跑报告（先修构建再看建议）
+          LOG.error("本地评审段未预期故障", e);
+          reviewError = failureMessage(e);
         }
       }
 
@@ -119,7 +121,7 @@ final class LocalPrePrCommand {
   }
 
   private ReviewResult runReview(
-      CraConfig config, LocalGitAdapter git, org.cra.common.signoff.SignoffContext signoffContext) {
+      CraConfig config, LocalGitAdapter git, SignoffContext signoffContext) {
     if (config.llmBaseUrl() == null
         || config.llmBaseUrl().isBlank()
         || config.llmModel() == null
@@ -139,12 +141,17 @@ final class LocalPrePrCommand {
               config.prNumber(),
               config.baseSha(),
               config.headSha(),
-              ReviewCommand.toDepth(config.depth()),
+              ReviewCommandRunner.toDepth(config.depth()),
               config.dryRun(),
               config.securityBlock(),
               signoffContext);
       return orchestrator.run(request);
     }
+  }
+
+  private static String failureMessage(RuntimeException e) {
+    String message = e.getMessage();
+    return message == null || message.isBlank() ? e.getClass().getSimpleName() : message;
   }
 
   private static String shortSha(String sha) {

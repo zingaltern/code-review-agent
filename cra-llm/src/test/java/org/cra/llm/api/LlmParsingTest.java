@@ -48,4 +48,51 @@ class LlmParsingTest {
         .isInstanceOf(CraConfigException.class)
         .hasMessageContaining("bogus");
   }
+
+  @Test
+  void parseMaxConcurrencyDefaultsAndBounds() {
+    // 05§5 max-concurrency：空 = 默认 8；合法域 1..64（有效并发另受线程池宽度约束）
+    assertThat(LlmParsing.parseMaxConcurrency(null, "CRA_LLM_MAX_CONCURRENCY"))
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+    assertThat(LlmParsing.parseMaxConcurrency("  ", "CRA_LLM_MAX_CONCURRENCY"))
+        .isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+    assertThat(LlmParsing.parseMaxConcurrency("16", "CRA_LLM_MAX_CONCURRENCY")).isEqualTo(16);
+    assertThat(LlmParsing.parseMaxConcurrency("1", "CRA_LLM_MAX_CONCURRENCY")).isEqualTo(1);
+    assertThat(LlmParsing.parseMaxConcurrency("64", "CRA_LLM_MAX_CONCURRENCY")).isEqualTo(64);
+
+    for (String invalid : new String[] {"0", "65", "-1", "abc"}) {
+      assertThatThrownBy(() -> LlmParsing.parseMaxConcurrency(invalid, "CRA_LLM_MAX_CONCURRENCY"))
+          .isInstanceOf(CraConfigException.class)
+          .hasMessageContaining("CRA_LLM_MAX_CONCURRENCY 必须在 1..64");
+    }
+  }
+
+  @Test
+  void threeTierConfigOverloadCarriesConcurrency() {
+    LlmGatewayConfig explicit =
+        LlmParsing.threeTierConfig(
+            "https://llm.example/v1",
+            "sk",
+            "m",
+            null,
+            null,
+            java.util.List.of(),
+            LlmGatewayConfig.defaultRpm(),
+            null,
+            3);
+    assertThat(explicit.maxConcurrency()).isEqualTo(3);
+
+    // 旧签名保留：委托默认并发（02§4.5）
+    LlmGatewayConfig legacy =
+        LlmParsing.threeTierConfig(
+            "https://llm.example/v1",
+            "sk",
+            "m",
+            null,
+            null,
+            java.util.List.of(),
+            LlmGatewayConfig.defaultRpm(),
+            null);
+    assertThat(legacy.maxConcurrency()).isEqualTo(LlmGatewayConfig.DEFAULT_MAX_CONCURRENCY);
+  }
 }

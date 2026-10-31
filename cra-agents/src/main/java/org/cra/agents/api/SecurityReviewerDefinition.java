@@ -5,12 +5,12 @@ import java.util.Objects;
 
 /**
  * SecurityReviewer 独立安全 pass（T2.3，03§3 角色表 + 03§6 v1.2 修正：按 chunk 扇出 + 窗口上下文， 仅对敏感路径注入该 chunk
- * 文件全文——独享全量 brief 超 2 倍预算方案已废弃）。 预算对齐 03§6（≤24k 输入 / ≤2k 输出 / 3 轮 / read_file+grep(scoped) / 强档）。
+ * 文件全文——独享全量 brief 超 2 倍预算方案已废弃）。 预算对齐 03§6（≤48k 输入 / ≤4k 输出 / 3 轮 / read_file+grep(scoped) / 强档）。
  */
 public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInput> {
 
   /** 预算（03§6 SecurityReviewer 行）。 */
-  private static final AgentBudget BUDGET = new AgentBudget(24_000, 2_000, 3, 240_000);
+  private static final AgentBudget BUDGET = new AgentBudget(48_000, 4_000, 3, 240_000);
 
   /** 角色（kebab-case，05§1.1）。 */
   public static final AgentRole ROLE = new AgentRole("security-reviewer", "安全评审");
@@ -59,7 +59,8 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(
+        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
   }
 
   @Override
@@ -79,6 +80,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   }
 
   private static String scopedPathsNote(ReviewAgentInput input) {
-    return TemplateSupport.scopedPathsNote(input.scopedPaths(), "read_file/grep_pattern");
+    return TemplateSupport.scopedPathsNote(
+        input.scopedPaths(), ToolWhitelist.READ_FILE_NAME + "/" + ToolWhitelist.GREP_PATTERN_NAME);
   }
 }

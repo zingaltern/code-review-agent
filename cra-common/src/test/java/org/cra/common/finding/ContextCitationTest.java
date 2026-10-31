@@ -98,4 +98,14 @@ class ContextCitationTest {
     assertThat(ContextCitation.eventRefs("the event loop blocks the main thread")).isEmpty();
     assertThat(ContextCitation.eventRefs("矛盾来源：\n- event INC-42")).hasSize(1);
   }
+
+  @Test
+  void overlongHexShaIsNotTruncatedIntoCitation() {
+    // 超过 40 位的十六进制串（SHA-256 / 误粘贴）不得截前 40 位产出指向错误对象的引用——与 BARE_SHA 的 \b 语义对齐
+    String sha256 = "a".repeat(64);
+    assertThat(ContextCitation.commitRefs("commit " + sha256, "src/Foo.java")).isEmpty();
+    assertThat(ContextCitation.commitRefs("对照 " + sha256, "src/Foo.java")).isEmpty();
+    // 41 位：整体不命中，也不得产出 40 位截断
+    assertThat(ContextCitation.commitRefs("commit " + "b".repeat(41), "src/Foo.java")).isEmpty();
+  }
 }

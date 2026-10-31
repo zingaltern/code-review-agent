@@ -3,6 +3,7 @@ package org.cra.core.internal.pipeline;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Summary 覆盖声明段落（04§4.3 Summary 固定结构的"覆盖声明"槽；验收 4：降档、截断计数、覆盖范围在 Summary 如实声明）。 每行一条事实声明；列表类内容超过 5
@@ -41,7 +42,7 @@ public final class SummarySections {
     out.add(
         "评审深度：%s（窗口 ±%d，条件全文%s）"
             .formatted(
-                plan.effectiveDepth().name().toLowerCase(java.util.Locale.ROOT),
+                plan.effectiveDepth().name().toLowerCase(Locale.ROOT),
                 plan.windowLines(),
                 plan.conditionalFullText() ? "开" : "关"));
     plan.notes().forEach(n -> out.add("档位说明：" + n));

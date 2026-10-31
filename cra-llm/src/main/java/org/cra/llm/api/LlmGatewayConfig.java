@@ -43,6 +43,12 @@ public record LlmGatewayConfig(
   /** 并发上限默认值（02§4.5）。 */
   public static final int DEFAULT_MAX_CONCURRENCY = 8;
 
+  /**
+   * 并发上限的配置面允许最大值（05§5 {@code CRA_LLM_MAX_CONCURRENCY} 校验上限）：更宽的值不会提升实际并发——评审/验证受 cra-core
+   * 固定线程池（8/4，09§6）约束，有效并发 = min(配置值, 线程池宽度)。
+   */
+  public static final int MAX_ALLOWED_CONCURRENCY = 64;
+
   /** 重试次数默认值（02§4.5：最多 3 次）。 */
   public static final int DEFAULT_MAX_RETRIES = 3;
 

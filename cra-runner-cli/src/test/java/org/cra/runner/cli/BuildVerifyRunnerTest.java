@@ -99,4 +99,50 @@ class BuildVerifyRunnerTest {
     assertThat(excerpts).hasSize(BuildVerifyRunner.EXCERPT_CAP);
     assertThat(BuildVerifyRunner.excerptTruncated(output)).isTrue();
   }
+
+  @Test
+  void tailExcerptCountsNonBlankLinesWithoutTrailingNewlineOffByOne() {
+    // 生产输出总以换行结尾：恰好 20 行时不得误报截断/漏首行；21 行时取末尾 20 行
+    String exactlyTwenty = numberedLines(20);
+    assertThat(BuildVerifyRunner.failureExcerpts(exactlyTwenty)).hasSize(20).startsWith("line 1");
+    assertThat(BuildVerifyRunner.excerptTruncated(exactlyTwenty)).isFalse();
+
+    String twentyOne = numberedLines(21);
+    List<String> excerpts = BuildVerifyRunner.failureExcerpts(twentyOne);
+    assertThat(excerpts).hasSize(20).startsWith("line 2").endsWith("line 21");
+    assertThat(BuildVerifyRunner.excerptTruncated(twentyOne)).isTrue();
+  }
+
+  @Test
+  void timeoutKillsDescendantProcesses() throws Exception {
+    // Maven 会 fork 测试 JVM：超时必须清理整棵进程树，不能只杀父进程留下孤儿
+    Path script = tempDir.resolve("slow.sh");
+    Files.writeString(script, "#!/bin/sh\nsleep 30 &\necho $! > child.pid\nwait\n");
+    Path childPidFile = tempDir.resolve("child.pid");
+    System.setProperty("cra.verify.timeoutSec", "1");
+    try {
+      assertThatThrownBy(
+              () ->
+                  new BuildVerifyRunner(tempDir.resolve("runs")).run(tempDir, "/bin/sh " + script))
+          .isInstanceOf(CraIntegrationException.class)
+          .hasMessageContaining("超时");
+    } finally {
+      System.clearProperty("cra.verify.timeoutSec");
+    }
+    long childPid = Long.parseLong(Files.readString(childPidFile).strip());
+    boolean alive = true;
+    for (int i = 0; i < 30 && alive; i++) {
+      Thread.sleep(100);
+      alive = ProcessHandle.of(childPid).map(ProcessHandle::isAlive).orElse(false);
+    }
+    assertThat(alive).isFalse();
+  }
+
+  private static String numberedLines(int count) {
+    StringBuilder out = new StringBuilder();
+    for (int i = 1; i <= count; i++) {
+      out.append("line ").append(i).append('\n');
+    }
+    return out.toString();
+  }
 }
