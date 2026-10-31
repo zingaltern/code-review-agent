@@ -144,6 +144,48 @@ class PostgresEventHistoryStoreTest {
   }
 
   @Test
+  void pathPrefixMatchesBySegmentAndTreatsWildcardsLiterally() {
+    // ADR-0012 §2.2：目录前缀按路径段边界匹配；事件路径里的 `_`/`%` 不得当 LIKE 通配符
+    PostgresEventHistoryStore store = new PostgresEventHistoryStore(dataSource);
+    store.upsertAll(
+        List.of(
+            event(
+                "P-1",
+                "owner/repo",
+                "billing",
+                Instant.parse("2026-09-01T00:00:00Z"),
+                "ticket",
+                "路径段边界",
+                List.of(),
+                List.of("src/my_module/**"))));
+
+    assertThat(
+            store.search(
+                new EventQuery(
+                    "owner/repo",
+                    List.of("src/my_module/A.java"),
+                    List.of(),
+                    List.of(),
+                    null,
+                    null,
+                    10)))
+        .extracting(ProductEvent::eventId)
+        .containsExactly("P-1");
+
+    assertThat(
+            store.search(
+                new EventQuery(
+                    "owner/repo",
+                    List.of("src/myXmodule/A.java"),
+                    List.of(),
+                    List.of(),
+                    null,
+                    null,
+                    10)))
+        .isEmpty();
+  }
+
+  @Test
   void schedulerRepeatedRunsDoNotDuplicate() throws Exception {
     Path file = dir.resolve("events.jsonl");
     Files.writeString(
@@ -157,7 +199,7 @@ class PostgresEventHistoryStoreTest {
         new IncrementalEventHistoryCollector(
             new JsonlEventHistorySource(file.toString(), 1_000_000, java.time.Clock.systemUTC()),
             store,
-            new EventCollectionSettings(365, 24, 3, 0, 1000));
+            new EventCollectionSettings(24, 3, 0, 1000));
     EventHistoryCollectionJob job = new EventHistoryCollectionJob(true, collector, 365);
 
     EventHistoryCollector.CollectionResult first = job.runOnce();
