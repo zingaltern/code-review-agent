@@ -12,15 +12,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * 有界评审队列 + 背压（02§5 服务形态）：容量满时 {@link #submit} 返回 FULL，HTTP 层回 503，GitHub 重投同一 delivery（幂等键保证不重复评审）。
+ * 有界评审队列 + 背压（02§5 服务形态）：容量满时 {@link #submit} 返回 FULL，HTTP 层回 503，平台重投同一事件（GitHub delivery id /
+ * GitLab event UUID；幂等键保证不重复评审）。
  *
- * <p>worker 数固定；stop 先停止接收，再在排水超时内等待队列清空与 in-flight 归零，最后 shutdownNow——Spring
- * 优雅停机（server.shutdown=graceful） 之后执行，避免把已接受的 webhook 丢掉。
+ * <p>worker 数固定；stop 先停止接收，再等待 worker 把已入队任务执行完（排水超时后中断）——Spring 优雅停机（server.shutdown=graceful）
+ * 之后执行，避免把已接受的 webhook 丢掉。
  */
 public final class ReviewQueue {
 
   private static final Logger LOG = LoggerFactory.getLogger(ReviewQueue.class);
   private static final long POLL_MILLIS = 200;
+  private static final long TERMINATION_GRACE_SECONDS = 5;
 
   /** 任务处理器（生产实现 = 更新 delivery 状态 + 调 ReviewExecutor）。 */
   @FunctionalInterface
@@ -150,27 +152,28 @@ public final class ReviewQueue {
     return SubmitResult.FULL;
   }
 
-  /** 优雅停机（Spring destroyMethod）：停止接收 → 等待排水 → 中断剩余 worker。 */
+  /** 优雅停机（Spring destroyMethod）：停止接收 → 等待 worker 排水（超时中断）。 */
   public void stop() {
     if (!accepting.compareAndSet(true, false)) {
       return;
     }
     LOG.info("review 队列停机开始: queued={} inFlight={}", queue.size(), inFlight.get());
-    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(drainTimeoutMillis);
-    while ((!queue.isEmpty() || inFlight.get() > 0) && System.nanoTime() < deadline) {
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        break;
-      }
-    }
-    boolean drained = queue.isEmpty() && inFlight.get() == 0;
-    workers.shutdownNow();
+    // shutdown 不中断运行中的 loop：worker 在 accepting=false 且队列空时自然退出，awaitTermination 覆盖已取走未计数的在途任务
+    workers.shutdown();
+    boolean drained;
     try {
-      workers.awaitTermination(5, TimeUnit.SECONDS);
+      drained = workers.awaitTermination(drainTimeoutMillis, TimeUnit.MILLISECONDS);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+      drained = false;
+    }
+    if (!drained) {
+      workers.shutdownNow();
+      try {
+        workers.awaitTermination(TERMINATION_GRACE_SECONDS, TimeUnit.SECONDS);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+      }
     }
     LOG.info(
         "review 队列停机完成: drained={} queued={} inFlight={} accepted={} completed={} failed={} rejected={}",
@@ -228,9 +231,5 @@ public final class ReviewQueue {
         inFlight.decrementAndGet();
       }
     }
-  }
-
-  private int remainingCapacity() {
-    return ((ArrayBlockingQueue<?>) queue).remainingCapacity();
   }
 }
