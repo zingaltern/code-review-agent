@@ -96,28 +96,43 @@ public final class DefaultContextAssembler implements ContextAssembler {
       List<String> lines = textLines(content);
       if (lines.isEmpty()) {
         skippedFiles.add(file.path() + "（无 head 文件内容：" + describe(file) + "）");
-        continue;
-      }
-      if (input.conditionalFullText() && lines.size() <= input.fullFileMaxLines()) {
-        out.append("### ").append(file.path()).append("（全文，").append(lines.size()).append(" 行）\n");
-        out.append(numbered(lines, 1));
-        continue;
-      }
-      if (file.hunks().isEmpty()) {
-        continue;
-      }
-      List<int[]> ranges = mergeRanges(file.hunks(), input.windowLines(), lines.size());
-      out.append("### ")
-          .append(file.path())
-          .append("（hunk 窗口 ±")
-          .append(input.windowLines())
-          .append("）\n");
-      for (int[] range : ranges) {
-        out.append("#### L").append(range[0]).append("-L").append(range[1]).append("\n");
-        out.append(numbered(lines.subList(range[0] - 1, range[1]), range[0]));
+      } else if (input.conditionalFullText() && lines.size() <= input.fullFileMaxLines()) {
+        appendFullFile(out, file, lines);
+      } else if (!file.hunks().isEmpty()) {
+        appendWindowRanges(out, file, lines, input.windowLines());
       }
     }
     return out.toString().stripTrailing();
+  }
+
+  /**
+   * 追加条件全文段（文件标题 + 全文行号）。
+   *
+   * @param out 组装输出
+   * @param file 文件
+   * @param lines 全文行
+   */
+  private static void appendFullFile(StringBuilder out, DiffFile file, List<String> lines) {
+    out.append("### ").append(file.path()).append("（全文，").append(lines.size()).append(" 行）\n");
+    out.append(numbered(lines, 1));
+  }
+
+  /**
+   * 追加 hunk 扩窗段（文件标题 + 每个合并区间的行号标题与内容）。
+   *
+   * @param out 组装输出
+   * @param file 文件
+   * @param lines 全文行
+   * @param windowLines hunk 扩窗行数
+   */
+  private static void appendWindowRanges(
+      StringBuilder out, DiffFile file, List<String> lines, int windowLines) {
+    List<int[]> ranges = mergeRanges(file.hunks(), windowLines, lines.size());
+    out.append("### ").append(file.path()).append("（hunk 窗口 ±").append(windowLines).append("）\n");
+    for (int[] range : ranges) {
+      out.append("#### L").append(range[0]).append("-L").append(range[1]).append("\n");
+      out.append(numbered(lines.subList(range[0] - 1, range[1]), range[0]));
+    }
   }
 
   private static String describe(DiffFile file) {
