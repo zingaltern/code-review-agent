@@ -323,7 +323,8 @@ class GitLabHttpAdapterWireMockTest {
     wm.stubFor(
         post(urlEqualTo(PROJECT + "/merge_requests/7/discussions"))
             .willReturn(aResponse().withStatus(500).withBody("boom")));
-    assertThatThrownBy(() -> adapter.postReview(command(1)))
+    PostReviewCommand cmd = command(1);
+    assertThatThrownBy(() -> adapter.postReview(cmd))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("GitLab API 500");
   }

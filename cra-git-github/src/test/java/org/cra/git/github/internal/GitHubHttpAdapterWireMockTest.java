@@ -241,7 +241,8 @@ class GitHubHttpAdapterWireMockTest {
     wm.stubFor(
         post(urlEqualTo("/repos/o/r/pulls/7/reviews"))
             .willReturn(aResponse().withStatus(500).withBody("boom")));
-    assertThatThrownBy(() -> adapter.postReview(command(1)))
+    PostReviewCommand cmd = command(1);
+    assertThatThrownBy(() -> adapter.postReview(cmd))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("GitHub API 500");
   }
@@ -430,8 +431,10 @@ class GitHubHttpAdapterWireMockTest {
                 "o",
                 "r",
                 "abc1234",
-                "## cra 评审 Summary\n\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE "
-                    + "| findings=0 | suppressed=0 -->"));
+                """
+                ## cra 评审 Summary
+
+                <!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE | findings=0 | suppressed=0 -->"""));
     assertThat(id).contains(7777L);
   }
 
@@ -450,8 +453,10 @@ class GitHubHttpAdapterWireMockTest {
                 "o",
                 "r",
                 "[cra-nightly] PR #7 abc1234 存量评审",
-                "## cra 评审 Summary\n\n<!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE "
-                    + "| findings=0 | suppressed=0 -->",
+                """
+                ## cra 评审 Summary
+
+                <!-- cra:v=2.1 | run=run_1 | commit=abc1234 | status=DONE | findings=0 | suppressed=0 -->""",
                 List.of("cra-nightly")));
     assertThat(number).contains(15L);
   }
@@ -641,7 +646,8 @@ class GitHubHttpAdapterWireMockTest {
             .whenScenarioStateIs("item")
             .willReturn(aResponse().withStatus(401).withBody("{\"message\":\"Bad credentials\"}")));
 
-    assertThatThrownBy(() -> adapter.postReview(command(1)))
+    PostReviewCommand secondAttempt = command(1);
+    assertThatThrownBy(() -> adapter.postReview(secondAttempt))
         .isInstanceOf(CraIntegrationException.class)
         .hasMessageContaining("401");
   }

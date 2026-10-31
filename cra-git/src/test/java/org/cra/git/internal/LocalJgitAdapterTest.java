@@ -57,7 +57,7 @@ class LocalJgitAdapterTest {
   }
 
   @AfterEach
-  void tearDown() throws Exception {
+  void tearDown() {
     if (adapter != null) {
       adapter.close();
     }
@@ -144,7 +144,8 @@ class LocalJgitAdapterTest {
     String binSha = commit("add binary");
     assertThat(adapter.readFile(new RepoRef("o", "r"), binSha, "bin.dat").binary()).isTrue();
 
-    assertThatThrownBy(() -> adapter.readFile(new RepoRef("o", "r"), head, "no/such.java"))
+    RepoRef repoRef = new RepoRef("o", "r");
+    assertThatThrownBy(() -> adapter.readFile(repoRef, head, "no/such.java"))
         .isInstanceOf(CraIntegrationException.class);
   }
 
@@ -212,7 +213,8 @@ class LocalJgitAdapterTest {
   @Test
   void nonRepoDirectoryFailsAtConstruction() {
     // 独立非仓库目录：FileRepositoryBuilder 向上搜索 .git，不得命中 fixture 仓库
-    assertThatThrownBy(() -> new LocalJgitAdapter(nonRepoDir.resolve("nested")))
+    Path nested = nonRepoDir.resolve("nested");
+    assertThatThrownBy(() -> new LocalJgitAdapter(nested))
         .isInstanceOf(CraIntegrationException.class);
   }
 }
