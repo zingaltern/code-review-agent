@@ -66,9 +66,13 @@ public final class DefaultLlmGateway implements LlmGateway {
     List<ModelTier> sequence = attemptSequence(requested);
     List<String> attemptFailures = new ArrayList<>();
     long consumed = 0; // 降级链上先前端点已消耗的输入 token（估算），并入最终结果
+    boolean requestedAttempted = false; // 请求档位是否真的被尝试过（注记分型依据，不从 config 反推）
     try {
       for (int index = 0; index < sequence.size(); index++) {
         ModelTier tier = sequence.get(index);
+        if (tier == requested) {
+          requestedAttempted = true;
+        }
         if (index > 0) {
           // fallback 链触发（09§5 WARN：降级发生）
           log.warn(
@@ -79,10 +83,9 @@ public final class DefaultLlmGateway implements LlmGateway {
         if (response.status() == LlmStatus.OK) {
           String degradation = null;
           if (tier != requested) {
-            // 语义区分：请求档位确实尝试过且失败后换端点 = model-fallback（02§4.2 降级链）；
-            // 请求档位未配置端点、从未尝试 = tier-unconfigured（回落而非降级，指标可区分）
-            String kind =
-                config.models().containsKey(requested) ? "model-fallback:" : "tier-unconfigured:";
+            // 语义区分按真实尝试史：请求档位尝试过且失败后换端点 = model-fallback（02§4.2 降级链）；
+            // 从未尝试（未配置回落）= tier-unconfigured（回落而非降级，指标可区分）
+            String kind = requestedAttempted ? "model-fallback:" : "tier-unconfigured:";
             degradation =
                 kind
                     + requested.name().toLowerCase(Locale.ROOT)
