@@ -143,8 +143,8 @@ class ReviewStageTest {
         agent.buildBrief(
             new ReviewAgentInput("PR #1", "", "d", "w", "s", "", "", java.util.Set.of()));
     java.nio.file.Path persisted = trace.persistBrief(brief, "cra-runner-cli/src");
-    org.assertj.core.api.Assertions.assertThat(persisted.getFileName().toString())
-        .isEqualTo("bug-hunter_dataflow-cra-runner-cli_src.md");
+    org.assertj.core.api.Assertions.assertThat(persisted.getFileName())
+        .hasToString("bug-hunter_dataflow-cra-runner-cli_src.md");
     org.assertj.core.api.Assertions.assertThat(java.nio.file.Files.exists(persisted)).isTrue();
   }
 
@@ -485,7 +485,9 @@ class ReviewStageTest {
     LlmGateway blocking =
         request -> {
           try {
-            Thread.sleep(60_000);
+            // 阻塞至被超时机制中断（上限 60s，语义与 sleep 相同但不再空转固定时长）
+            new java.util.concurrent.CountDownLatch(1)
+                .await(60, java.util.concurrent.TimeUnit.SECONDS);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
           }

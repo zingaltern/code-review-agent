@@ -129,9 +129,10 @@ class AgentRunnerToolLoopTest {
     assertThat(gateway.allRequests()).hasSize(2);
     // 第二轮请求带回了 UNTRUSTED 定界的工具结果（带行号）
     String secondPrompt = gateway.allRequests().get(1).userPrompt();
-    assertThat(secondPrompt).contains("UNTRUSTED_CONTENT");
-    assertThat(secondPrompt).contains("L1: package demo;");
-    assertThat(secondPrompt).contains("L2: public class Foo {");
+    assertThat(secondPrompt)
+        .contains("UNTRUSTED_CONTENT")
+        .contains("L1: package demo;")
+        .contains("L2: public class Foo {");
   }
 
   @Test
@@ -242,7 +243,7 @@ class AgentRunnerToolLoopTest {
   }
 
   @Test
-  void timeBudgetKillsSlowAgent() throws Exception {
+  void timeBudgetKillsSlowAgent() {
     LlmGateway slow =
         request -> {
           try {
@@ -360,7 +361,8 @@ class AgentRunnerToolLoopTest {
     assertThat(traceFile).exists();
     String content =
         java.nio.file.Files.readString(traceFile, java.nio.charset.StandardCharsets.UTF_8);
-    assertThat(content).contains("\"event\":\"agent_budget_exceeded\"");
-    assertThat(content).contains("\"limit\":\"turns\"");
+    assertThat(content)
+        .contains("\"event\":\"agent_budget_exceeded\"")
+        .contains("\"limit\":\"turns\"");
   }
 }

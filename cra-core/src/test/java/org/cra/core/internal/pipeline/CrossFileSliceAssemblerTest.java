@@ -19,10 +19,12 @@ class CrossFileSliceAssemblerTest {
         KEEP_ALIVE,
         null,
         "modified",
-        "@@ -7,3 +7,5 @@\n public class SessionKeepAlive {\n"
-            + "+  boolean shouldKeepAlive(Duration sessionAge) {\n"
-            + "+    return true;\n"
-            + " }",
+        """
+        @@ -7,3 +7,5 @@
+         public class SessionKeepAlive {
+        +  boolean shouldKeepAlive(Duration sessionAge) {
+        +    return true;
+         }""",
         List.of(new DiffHunk(7, 3, 7, 5)));
   }
 

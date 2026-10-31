@@ -4,8 +4,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -312,7 +314,7 @@ class ReviewPipelineTest {
     assertThat(runCaptor.getValue().commitSha()).isEqualTo(HEAD);
     assertThat(runCaptor.getValue().status()).isEqualTo("DONE");
     assertThat(runCaptor.getValue().findings()).isEqualTo(1);
-    assertThat(runCaptor.getValue().suppressed()).isEqualTo(0);
+    assertThat(runCaptor.getValue().suppressed()).isZero();
     assertThat(runCaptor.getValue().commentId()).isEqualTo(9500L);
     String expectedFp =
         FingerprintCalculator.fingerprint(
@@ -347,8 +349,9 @@ class ReviewPipelineTest {
         .matches("dataflow@[0-9a-f]{8}");
     Path runDir = Path.of(result.traceRef().substring("file://".length()));
     String trace = Files.readString(runDir.resolve("trace.ndjson"));
-    assertThat(trace).contains("\"event\":\"template_versions\"");
-    assertThat(trace).contains("\"bug-hunter/dataflow\":\"dataflow@");
+    assertThat(trace)
+        .contains("\"event\":\"template_versions\"")
+        .contains("\"bug-hunter/dataflow\":\"dataflow@");
   }
 
   @Test
@@ -686,9 +689,7 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("降为 Quick 质量");
-    assertThat(summary).contains("覆盖：评审 1/1 个变更文件");
-    assertThat(summary).contains("窗口 ±15");
+    assertThat(summary).contains("降为 Quick 质量").contains("覆盖：评审 1/1 个变更文件").contains("窗口 ±15");
     assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
     assertThat(result.stats().suppressedByTruncation()).isZero();
   }
@@ -723,9 +724,7 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("仅评审 priority_paths");
-    assertThat(summary).contains("跳过");
-    assertThat(summary).contains("misc/Other.java");
+    assertThat(summary).contains("仅评审 priority_paths").contains("跳过").contains("misc/Other.java");
     assertThat(result.stats().coverage().filesReviewed()).isEqualTo(1);
     assertThat(result.stats().coverage().filesChanged()).isEqualTo(2);
   }
@@ -784,8 +783,9 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("因预算截断丢弃 2 条候选（未验证、未发布；02§4.4）");
-    assertThat(summary).containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
+    assertThat(summary)
+        .contains("因预算截断丢弃 2 条候选（未验证、未发布；02§4.4）")
+        .containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
     assertThat(result.stats().degradations()).contains("budget-truncate-85");
   }
 
@@ -889,10 +889,9 @@ class ReviewPipelineTest {
   @Test
   void blameRecheckGroupsConfirmedPreExisting() {
     // 07 T1.7：嫌疑 finding 经 blame 确证（锚行最后修改 commit 不在 PR 集内）→ Pre-existing 分组
-    org.cra.git.api.LocalRepoContext repo =
-        org.mockito.Mockito.mock(org.cra.git.api.LocalRepoContext.class);
-    org.mockito.Mockito.when(repo.localRepoRoot()).thenReturn(Optional.of("/w"));
-    org.mockito.Mockito.when(repo.blame(anyString(), anyInt(), anyString()))
+    org.cra.git.api.LocalRepoContext repo = mock(org.cra.git.api.LocalRepoContext.class);
+    when(repo.localRepoRoot()).thenReturn(Optional.of("/w"));
+    when(repo.blame(anyString(), anyInt(), anyString()))
         .thenReturn(new org.cra.common.git.BlameResult(FILE, 4, "old-commit-outside-pr", "alice"));
     pipeline =
         new ReviewPipeline(
@@ -966,45 +965,34 @@ class ReviewPipelineTest {
    * 方法，必须显式桥接）。
    */
   private void bridgeKeyedLedgerToIntStubs() {
-    org.mockito.Mockito.when(
-            ledger.findCompletion(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.findCompletion(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               return ledger.findCompletion(k.prNumber(), k.commitSha());
             });
-    org.mockito.Mockito.when(
-            ledger.publishedFindings(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.publishedFindings(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.publishedFindings(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.completedRuns(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.completedRuns(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.completedRuns(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.suspectMarkerCount(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class)))
+    when(ledger.suspectMarkerCount(any(org.cra.common.git.ReviewKey.class)))
         .thenAnswer(
             inv ->
                 ledger.suspectMarkerCount(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber()));
-    org.mockito.Mockito.when(
-            ledger.comment(
-                org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-                org.mockito.ArgumentMatchers.anyLong()))
+    when(ledger.comment(any(org.cra.common.git.ReviewKey.class), anyLong()))
         .thenAnswer(
             inv ->
                 ledger.comment(
                     ((org.cra.common.git.ReviewKey) inv.getArgument(0)).prNumber(),
                     inv.getArgument(1)));
-    org.mockito.Mockito.doAnswer(
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordRunCompletion(k.prNumber(), inv.getArgument(1));
@@ -1012,9 +1000,8 @@ class ReviewPipelineTest {
             })
         .when(ledger)
         .recordRunCompletion(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerRunMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class), any(org.cra.common.git.LedgerRunMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordPublishedFinding(k.prNumber(), inv.getArgument(1));
@@ -1022,19 +1009,16 @@ class ReviewPipelineTest {
             })
         .when(ledger)
         .recordPublishedFinding(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.LedgerFindingMarker.class));
-    org.mockito.Mockito.doAnswer(
+            any(org.cra.common.git.ReviewKey.class),
+            any(org.cra.common.git.LedgerFindingMarker.class));
+    doAnswer(
             inv -> {
               org.cra.common.git.ReviewKey k = inv.getArgument(0);
               ledger.recordTemplateVersions(k.prNumber(), inv.getArgument(1), inv.getArgument(2));
               return null;
             })
         .when(ledger)
-        .recordTemplateVersions(
-            org.mockito.ArgumentMatchers.any(org.cra.common.git.ReviewKey.class),
-            org.mockito.ArgumentMatchers.anyString(),
-            org.mockito.ArgumentMatchers.anyMap());
+        .recordTemplateVersions(any(org.cra.common.git.ReviewKey.class), anyString(), anyMap());
   }
 
   // ---------- M4a：风险分级与签字建议（07§5；01§3.4） ----------
@@ -1133,7 +1117,12 @@ class ReviewPipelineTest {
                     88L,
                     LedgerComment.KIND_ISSUE,
                     "cra-bot",
-                    "## cra 评审 Summary（run_old）\n\n" + "### 签字建议（建议，非审批）\n- 风险分级：高风险 → 建议 2 人签字\n",
+                    """
+                    ## cra 评审 Summary（run_old）
+
+                    ### 签字建议（建议，非审批）
+                    - 风险分级：高风险 → 建议 2 人签字
+                    """,
                     Instant.now(),
                     null)));
     pipeline = signoffPipeline(SignoffOptions.defaults(List.of("zingaltern")));
@@ -1229,11 +1218,12 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("仅测试文件/无可评审变更，按策略不评审");
-    assertThat(summary).contains("测试文件按策略不评审：1 个");
-    assertThat(summary).contains("本次无可评审变更");
-    assertThat(summary).doesNotContain("本次未发现问题");
-    assertThat(summary).contains("status=DONE");
+    assertThat(summary)
+        .contains("仅测试文件/无可评审变更，按策略不评审")
+        .contains("测试文件按策略不评审：1 个")
+        .contains("本次无可评审变更")
+        .doesNotContain("本次未发现问题")
+        .contains("status=DONE");
     assertThat(captor.getValue().inlineComments()).isEmpty();
     assertThat(result.stats().coverage().filesReviewed()).isZero();
     assertThat(result.stats().coverage().filesChanged()).isEqualTo(1);
@@ -1259,9 +1249,10 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("测试文件 1 个按默认策略跳过");
-    assertThat(summary).contains("另 1 个被 skip_paths/hard-cap 裁剪");
-    assertThat(summary).doesNotContain("仅测试文件/无可评审变更");
+    assertThat(summary)
+        .contains("测试文件 1 个按默认策略跳过")
+        .contains("另 1 个被 skip_paths/hard-cap 裁剪")
+        .doesNotContain("仅测试文件/无可评审变更");
   }
 
   @Test
@@ -1284,8 +1275,7 @@ class ReviewPipelineTest {
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
     String summary = captor.getValue().summaryBody();
-    assertThat(summary).contains("覆盖：评审 2/2 个变更文件");
-    assertThat(summary).doesNotContain("测试文件按策略不评审");
+    assertThat(summary).contains("覆盖：评审 2/2 个变更文件").doesNotContain("测试文件按策略不评审");
     assertThat(result.stats().coverage().filesReviewed()).isEqualTo(2);
   }
 
