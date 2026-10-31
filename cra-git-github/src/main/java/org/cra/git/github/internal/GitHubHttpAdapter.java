@@ -4,14 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.nio.charset.CharacterCodingException;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
+import java.util.function.LongConsumer;
+import java.util.regex.Pattern;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -27,11 +28,6 @@ import org.cra.common.git.DispositionSupport;
 import org.cra.common.git.FileContent;
 import org.cra.common.git.InlineComment;
 import org.cra.common.git.LedgerComment;
-import org.cra.common.git.LedgerFindingMarker;
-import org.cra.common.git.LedgerMarkerParser;
-import org.cra.common.git.LedgerMarkerParser.MarkerParseResult;
-import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
-import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PostCommitReviewCommand;
 import org.cra.common.git.PostIssueCommand;
 import org.cra.common.git.PostReviewCommand;
@@ -59,16 +55,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
 
   private static final Logger LOG = LoggerFactory.getLogger(GitHubHttpAdapter.class);
   private static final ObjectMapper MAPPER = new ObjectMapper();
-  private static final String CI_BOT_LOGIN = "github-actions[bot]";
-  private static final int PAGE_SIZE = 100;
-  private static final int MAX_PAGES = 100;
-
-  /** 分页硬上限（100×100 = 10k 条）：触顶即显式失败，禁止把部分结果冒充"全部评论"。 */
-  private static final int MAX_ITEMS = PAGE_SIZE * MAX_PAGES;
 
   private final GitHubHttpTransport transport;
-  private final LedgerMarkerParser markerParser = new LedgerMarkerParser();
-  private String cachedLogin;
+  private final GitHubCommentReader commentReader;
 
   /**
    * @param apiBase API 根（默认 https://api.github.com，测试注入 WireMock 地址）
@@ -76,12 +65,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
    * @param http HTTP 客户端
    * @param sleeper 退避睡眠（测试注入即时实现）
    */
-  public GitHubHttpAdapter(
-      String apiBase,
-      String token,
-      java.net.http.HttpClient http,
-      java.util.function.LongConsumer sleeper) {
+  public GitHubHttpAdapter(String apiBase, String token, HttpClient http, LongConsumer sleeper) {
     this.transport = new GitHubHttpTransport(apiBase, token, http, sleeper);
+    this.commentReader = new GitHubCommentReader(transport);
   }
 
   // ---------- 读：diff / 文件 / 文件树 ----------
@@ -143,10 +129,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
             repo, "/git/trees/" + GitHubPayloadSupport.urlEncode(sha) + "?recursive=1");
     if (root.path("truncated").asBoolean(false)) {
       // ADR-0015 §2.2：不可得不静默——截断的文件树会让"调用方/测试覆盖"判定把未看到的文件当成不存在
-      throw new org.cra.common.exception.CraIntegrationException(
-          "GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
+      throw new CraIntegrationException("GitHub tree 被平台截断（>100k 条目或 >7MB），无法作为完整文件索引: sha=" + sha);
     }
-    java.util.regex.Pattern glob = PathGlobs.compile(pathGlob);
+    Pattern glob = PathGlobs.compile(pathGlob);
     List<String> out = new ArrayList<>();
     for (JsonNode entry : root.path("tree")) {
       if ("blob".equals(entry.path("type").asText())) {
@@ -168,7 +153,7 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     if (!cmd.inlineComments().isEmpty()) {
       try {
         PostedReview posted = postInlineReview(cmd, cmd.inlineComments());
-        reviewId = Optional.of(posted.reviewId());
+        reviewId = posted.reviewId().isBlank() ? Optional.empty() : Optional.of(posted.reviewId());
         List<Long> ids = posted.commentIds();
         for (int i = 0; i < cmd.inlineComments().size(); i++) {
           InlineComment c = cmd.inlineComments().get(i);
@@ -215,7 +200,9 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     for (JsonNode c : response.path("comments")) {
       ids.add(c.path("id").asLong(0));
     }
-    return new PostedReview(response.path("id").asText(), ids);
+    JsonNode id = response.path("id");
+    String reviewId = id.isMissingNode() || id.isNull() ? "" : id.asText("");
+    return new PostedReview(reviewId, ids);
   }
 
   private void perItemFallback(PostReviewCommand cmd, List<ReviewItemResult> items) {
@@ -245,17 +232,23 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
                 commentId > 0 ? commentId : null,
                 ""));
       } catch (CraIntegrationException e) {
-        items.add(
-            new ReviewItemResult(
-                one.findingId(),
-                one.path(),
-                one.line(),
-                PublishStatus.SUMMARY_FALLBACK,
-                AnchorStatus.SUMMARY_FALLBACK,
-                null,
-                e.getMessage()));
+        if (!GitHubHttpTransport.isUnprocessable(e)) {
+          throw e; // 逐条发布时的鉴权/服务端故障仍是 run 级失败，只有锚定 422 降级
+        }
+        items.add(fallbackItem(one, e.getMessage()));
       }
     }
+  }
+
+  private static ReviewItemResult fallbackItem(InlineComment comment, String reason) {
+    return new ReviewItemResult(
+        comment.findingId(),
+        comment.path(),
+        comment.line(),
+        PublishStatus.SUMMARY_FALLBACK,
+        AnchorStatus.SUMMARY_FALLBACK,
+        null,
+        reason);
   }
 
   private Optional<Long> postSummary(PostReviewCommand cmd) {
@@ -325,364 +318,35 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     return number > 0 ? Optional.of(number) : Optional.empty();
   }
 
-  // ---------- 账本：bot 评论 + 标记解析（05§1.3） ----------
+  // ---------- CommentSource / 账本与处置读侧（实现委托 GitHubCommentReader） ----------
 
   @Override
   public CommentLedger fetchBotComments(RepoRef repo, int prNumber) {
-    String login = botLogin(repo);
-    List<LedgerComment> comments = new ArrayList<>();
-    List<LedgerFindingMarker> findings = new ArrayList<>();
-    List<LedgerRunMarker> runs = new ArrayList<>();
-    int[] suspectCount = {0};
-    collectPaged(
-        repo, "/pulls/" + prNumber + "/comments", login, LedgerComment.KIND_INLINE, comments);
-    collectPaged(
-        repo, "/issues/" + prNumber + "/comments", login, LedgerComment.KIND_ISSUE, comments);
-    for (LedgerComment c : comments) {
-      ParseOutcome outcome = markerParser.parse(c.body());
-      suspectCount[0] += outcome.suspects().size();
-      if (outcome.marker().isPresent()) {
-        MarkerParseResult parsed = outcome.marker().get();
-        if (parsed instanceof MarkerParseResult.FindingMark f) {
-          findings.add(
-              new LedgerFindingMarker(
-                  f.fingerprint(),
-                  f.file(),
-                  f.line(),
-                  f.category(),
-                  f.findingId(),
-                  f.runId(),
-                  f.commitSha(),
-                  c.id()));
-        } else if (parsed instanceof MarkerParseResult.RunMark r) {
-          runs.add(
-              new LedgerRunMarker(
-                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
-        }
-      }
-    }
-    return new CommentLedger(comments, findings, runs, suspectCount[0]);
-  }
-
-  private void collectPaged(
-      RepoRef repo, String path, String login, String kind, List<LedgerComment> out) {
-    // 与 GitLab 同语义：恰好 MAX_PAGES 个满页后探第 MAX_PAGES+1 页，空=恰好 10k 正常结束，非空=超限
-    for (int page = 1; page <= MAX_PAGES + 1; page++) {
-      JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
-      if (page == MAX_PAGES + 1) {
-        if (root.isArray() && !root.isEmpty()) {
-          throw new org.cra.common.exception.CraIntegrationException(
-              "评论分页超过上限 " + MAX_ITEMS + " 条，无法保证账本完整: " + path);
-        }
-        return;
-      }
-      if (!root.isArray() || root.isEmpty()) {
-        return;
-      }
-      for (JsonNode c : root) {
-        if (!login.equals(c.path("user").path("login").asText())) {
-          continue; // 只认 bot 自身评论（账本语义，02§5）
-        }
-        out.add(
-            new LedgerComment(
-                c.path("id").asLong(),
-                kind,
-                login,
-                c.path("body").asText(""),
-                c.path("created_at").isMissingNode()
-                    ? Instant.EPOCH
-                    : Instant.parse(c.path("created_at").asText()),
-                c.path("commit_id").isMissingNode() || c.path("commit_id").isNull()
-                    ? null
-                    : c.path("commit_id").asText()));
-      }
-      if (root.size() < PAGE_SIZE) {
-        return;
-      }
-    }
+    return commentReader.fetchBotComments(repo, prNumber);
   }
 
   @Override
   public CommentLedger fetchCommitBotComments(RepoRef repo, String commitSha) {
-    String login = botLogin(repo);
-    List<LedgerComment> comments = new ArrayList<>();
-    List<LedgerFindingMarker> findings = new ArrayList<>();
-    List<LedgerRunMarker> runs = new ArrayList<>();
-    int[] suspectCount = {0};
-    collectPaged(
-        repo,
-        "/commits/" + GitHubPayloadSupport.urlEncode(commitSha) + "/comments",
-        login,
-        LedgerComment.KIND_COMMIT,
-        comments);
-    for (LedgerComment c : comments) {
-      ParseOutcome outcome = markerParser.parse(c.body());
-      suspectCount[0] += outcome.suspects().size();
-      if (outcome.marker().isPresent()) {
-        MarkerParseResult parsed = outcome.marker().get();
-        if (parsed instanceof MarkerParseResult.FindingMark f) {
-          findings.add(
-              new LedgerFindingMarker(
-                  f.fingerprint(),
-                  f.file(),
-                  f.line(),
-                  f.category(),
-                  f.findingId(),
-                  f.runId(),
-                  f.commitSha(),
-                  c.id()));
-        } else if (parsed instanceof MarkerParseResult.RunMark r) {
-          runs.add(
-              new LedgerRunMarker(
-                  r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
-        }
-      }
-    }
-    return new CommentLedger(comments, findings, runs, suspectCount[0]);
+    return commentReader.fetchCommitBotComments(repo, commitSha);
   }
 
-  /**
-   * issue 载体账本（M4d，05§2.5）：列出 bot 的 issue，只保留 run 完成标记内 commit 与 {@code commitSha} 一致者——issue
-   * 载体本身不带 PR 号，head sha 即键（05§1.3）。
-   */
   @Override
   public CommentLedger fetchIssueBotComments(RepoRef repo, String commitSha) {
-    List<LedgerComment> matched = new ArrayList<>();
-    List<LedgerFindingMarker> findings = new ArrayList<>();
-    List<LedgerRunMarker> runs = new ArrayList<>();
-    int suspectCount = 0;
-    for (LedgerComment c : listBotIssues(repo, null)) {
-      ParseOutcome outcome = markerParser.parse(c.body());
-      if (!marksCommit(outcome, commitSha)) {
-        continue; // 其它 PR / 其它 commit 的夜间 issue 不属于本键作用域
-      }
-      suspectCount += outcome.suspects().size();
-      matched.add(c);
-      MarkerParseResult parsed = outcome.marker().orElseThrow();
-      if (parsed instanceof MarkerParseResult.FindingMark f) {
-        findings.add(
-            new LedgerFindingMarker(
-                f.fingerprint(),
-                f.file(),
-                f.line(),
-                f.category(),
-                f.findingId(),
-                f.runId(),
-                f.commitSha(),
-                c.id()));
-      } else if (parsed instanceof MarkerParseResult.RunMark r) {
-        runs.add(
-            new LedgerRunMarker(
-                r.runId(), r.commitSha(), r.status(), r.findings(), r.suppressed(), c.id()));
-      }
-    }
-    return new CommentLedger(matched, findings, runs, suspectCount);
+    return commentReader.fetchIssueBotComments(repo, commitSha);
   }
 
   @Override
   public List<LedgerComment> listBotIssues(RepoRef repo, Instant since) {
-    String login = botLogin(repo);
-    List<LedgerComment> out = new ArrayList<>();
-    String sinceQuery =
-        since == null ? "" : "&since=" + GitHubPayloadSupport.urlEncode(since.toString());
-    for (int page = 1; page <= MAX_PAGES; page++) {
-      JsonNode root =
-          transport.getJson(
-              repo,
-              "/issues?state=all&sort=updated&direction=desc&per_page="
-                  + PAGE_SIZE
-                  + "&page="
-                  + page
-                  + sinceQuery);
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      boolean reachedOlder = false;
-      for (JsonNode issue : root) {
-        if (!issue.path("pull_request").isMissingNode()) {
-          continue; // /issues 端点同时返回 PR，PR 条目不是夜间 issue 载体
-        }
-        Instant updated = DispositionSupport.instantOrNull(issue.path("updated_at"));
-        if (since != null && updated != null && updated.isBefore(since)) {
-          reachedOlder = true;
-          continue;
-        }
-        if (!login.equals(issue.path("user").path("login").asText())) {
-          continue; // 只认 bot 发布的 issue
-        }
-        long number = issue.path("number").asLong(0);
-        if (number <= 0) {
-          continue;
-        }
-        out.add(
-            new LedgerComment(
-                number,
-                LedgerComment.KIND_ISSUE,
-                login,
-                issue.path("body").asText(""),
-                DispositionSupport.instantOrEpoch(issue.path("created_at")),
-                null));
-      }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
-      }
-    }
-    return out;
-  }
-
-  private static boolean marksCommit(ParseOutcome outcome, String commitSha) {
-    if (outcome.marker().isEmpty()) {
-      return false;
-    }
-    MarkerParseResult parsed = outcome.marker().get();
-    if (parsed instanceof MarkerParseResult.RunMark r) {
-      return r.commitSha().equalsIgnoreCase(commitSha);
-    }
-    return ((MarkerParseResult.FindingMark) parsed).commitSha().equalsIgnoreCase(commitSha);
+    return commentReader.listBotIssues(repo, since);
   }
 
   @Override
   public List<PullRequestRef> listPullRequests(RepoRef repo, Instant since) {
-    List<PullRequestRef> out = new ArrayList<>();
-    for (int page = 1; page <= MAX_PAGES; page++) {
-      JsonNode root =
-          transport.getJson(
-              repo,
-              "/pulls?state=all&sort=updated&direction=desc&per_page="
-                  + PAGE_SIZE
-                  + "&page="
-                  + page);
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      boolean reachedOlder = false;
-      for (JsonNode pr : root) {
-        Instant updated = DispositionSupport.instantOrNull(pr.path("updated_at"));
-        if (updated == null || updated.isBefore(since)) {
-          // 按 updated desc 排序：本页出现早于窗口的条目，后续页只会更早
-          reachedOlder = true;
-          continue;
-        }
-        out.add(
-            new PullRequestRef(
-                pr.path("number").asInt(),
-                pr.path("head").path("sha").asText(""),
-                pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
-                pr.path("state").asText(PullRequestRef.STATE_CLOSED),
-                updated,
-                DispositionSupport.instantOrNull(pr.path("merged_at")),
-                pr.path("base").path("sha").asText(null)));
-      }
-      if (root.size() < PAGE_SIZE || reachedOlder) {
-        break;
-      }
-    }
-    return out;
+    return commentReader.listPullRequests(repo, since);
   }
 
-  /**
-   * 处置信号（06§1.1）：人类对 bot inline 评论的 reply 标签 + Summary issue comment 的 👍/👎。
-   *
-   * <p>reply 走 `GET /pulls/{n}/comments` 全量评论（人类回复与 bot 评论同端点，按 in_reply_to_id 关联，05§2.3）；reaction
-   * 走 `GET /issues/comments/{id}/reactions`。resolve 状态 GraphQL-only，不采。
-   */
   @Override
   public DispositionSignal[] fetchDispositionSignals(RepoRef repo, int prNumber) {
-    String login = botLogin(repo);
-    List<JsonNode> reviewComments = getPaged(repo, "/pulls/" + prNumber + "/comments");
-    Set<Long> botCommentIds = new HashSet<>();
-    for (JsonNode c : reviewComments) {
-      if (login.equals(c.path("user").path("login").asText())) {
-        botCommentIds.add(c.path("id").asLong());
-      }
-    }
-    List<DispositionSignal> out = new ArrayList<>();
-    for (JsonNode c : reviewComments) {
-      long parent = c.path("in_reply_to_id").asLong(0);
-      if (parent <= 0 || !botCommentIds.contains(parent)) {
-        continue; // 只认对 bot 评论的回复；PR 内人类互相回复不是处置信号
-      }
-      String body = c.path("body").asText("");
-      String tag = DispositionSupport.replyTag(body);
-      if (tag == null) {
-        continue; // 无标签回复不改变处置分类（ignored 口径据此保持噪声语义）
-      }
-      out.add(
-          new DispositionSignal(
-              DispositionSignal.KIND_REPLY_TAG,
-              parent,
-              DispositionSupport.instantOrEpoch(c.path("created_at")),
-              tag,
-              c.path("user").path("login").asText(""),
-              DispositionSupport.excerpt(body)));
-    }
-    List<JsonNode> issueComments = getPaged(repo, "/issues/" + prNumber + "/comments");
-    for (JsonNode c : issueComments) {
-      if (!login.equals(c.path("user").path("login").asText())) {
-        continue; // 只采 bot 的 Summary 评论 reaction（run 满意度载体，06§1.1）
-      }
-      long commentId = c.path("id").asLong(0);
-      if (commentId <= 0) {
-        continue;
-      }
-      for (JsonNode r : getPaged(repo, "/issues/comments/" + commentId + "/reactions")) {
-        String content = r.path("content").asText("");
-        if (!DispositionSignal.REACTION_UP.equals(content)
-            && !DispositionSignal.REACTION_DOWN.equals(content)) {
-          continue;
-        }
-        out.add(
-            new DispositionSignal(
-                DispositionSignal.KIND_REACTION,
-                commentId,
-                DispositionSupport.instantOrEpoch(r.path("created_at")),
-                content,
-                r.path("user").path("login").asText(""),
-                ""));
-      }
-    }
-    return out.toArray(new DispositionSignal[0]);
-  }
-
-  private List<JsonNode> getPaged(RepoRef repo, String path) {
-    List<JsonNode> out = new ArrayList<>();
-    for (int page = 1; page <= MAX_PAGES; page++) {
-      JsonNode root = transport.getJson(repo, path + "?per_page=" + PAGE_SIZE + "&page=" + page);
-      if (!root.isArray() || root.isEmpty()) {
-        break;
-      }
-      root.forEach(out::add);
-      if (root.size() < PAGE_SIZE) {
-        break;
-      }
-    }
-    return out;
-  }
-
-  private String botLogin(RepoRef repo) {
-    if (cachedLogin == null) {
-      // /user 不在 /repos/{o}/{r} 前缀下（05§2.3：bot 身份按 token 对应 login）
-      HttpRequest request =
-          transport.request("/user").header("Accept", "application/vnd.github+json").GET().build();
-      try {
-        cachedLogin =
-            transport
-                .parseJson(transport.execute(request, "/user").body(), "/user")
-                .path("login")
-                .asText();
-      } catch (CraIntegrationException e) {
-        if (!isUserForbidden(e)) {
-          throw e;
-        }
-        // Actions 集成 token（GITHUB_TOKEN）是 App 语义，/user 恒 403——CI 内 bot 身份即
-        // 工作流 bot（05§2.3 钉死：CI 内为 github-actions[bot]）
-        cachedLogin = CI_BOT_LOGIN;
-      }
-    }
-    return cachedLogin;
-  }
-
-  private static boolean isUserForbidden(CraIntegrationException e) {
-    return e.getMessage() != null && e.getMessage().contains("GitHub API 403 on /user");
+    return commentReader.fetchDispositionSignals(repo, prNumber);
   }
 }

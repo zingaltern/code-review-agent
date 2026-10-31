@@ -178,6 +178,15 @@ class LocalJgitAdapterTest {
     adapter.close();
     adapter = new LocalJgitAdapter(tempDir);
     assertThat(adapter.remoteOriginOwnerSlashName()).contains("zingaltern/cra");
+
+    // 常见书写变体：尾斜杠 / query / fragment 不应污染 owner/name
+    git.getRepository()
+        .getConfig()
+        .setString("remote", "origin", "url", "https://github.com/zingaltern/cra.git/?ref=main");
+    git.getRepository().getConfig().save();
+    adapter.close();
+    adapter = new LocalJgitAdapter(tempDir);
+    assertThat(adapter.remoteOriginOwnerSlashName()).contains("zingaltern/cra");
   }
 
   @Test

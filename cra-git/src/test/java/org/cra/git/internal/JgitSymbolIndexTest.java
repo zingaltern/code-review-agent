@@ -276,6 +276,27 @@ class JgitSymbolIndexTest {
     assertThat(nullRoot.available()).isFalse();
   }
 
+  @Test
+  void invalidUtf8SourceIsSkippedWithDeclaration() throws Exception {
+    // 严格 UTF-8（ADR-0016）：非法字节不得以 U+FFFD 伪文本进入索引
+    Path bad = workspace.resolve("src/main/java/demo/Bad.java");
+    byte[] content =
+        "package demo; class Bad { int x; }\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    byte[] withInvalid = java.util.Arrays.copyOf(content, content.length + 1);
+    withInvalid[content.length] = (byte) 0xFF;
+    Files.write(bad, withInvalid);
+    git("add", ".");
+    git("-c", "user.name=alice", "-c", "user.email=a@x", "commit", "-q", "-m", "bad utf8");
+    String sha = git("rev-parse", "HEAD").strip();
+
+    SymbolIndexSnapshot snapshot = new JgitSymbolIndex(workspace).build(sha);
+
+    assertThat(snapshot.available()).isTrue();
+    assertThat(snapshot.definitionsOfPath("src/main/java/demo/Bad.java")).isEmpty();
+    assertThat(snapshot.filesSkipped()).isEqualTo(1);
+    assertThat(snapshot.notes()).anyMatch(note -> note.contains("读取失败跳过"));
+  }
+
   private String git(String... args) throws Exception {
     List<String> cmd = new ArrayList<>();
     cmd.add("git");

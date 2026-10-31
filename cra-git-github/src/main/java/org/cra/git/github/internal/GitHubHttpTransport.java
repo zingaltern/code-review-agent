@@ -9,6 +9,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.function.LongConsumer;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.git.RepoRef;
 import org.cra.common.text.Texts;
@@ -26,13 +27,18 @@ final class GitHubHttpTransport {
   private static final ObjectMapper MAPPER = new ObjectMapper();
   private static final int MAX_BACKOFF_RETRIES = 3;
 
+  /** 外部 Retry-After 的单次等待上限：响应头可控，不设上限可让 run 挂起数天（05§2.3 只要求退避，不要求盲从）。 */
+  private static final long MAX_RETRY_AFTER_MS = 60_000L;
+
+  /** 内部指数退避基数（1s/2s/4s/8s/16s）：与外部头分离，不受攻击者可控延迟影响。 */
+  private static final long BASE_BACKOFF_MS = 1_000L;
+
   private final String apiBase;
   private final String token;
   private final HttpClient http;
-  private final java.util.function.LongConsumer sleeper;
+  private final LongConsumer sleeper;
 
-  GitHubHttpTransport(
-      String apiBase, String token, HttpClient http, java.util.function.LongConsumer sleeper) {
+  GitHubHttpTransport(String apiBase, String token, HttpClient http, LongConsumer sleeper) {
     this.apiBase = apiBase.replaceAll("/+$", "");
     this.token = token;
     this.http = http;
@@ -88,7 +94,9 @@ final class GitHubHttpTransport {
         sleeper.accept(retryAfterMs(response, attempt)); // 指数退避（05§2.3 ≤3 次）
         continue;
       }
-      throw new CraIntegrationException(
+      throw new GitHubApiException(
+          status,
+          path,
           "GitHub API " + status + " on " + path + ": " + Texts.truncate(response.body(), 200));
     }
   }
@@ -104,7 +112,9 @@ final class GitHubHttpTransport {
         sleeper.accept(retryAfterMs(response, attempt));
         continue;
       }
-      throw new CraIntegrationException(
+      throw new GitHubApiException(
+          status,
+          path,
           "GitHub API "
               + status
               + " on "
@@ -123,7 +133,11 @@ final class GitHubHttpTransport {
   }
 
   static boolean isUnprocessable(CraIntegrationException e) {
-    return e.getMessage() != null && e.getMessage().contains("GitHub API 422");
+    return e instanceof GitHubApiException api && api.status() == 422;
+  }
+
+  static boolean isStatusOnPath(CraIntegrationException e, int status, String path) {
+    return e instanceof GitHubApiException api && api.status() == status && path.equals(api.path());
   }
 
   private HttpResponse<String> send(HttpRequest request, String path) {
@@ -158,9 +172,9 @@ final class GitHubHttpTransport {
     String retryAfter = response.headers().firstValue("Retry-After").orElse(null);
     // 正则前置校验替代 try/parse：无效头不进 catch（09§4 禁吞异常），直接走指数退避
     if (retryAfter != null && retryAfter.matches("\\d{1,9}")) {
-      return Long.parseLong(retryAfter) * 1000L;
+      return Math.min(Long.parseLong(retryAfter) * 1000L, MAX_RETRY_AFTER_MS);
     }
-    return 1_000L * (1L << Math.min(attempt, 4));
+    return BASE_BACKOFF_MS * (1L << Math.min(attempt, 4));
   }
 
   private void throttleIfCloseToLimit(HttpResponse<?> response) {
