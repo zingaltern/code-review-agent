@@ -34,6 +34,11 @@ class DefaultLlmGatewayTest {
     private final List<String> bodies = new ArrayList<>();
     private final AtomicInteger inFlight = new AtomicInteger();
     private final AtomicInteger peak = new AtomicInteger();
+
+    /** 请求进入传输层的无 sleep 同步点（"至少 n 个已进入"）。 */
+    private final java.util.concurrent.BlockingQueue<Boolean> entries =
+        new java.util.concurrent.LinkedBlockingQueue<>();
+
     private volatile CountDownLatch gate;
 
     ScriptedTransport(Object... script) {
@@ -44,6 +49,20 @@ class DefaultLlmGatewayTest {
       this.gate = latch;
     }
 
+    /** 阻塞等待 n 个请求真正进入传输层（替代 Thread.sleep 时序等待；超时即失败）。 */
+    void awaitEntries(int n) {
+      for (int i = 0; i < n; i++) {
+        try {
+          if (entries.poll(2, TimeUnit.SECONDS) == null) {
+            throw new AssertionError("等待请求进入传输层超时（期望 " + n + " 个）");
+          }
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+          throw new AssertionError("等待被中断", e);
+        }
+      }
+    }
+
     @Override
     public TransportResponse post(
         String url, String apiKey, String jsonBody, java.time.Duration timeout)
@@ -51,6 +70,7 @@ class DefaultLlmGatewayTest {
       bodies.add(jsonBody);
       int current = inFlight.incrementAndGet();
       peak.accumulateAndGet(current, Math::max);
+      entries.offer(Boolean.TRUE);
       try {
         if (gate != null) {
           gate.await();
@@ -176,7 +196,8 @@ class DefaultLlmGatewayTest {
     for (int i = 0; i < 4; i++) {
       futures.add(pool.submit(() -> gateway.complete(request())));
     }
-    Thread.sleep(150); // 让全部 4 个调用进入排队/在途
+    // 让全部 4 个调用进入排队/在途：信号量上限 2，等待 2 个真正进入传输层即可
+    transport.awaitEntries(2);
     gate.countDown();
     for (var f : futures) {
       assertThat(f.get(5, TimeUnit.SECONDS).status()).isEqualTo(LlmStatus.OK);
@@ -193,7 +214,7 @@ class DefaultLlmGatewayTest {
     DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 50), transport, d -> {});
     ExecutorService pool = Executors.newFixedThreadPool(2);
     var first = pool.submit(() -> gateway.complete(request()));
-    Thread.sleep(30);
+    transport.awaitEntries(1); // 首个请求应已占住唯一并发许可
     var second = pool.submit(() -> gateway.complete(request()));
     assertThat(second.get(2, TimeUnit.SECONDS).status()).isEqualTo(LlmStatus.UNAVAILABLE);
     assertThat(second.get(2, TimeUnit.SECONDS).errorMessage()).contains("queue timeout");
@@ -224,10 +245,7 @@ class DefaultLlmGatewayTest {
     try {
       var first = pool.submit(() -> gateway.complete(request(ModelTier.STANDARD)));
       // 让首个请求进入传输层并占住并发许可
-      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-      while (transport.inFlight.get() == 0 && System.nanoTime() < deadline) {
-        Thread.sleep(10);
-      }
+      transport.awaitEntries(1); // 首个请求应已进入传输层
       assertThat(transport.inFlight.get()).isEqualTo(1);
       LlmResponse queued = gateway.complete(request(ModelTier.STANDARD));
       assertThat(queued.status()).isEqualTo(LlmStatus.UNAVAILABLE);
@@ -244,7 +262,7 @@ class DefaultLlmGatewayTest {
   }
 
   @Test
-  void baseUrlTrailingSlashHandled() throws Exception {
+  void baseUrlTrailingSlashHandled() {
     ScriptedTransport transport = new ScriptedTransport(200);
     DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
     gateway.complete(request());

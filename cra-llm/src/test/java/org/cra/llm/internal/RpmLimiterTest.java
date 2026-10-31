@@ -19,7 +19,7 @@ class RpmLimiterTest {
       limiter.awaitSlot(ModelTier.STANDARD, 3);
     }
     // 3 次全部立即放行（无等待语义可断言：等待会消费注入时钟，此处时钟未动）
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 
   @Test
@@ -56,7 +56,7 @@ class RpmLimiterTest {
     RpmLimiter limiter = new RpmLimiter(clock::get, ms -> clock.addAndGet(ms));
     limiter.awaitSlot(ModelTier.STANDARD, 1);
     limiter.awaitSlot(ModelTier.LIGHT, 1); // 不同档位不受 standard 占用影响
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 
   @Test
@@ -66,6 +66,6 @@ class RpmLimiterTest {
     for (int i = 0; i < 100; i++) {
       limiter.awaitSlot(ModelTier.STRONG, 0);
     }
-    assertThat(clock.get()).isEqualTo(0);
+    assertThat(clock.get()).isZero();
   }
 }
