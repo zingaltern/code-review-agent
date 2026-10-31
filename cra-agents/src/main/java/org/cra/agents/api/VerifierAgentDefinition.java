@@ -14,7 +14,7 @@ import java.util.Objects;
 public final class VerifierAgentDefinition implements SubAgent<VerificationBatchInput> {
 
   /** 验证者角色（kebab-case，05§1.1）。 */
-  public static final AgentRole ROLE = new AgentRole("verifier", "独立复核员");
+  public static final AgentRole AGENT_ROLE = new AgentRole("verifier", "独立复核员");
 
   private static final String TEMPLATE = "prompts/verifier/balanced-review.md";
 
@@ -40,7 +40,7 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
 
   @Override
   public AgentRole role() {
-    return ROLE;
+    return AGENT_ROLE;
   }
 
   @Override
@@ -75,7 +75,7 @@ public final class VerifierAgentDefinition implements SubAgent<VerificationBatch
                     ? "（本批无 test 类结论或测试清单不可得）"
                     : TemplateSupport.untrusted(input.testFileIndex())));
     return TemplateSupport.briefOf(
-        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
+        templates, TEMPLATE, rendered, AGENT_ROLE, tools(), budget(), modelTier());
   }
 
   @Override
