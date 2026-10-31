@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** 组合根装配与退出码映射（05§3；Spring 装配错误在自举首跑即暴露——08§2.3 不做全量上下文测试， 这里只做轻量装配 smoke + 退出码纯逻辑）。 */
-class ReviewCommandWiringTest {
+class ReviewCommandRunnerWiringTest {
 
   @TempDir Path runRoot;
 
@@ -98,6 +98,6 @@ class ReviewCommandWiringTest {
             "",
             "");
     CraConfig config = config(".").securityBlock(true).build();
-    return ReviewCommand.exitCode(result, config);
+    return ReviewCommandRunner.exitCode(result, config);
   }
 }

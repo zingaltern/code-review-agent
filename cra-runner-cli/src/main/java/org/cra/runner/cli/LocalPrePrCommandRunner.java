@@ -28,12 +28,12 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
  *       security-block）。评审段故障在报告中如实声明。
  * </ol>
  */
-final class LocalPrePrCommand {
+final class LocalPrePrCommandRunner {
 
   /** 实跑构建/测试失败（05§3 退出码 4，v1.3.2 定点修订）。 */
   static final int EXIT_BUILD_FAILED = 4;
 
-  private static final Logger LOG = LoggerFactory.getLogger(LocalPrePrCommand.class);
+  private static final Logger LOG = LoggerFactory.getLogger(LocalPrePrCommandRunner.class);
 
   /**
    * 执行本地 pre-PR 流程。
@@ -141,7 +141,7 @@ final class LocalPrePrCommand {
               config.prNumber(),
               config.baseSha(),
               config.headSha(),
-              ReviewCommand.toDepth(config.depth()),
+              ReviewCommandRunner.toDepth(config.depth()),
               config.dryRun(),
               config.securityBlock(),
               signoffContext);

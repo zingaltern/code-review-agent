@@ -1,5 +1,6 @@
 # 09 · 代码编写规范
 
+> 文档版本：v1.2（2026-10-31，ADR-0017：新增 `*CommandRunner` 后缀——CLI 子命令执行器；`*Command` 回归跨层边界 DTO）
 > 文档版本：v1.1（2026-10-27，M4e 第一半：包名示例补 cra-git-gitlab → org.cra.git.gitlab）
 > 文档版本：v1.0（2026-10-25，开发前规范包）
 > 前置阅读：`02-architecture-design.md` §3/§4、`03-multi-agent-design.md` §1、`05-data-and-integration.md` §1
@@ -63,6 +64,7 @@
 | `*Planner` | 评审计划生成（产出 `ReviewPlan`） | Planner（02§3） |
 | `*Guard` | 流程护栏（收敛/预算/抽样） | ConvergenceGuard（02§3） |
 | `*Command` / `*Result` | 跨层边界 DTO | PostReviewCommand、DiffResult、ReviewRequest/ReviewResult（05§2、02§5） |
+| `*CommandRunner` | CLI 子命令执行器：参数解析产物 → run → 退出码（仅 cra-runner-cli 内，package-private；ADR-0017） | ReviewCommandRunner、SweepCommandRunner、LocalPrePrCommandRunner |
 | `*Exception` | 项目异常层次 | §4 |
 
 方法与字段从简，按 Google Java Style 即可（驼峰、常量 `UPPER_SNAKE`、boolean 字段不带 `is` 前缀），不逐条抄。枚举值与 trace `event` 名用小写 snake_case（`agent_start`，05§1.4）。
