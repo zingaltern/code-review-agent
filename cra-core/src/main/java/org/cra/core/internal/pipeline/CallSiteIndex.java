@@ -226,12 +226,11 @@ public final class CallSiteIndex {
     return entries;
   }
 
-  /** 实际读取内容并扫描的候选文件数（≤ {@link #candidateFiles()}；内容不可得的候选不计入）。 */
+  /** 尝试读取内容的候选文件数（≤ {@link #candidateFiles()}；内容不可得的候选同样计入）。 */
   public int filesScanned() {
     return filesScanned;
   }
 
-  /** 候选文件数（截断前）。 */
   /** 纳入本轮扫描计划的候选文件数（含 self；上限 {@value #MAX_FILES}，记录截断前数值）。 */
   public int candidateFiles() {
     return candidateFiles;
@@ -382,14 +381,10 @@ public final class CallSiteIndex {
   }
 
   /**
-   * import 关联的候选文件（跨包 caller）：{@code import pkg.Type} 解析到批次文件、{@code import static pkg.Type.member}
-   * 按前缀命中、{@code import pkg.*} 按包名命中（较弱证据，仍需逐行匹配符号）。
-   *
-   * @return 去重后的候选路径（按路径升序；不含批次文件与已入选的同目录文件）
-   */
-  /**
    * import 关联 caller（词法启发式，ADR-0014 近似性）：精确解析（{@code resolvedInRepo}）、静态成员导入（包内类型前缀）、 通配导入（{@code
    * pkg.*}）。不做类型绑定：同名成员跨类型/运行期 DI 装配不在覆盖范围，渲染端已声明近似性。
+   *
+   * @return 去重后的候选路径（按路径升序；不含批次文件与已入选的同目录文件）
    */
   private static List<String> importCallers(
       String batchFile, String batchFileText, SymbolIndexSnapshot index, Set<String> excluded) {
@@ -420,9 +415,8 @@ public final class CallSiteIndex {
         callers.add(path);
       }
     }
-    List<String> ordered = new ArrayList<>(callers);
-    ordered.sort(String::compareTo);
-    return ordered;
+    // TreeSet 已按路径升序，拷贝为 ArrayList 即可（调用方按序截断）
+    return new ArrayList<>(callers);
   }
 
   /**
@@ -449,7 +443,6 @@ public final class CallSiteIndex {
           + MIN_RENDER_CAP
           + "），条目未注入；如需调用方证据可用 followup_file 请求具体文件）\n";
     }
-    long cap = tokenCap;
     StringBuilder sb = new StringBuilder();
     sb.append("## 受影响符号的调用点索引（确定性预取；调用链不完整，未列出不代表不存在调用者）\n");
     if (!available) {
@@ -486,7 +479,7 @@ public final class CallSiteIndex {
               + entry.snippet()
               + "\n";
       long cost = TokenMath.estimateTokens(line) + 1;
-      if (used + cost > cap) {
+      if (used + cost > tokenCap) {
         sb.append("…（超预算截断）\n");
         break;
       }

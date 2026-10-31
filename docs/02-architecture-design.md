@@ -1,5 +1,6 @@
 # 02 · 总体架构设计
 
+> 文档版本：v1.8.1（2026-11-01，合并修订：预算翻倍——run 1.6M + 03§6 单代理预算 ×2，降档阈值 70%/85% 不变；§4.4 预算执行主体勘误——预算裁决在编排层（AgentRunner 逐代理硬限、ReviewStage 阶梯），LlmGateway 负责单次调用计量与不可得降级；§3 模块表与 L2 图同步"成本核算"→"成本计量"）
 > 文档版本：v1.7（2026-10-30，评审范围产品化：测试文件默认不进入评审范围（`include-test-files=false`），TestReviewer 比例仍按全量 diff、纯测试 PR 如实声明）
 > 文档版本：v1.6（2026-10-27，M4e 第二半：CLI/server 平台选择与 GitLab webhook 接线（ADR-0013）；真实写操作 pending）
 > 文档版本：v1.5（2026-10-27，M4e 第一半：新增 cra-git-gitlab（ADR-0011），GitLab 触发边界表见 docs/deployment-gitlab.md）
@@ -42,7 +43,7 @@
         │ CandidateFinding(JSON)
 ┌───────▼────────────────────────────────────────────────────────────────┐
 │  L2 基础设施层                                                           │
-│  LlmGateway(多模型路由/并发限流/结构化输出/重试降级/成本核算)               │
+│  LlmGateway(多模型路由/并发限流/结构化输出/重试降级/成本计量)               │
 │  GitPlatformAdapter(diff/文件树/PR API/inline comment + 本地jgit blame)  │
 │  状态账本(§5：GitHub评论 / SQLite / PG，按形态)  配置服务                  │
 └────────────────────────────────────────────────────────────────────────┘
@@ -77,7 +78,7 @@ PR:opened/synchronize ─→ Trigger(CI job / CLI)
 ```
 code-review-agent/
 ├── cra-common/            # 纯公共契约：Finding/RunStatus 等数据模型 + 无依赖文本/校验辅助
-├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本核算
+├── cra-llm/               # LlmGateway：模型路由、并发限流、重试降级、成本计量
 ├── cra-git/               # GitPlatformAdapter SPI + LocalRepoContext(jgit blame)
 │   ├── cra-git-github/    # GitHub 实现（diff/PR API/inline comment/账本解析）
 │   └── cra-git-gitlab/    # GitLab 实现（M4e，ADR-0011/0013；不依赖 github；CLI/server 可按平台选择）
@@ -134,8 +135,8 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 
 ### 4.4 成本与预算
 
-- 预算三层：子代理级（token/轮次/时间）→ chunk 级 → run 级（默认 **800k**；2026-10-30 AI Coding 放宽档，原 500k）；LlmGateway 硬性执行，超限杀代理记 `BUDGET_EXCEEDED`；单代理预算默认见 03§6（可用 `agents.budget.<role>.*` 覆盖，05§5）；
-- **run 级降档阶梯（阈值不变：70%/85%/100%）**：消耗 <70% 正常（旗舰算术示例 330k/800k = 41%，正常 PR 不触发任何降档——v1.2 的 400k 预算下该示例为 82.5%，坐在旧 80% 档之上，会使 top-10 截断与 `suppressed_by_truncation>0` 报警常态化，属护栏"狼来了"；v1.2.1 上调至 500k 后为 66%）；≥70% → 砍 light 角色与 1 个视角；≥85% → 候选 finding 按 severity 排序只验证 top-10（**截断数 top-10 不变**）；100% → 终止剩余代理，DEGRADED 收尾；
+- 预算三层：子代理级（token/轮次/时间）→ chunk 级 → run 级（默认 **1.6M**；2026-10-31 预算翻倍，原 800k；更早 500k）；**执行在编排层**——AgentRunner 逐代理硬限（超限杀代理记 `BUDGET_EXCEEDED`）、run 级阶梯在 ReviewStage；LlmGateway 负责单次调用计量（usage 或估算）与不可得降级，不做预算裁决（v1.7.1 勘误，对齐代码实态）；单代理预算默认见 03§6（可用 `agents.budget.<role>.*` 覆盖，05§5）；
+- **run 级降档阶梯（阈值不变：70%/85%/100%）**：消耗 <70% 正常（旗舰算术示例 330k/1.6M ≈ 21%，正常 PR 不触发任何降档——v1.2 的 400k 预算下该示例为 82.5%，坐在旧 80% 档之上，会使 top-10 截断与 `suppressed_by_truncation>0` 报警常态化，属护栏"狼来了"；v1.2.1 上调至 500k 后为 66%，2026-10-30 至 800k 为 41%，2026-10-31 翻倍至 1.6M 后为 21%）；≥70% → 砍 light 角色与 1 个视角；≥85% → 候选 finding 按 severity 排序只验证 top-10（**截断数 top-10 不变**）；100% → 终止剩余代理，DEGRADED 收尾；
 - **截断必须可见（梯度沉默护栏）**：top-10 截断与预算终止产生的**丢弃候选数**计入 run stats（`suppressed_by_truncation`）并在 Summary 中逐条声明"因预算截断未验证 N 条候选"；该计数进入 L3 健康度（06§1.3）与门禁趋势监控——"发 1 条丢 9 条"不允许对护栏 invisible；
 - 大 diff 策略（2026-10-30 放宽档）：>4000 行自动降为 Quick 质量（原 2000）；>16000 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围（原 8000）。两项阈值均可配（`review.large-diff-lines` / `review.hard-cap-lines`），行数口径见 04§2.2。
 - 大 diff 策略：>2k 行自动降为 Quick 质量；>8k 行只评审 REVIEW.md `priority_paths` 并声明覆盖范围。
@@ -143,8 +144,8 @@ anchor_context_hash      : 锚行 ±2 行内容联合哈希——区分同文件
 
 ### 4.5 LLM 并发与限流（v1.1 新增）
 
-- LlmGateway 内置信号量并发上限（默认 8）与每模型 RPM 限制（配置项，见 05§5）；
-- 429/5xx 指数退避（最多 3 次）；排队超时按 §4.2 降级；
+- LlmGateway 内置信号量并发上限（默认 8）与每模型 RPM 限制（配置项，见 05§5；RPM 窗口按解析后的物理端点（base-url + 模型名）建，多档位共用同一端点时共享同一配额池，v1.7.1）；
+- 429/5xx 指数退避（最多 3 次）；排队超时（并发许可等待与 RPM 槽等待共用 queueTimeout 预算）按 §4.2 降级；
 - GitHub API 与 LLM 端限流相互独立配置。
 
 ## 5. 部署形态与状态归属（v1.1 重写）

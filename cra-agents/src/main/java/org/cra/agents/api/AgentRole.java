@@ -1,6 +1,8 @@
 package org.cra.agents.api;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
+import org.cra.common.text.Texts;
 
 /**
  * 子代理角色标识（03§1；角色标识符 kebab-case，05§1.1——如 general-reviewer、bug-hunter/dataflow）。
@@ -10,11 +12,13 @@ import java.util.Objects;
  */
 public record AgentRole(String id, String displayName) {
 
+  private static final Pattern KEBAB_CASE = Pattern.compile("[a-z0-9]+(?:[-/][a-z0-9]+)*");
+
   public AgentRole {
     Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(displayName, "displayName");
-    if (id.isBlank() || !id.matches("[a-z0-9/-]+")) {
+    if (!KEBAB_CASE.matcher(id).matches()) {
       throw new IllegalArgumentException("role id must be kebab-case: " + id);
     }
+    Texts.requireNonBlank(displayName, "displayName");
   }
 }

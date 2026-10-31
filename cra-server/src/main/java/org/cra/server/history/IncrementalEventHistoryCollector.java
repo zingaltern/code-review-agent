@@ -80,7 +80,8 @@ public final class IncrementalEventHistoryCollector implements EventHistoryColle
     try {
       previous = retry("读取水位", () -> store.checkpoint(source.id()), warnings);
     } catch (CollectFailure e) {
-      // 水位不可读不阻断采集：按请求窗口执行，水位推进在写侧再试
+      // 水位不可读不阻断采集：按请求窗口执行，并把降级写进 warnings（note 如实带出，09§4）
+      warnings.add("水位不可读，按请求窗口采集: " + e.getMessage());
       previous = Optional.empty();
     }
     Instant effectiveSince = requested;

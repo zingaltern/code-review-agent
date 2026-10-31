@@ -34,15 +34,6 @@ final class ScopedToolSet {
     this.scopedFiles = new TreeMap<>(scopedFiles == null ? Map.of() : scopedFiles);
   }
 
-  /**
-   * 白名单作用域内的路径集合。
-   *
-   * @return 路径集合
-   */
-  java.util.Set<String> scopedPaths() {
-    return scopedFiles.keySet();
-  }
-
   /** 工具执行结果：{@code allowed=false} 表示白名单/作用域违规（调用方须终止该代理）。 */
   record ToolResult(boolean allowed, String output) {}
 

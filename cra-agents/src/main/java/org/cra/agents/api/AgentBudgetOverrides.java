@@ -19,8 +19,8 @@ import java.util.Set;
  * <p>覆盖在组合根以装饰器形式施加（{@link #apply})：核心只面向 {@link SubAgent} 接口，预算读取点（上下文裁剪、AgentRunner
  * 硬限、验证/仲裁组装）自然生效，无需改动编排逻辑。轮次与超时不在覆盖范围（03§6 的隔离机制不随配置放宽）。
  *
- * <p>校验时序：两维度都覆盖时在构造期校验 input&gt;output；**单维度覆盖**必须与定义默认值合并后才能判定（{@link #apply} 期的 merge 校验），此时才可能抛
- * IllegalArgumentException——配置错误仍在组装期（退出码 2）暴露，不会带病运行。
+ * <p>校验时序：两维度都覆盖时在构造期校验 input&gt;output；<strong>单维度覆盖</strong>必须与定义默认值合并后才能判定（{@link #apply} 期的
+ * merge 校验），此时才可能抛 IllegalArgumentException——配置错误仍在组装期（退出码 2）暴露，不会带病运行。
  */
 public final class AgentBudgetOverrides {
 
@@ -135,7 +135,8 @@ public final class AgentBudgetOverrides {
     }
     Map<String, RoleOverride> collected = new LinkedHashMap<>();
     for (Map.Entry<String, String> entry : values.entrySet()) {
-      String key = entry.getKey();
+      // 整键先归一（首尾空白）：此前仅在 role/field 段 strip，键首空白会让 startsWith 失配而静默丢弃配置
+      String key = entry.getKey() == null ? null : entry.getKey().strip();
       if (key == null || !key.startsWith("agents.budget.")) {
         continue;
       }
@@ -144,10 +145,11 @@ public final class AgentBudgetOverrides {
       if (dot <= 0) {
         continue;
       }
-      // 与 of() 同一归一化口径：键大小写/首尾空白不敏感——静默丢弃配置比拒绝更危险
+      // 角色键大小写/首尾空白不敏感（整键先 strip，角色段再归一）——静默丢弃配置比拒绝更危险
       String role = rest.substring(0, dot).strip().toLowerCase(Locale.ROOT);
       String field = rest.substring(dot + 1).strip();
       if (!ROLE_KEYS.contains(role)) {
+        // 未知角色/字段按未配置忽略（fromConfig 接收整张配置表；严格校验走 of()）
         continue;
       }
       if (!"input-tokens".equals(field) && !"output-tokens".equals(field)) {
@@ -162,7 +164,7 @@ public final class AgentBudgetOverrides {
         value = Long.parseLong(raw.strip());
       } catch (NumberFormatException e) {
         throw new IllegalArgumentException(
-            "agents.budget." + role + "." + field + " 必须为整数: " + raw);
+            "agents.budget." + role + "." + field + " 必须为整数: " + raw, e);
       }
       RoleOverride existing = collected.get(role);
       Long input = existing == null ? null : existing.inputTokens();
@@ -261,7 +263,7 @@ public final class AgentBudgetOverrides {
     return new AgentBudget(input, output, base.maxTurns(), base.timeoutMs());
   }
 
-  /** 只替换 budget() 的装饰器（纯定义，无状态）。 */
+  /** 只替换 budget() 的装饰器（纯定义，无状态；brief 同步重建，确保执行侧读到的预算与覆盖一致）。 */
   private static final class BudgetedAgent<I> implements SubAgent<I> {
 
     private final SubAgent<I> delegate;
@@ -279,7 +281,15 @@ public final class AgentBudgetOverrides {
 
     @Override
     public AgentBrief buildBrief(I input) {
-      return delegate.buildBrief(input);
+      AgentBrief brief = delegate.buildBrief(input);
+      return new AgentBrief(
+          brief.role(),
+          brief.systemPrompt(),
+          brief.userPrompt(),
+          brief.templateVersion(),
+          brief.tools(),
+          budget,
+          brief.modelTier());
     }
 
     @Override

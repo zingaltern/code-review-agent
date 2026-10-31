@@ -7,8 +7,8 @@ import org.cra.common.git.LedgerRunMarker;
 /**
  * 签字建议的 commit 绑定与 stale 判定（07§5 M4a；05§1.3 账本语义同源）。
  *
- * <p>规则：approve 只对特定 commit 有效。签字建议绑定生成时的 head sha；账本中出现**更新的**完成标记 （不同 commit 且发布序在后）后， 旧建议即
- * stale，必须重新核实——与 commit 级幂等闸（DONE 只认同一 commit） 和指纹去重共享同一事实源。
+ * <p>规则：approve 只对特定 commit 有效。签字建议绑定生成时的 head sha；账本中出现<strong>更新的</strong>完成标记 （不同 commit
+ * 且发布序在后）后， 旧建议即 stale，必须重新核实——与 commit 级幂等闸（DONE 只认同一 commit） 和指纹去重共享同一事实源。
  */
 public final class SignoffBinding {
 

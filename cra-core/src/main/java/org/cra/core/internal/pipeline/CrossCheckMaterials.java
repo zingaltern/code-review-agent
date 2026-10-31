@@ -10,8 +10,8 @@ import org.cra.common.git.DiffFile;
 import org.cra.common.text.Texts;
 
 /**
- * CrossChecker brief 材料组装（03§3.1 模式 A/B；03§6 预算行 = ≤16k 输入：diff 精简视图 ~8k + 变更史/事件史合计 ≤4k + 产品段
- * ≤2k）。
+ * CrossChecker brief 材料组装（03§3.1 模式 A/B；03§6 预算行 = ≤32k 输入，材料分项不变：diff 精简视图 ~8k + 变更史/事件史 合计 ≤4k +
+ * 产品段 ≤2k）。
  *
  * <ul>
  *   <li><b>diff 精简视图</b>：仅 hunk 头 + 增删行（不注入上下文行）——用于推导隐含假设，不用于找错；

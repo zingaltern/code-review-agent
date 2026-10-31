@@ -31,6 +31,7 @@ class DefaultLlmGatewayTest {
   /** 按脚本回放的 fake 传输：条目为状态码响应或 IOException。 */
   private static final class ScriptedTransport implements LlmTransport {
     private final List<Object> script;
+    private final List<String> urls = new ArrayList<>();
     private final List<String> bodies = new ArrayList<>();
     private final AtomicInteger inFlight = new AtomicInteger();
     private final AtomicInteger peak = new AtomicInteger();
@@ -48,6 +49,7 @@ class DefaultLlmGatewayTest {
     public TransportResponse post(
         String url, String apiKey, String jsonBody, java.time.Duration timeout)
         throws IOException, InterruptedException {
+      urls.add(url);
       bodies.add(jsonBody);
       int current = inFlight.incrementAndGet();
       peak.accumulateAndGet(current, Math::max);
@@ -62,6 +64,9 @@ class DefaultLlmGatewayTest {
         if (next instanceof Integer code) {
           return new TransportResponse(code, code == 200 ? OK_BODY : "{\"error\":\"x\"}");
         }
+        if (next instanceof LlmTransport.TransportResponse raw) {
+          return raw; // 自定义响应体（坏 JSON 等）
+        }
         throw (IOException) next;
       } finally {
         inFlight.decrementAndGet();
@@ -70,7 +75,11 @@ class DefaultLlmGatewayTest {
   }
 
   private static LlmGatewayConfig.ModelEndpoint endpoint(String model) {
-    return new LlmGatewayConfig.ModelEndpoint(model, "http://llm.test/v1/", "test-key");
+    return endpointAt("http://llm.test/v1/", model);
+  }
+
+  private static LlmGatewayConfig.ModelEndpoint endpointAt(String baseUrl, String model) {
+    return new LlmGatewayConfig.ModelEndpoint(model, baseUrl, "test-key");
   }
 
   /** M0 形态：三档同端点、降级链只含 standard（既有行为回归基准）。 */
@@ -126,7 +135,8 @@ class DefaultLlmGatewayTest {
     LlmResponse response = gateway.complete(request());
     assertThat(response.status()).isEqualTo(LlmStatus.OK);
     assertThat(response.content()).contains("findings");
-    assertThat(response.tokensIn()).isEqualTo(100);
+    // usage(100) + 1 次 5xx 尝试的输入估算（429 被拒未计费不计；02§4.4 计量不静默少计）
+    assertThat(response.tokensIn()).isEqualTo(100 + TokenEstimator.estimate("sysuser"));
     assertThat(delays).containsExactly(10L, 20L); // 10 * 2^0, 10 * 2^1
   }
 
@@ -248,8 +258,8 @@ class DefaultLlmGatewayTest {
     ScriptedTransport transport = new ScriptedTransport(200);
     DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
     gateway.complete(request());
-    // 传输层收到的 URL 由 fake 忽略，但编码/拼接不抛异常即覆盖根路径拼接
-    assertThat(transport.bodies).hasSize(1);
+    // 尾斜杠归一 + /chat/completions 拼接：URL 真实传给传输层
+    assertThat(transport.urls).containsExactly("http://llm.test/v1/chat/completions");
   }
 
   // ---------- T2.9：三档路由与降级链（02§4.5/05§5） ----------
@@ -323,13 +333,14 @@ class DefaultLlmGatewayTest {
 
   @Test
   void perModelRpmThrottlesThirdImmediateRequest() {
-    // RPM=2：前两请求立即放行，第三请求等待最早时间戳出窗（测试注入时钟前进，无真实睡眠）
+    // RPM=2：前两请求立即放行，第三请求等待最早时间戳出窗（测试注入时钟前进，无真实睡眠；
+    // queueTimeout 须容纳 60s 出窗等待——等待受 queueTimeout 约束是 RPM 排队的既定语义）
     ScriptedTransport transport = new ScriptedTransport(200, 200, 200);
     AtomicLong clock = new AtomicLong(0);
     List<Long> waits = new ArrayList<>();
     DefaultLlmGateway gateway =
         new DefaultLlmGateway(
-            routedConfig(1, 1_000, java.util.Map.of(ModelTier.STANDARD, 2, ModelTier.LIGHT, 60)),
+            routedConfig(1, 120_000, java.util.Map.of(ModelTier.STANDARD, 2, ModelTier.LIGHT, 60)),
             transport,
             ms -> {
               waits.add(ms);
@@ -359,5 +370,201 @@ class DefaultLlmGatewayTest {
     // strong 未配置 RPM → 不限流，立即放行
     assertThat(gateway.complete(request(ModelTier.STRONG)).status()).isEqualTo(LlmStatus.OK);
     assertThat(transport.bodies).hasSize(3);
+  }
+
+  // ---------- 计量与档位回落（02§4.4 / 09§4） ----------
+
+  @Test
+  void fiveHundredAttemptsCountTowardTokensOnSuccess() {
+    // 5xx：服务端已处理请求后失败，输入 token 确定消耗，成功结果合并 usage 与失败尝试估算
+    ScriptedTransport transport = new ScriptedTransport(500, 200);
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.OK);
+    assertThat(response.tokensIn()).isEqualTo(100 + TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void allEndpointsExhaustedCarriesConsumedInputEstimate() {
+    // 全链耗尽：两个端点各 4 次 5xx，输入估算全部并入 UNAVAILABLE（不再恒 0）
+    ScriptedTransport transport = new ScriptedTransport(503, 503, 503, 503, 503, 503, 503, 503);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            routedConfig(1, 1_000, LlmGatewayConfig.defaultRpm()), transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.STANDARD));
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.tokensIn()).isEqualTo(8 * TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void unparseableOkResponseCarriesConsumedInput() {
+    // 200 但响应不可解析：请求已被服务端处理，输入 token 确定消耗
+    ScriptedTransport transport =
+        new ScriptedTransport(new LlmTransport.TransportResponse(200, "not-json"));
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage()).contains("unparseable");
+    assertThat(response.tokensIn()).isEqualTo(TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void unconfiguredRequestedTierFallsBackToStandard() {
+    // 请求档位未配置端点：回落 standard（配置强制项，05§5），不抛 NPE 穿出网关（09§4）。
+    // 请求档位从未尝试，注记用 tier-unconfigured 而非 model-fallback（降级链语义留给真实换端点）
+    ScriptedTransport transport = new ScriptedTransport(200);
+    LlmGatewayConfig onlyStandard =
+        new LlmGatewayConfig(
+            java.util.Map.of(ModelTier.STANDARD, endpoint("std-model")),
+            List.of(),
+            LlmGatewayConfig.defaultRpm(),
+            1,
+            3,
+            1_000,
+            500,
+            10,
+            40,
+            null,
+            java.util.Map.of(),
+            null);
+    DefaultLlmGateway gateway = new DefaultLlmGateway(onlyStandard, transport, d -> {});
+    LlmResponse response = gateway.complete(request(ModelTier.STRONG));
+    assertThat(response.status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies.get(0)).contains("std-model");
+    assertThat(response.degradation()).isEqualTo("tier-unconfigured:strong→standard");
+  }
+
+  @Test
+  void fourHundredAfterFiveHundredKeepsConsumedInput() {
+    // 第 0 次尝试 500（已确认消耗），第 1 次尝试 400 不可重试：消耗保留，不因换出口清零
+    ScriptedTransport transport = new ScriptedTransport(500, 400);
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage()).contains("http 400");
+    assertThat(response.tokensIn()).isEqualTo(TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void ioFailureAfterFiveHundredKeepsConsumedInput() {
+    // IOException 耗尽：本次尝试不可判定计 0，先前 5xx 的已确认消耗保留
+    ScriptedTransport transport =
+        new ScriptedTransport(500, new IOException("boom"), new IOException("boom"));
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage()).contains("transport failed");
+    assertThat(response.tokensIn()).isEqualTo(TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void rpmWindowSharedAcrossTrailingSlashVariants() {
+    // 两档 base-url 仅差尾斜杠 = 同一物理端点：RPM 窗口共享（identity 与 URL 拼接同用去尾斜杠形态）
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    List<Long> waits = new ArrayList<>();
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            new LlmGatewayConfig(
+                LlmGatewayConfig.models(
+                    endpointAt("http://llm.test/v1/", "std-model"),
+                    endpointAt("http://llm.test/v1", "std-model"),
+                    endpointAt("http://llm.test/v1", "std-model")),
+                List.of(),
+                java.util.Map.of(ModelTier.STANDARD, 1, ModelTier.LIGHT, 1),
+                1,
+                3,
+                120_000,
+                500,
+                10,
+                40,
+                null,
+                java.util.Map.of(),
+                null),
+            transport,
+            ms -> {
+              waits.add(ms);
+              clock.addAndGet(ms);
+            },
+            clock::get);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    LlmResponse light = gateway.complete(request(ModelTier.LIGHT));
+    assertThat(light.status()).isEqualTo(LlmStatus.OK);
+    // 同一物理端点窗口已满：等待最早时间戳出窗（若分窗则此等待不存在）
+    assertThat(waits).hasSize(1);
+    assertThat(waits.get(0)).isEqualTo(60_001L);
+    assertThat(transport.bodies).hasSize(2);
+  }
+
+  // ---------- RPM 语义（per-model 窗口 + 等待预算，02§4.5） ----------
+
+  @Test
+  void rpmWaitTimeoutReturnsUnavailableWithoutCallingTransport() {
+    // RPM 等待受 queueTimeout 约束：预算内无槽 → 未触达模型，不占配额、不发请求。
+    // 无降级链配置（链兜底属设计行为，此处隔离验证单端点语义）
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    LlmGatewayConfig singleEndpoint =
+        new LlmGatewayConfig(
+            java.util.Map.of(ModelTier.STANDARD, endpoint("std-model")),
+            List.of(),
+            java.util.Map.of(ModelTier.STANDARD, 1),
+            1,
+            3,
+            50,
+            500,
+            10,
+            40,
+            null,
+            java.util.Map.of(),
+            null);
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(singleEndpoint, transport, d -> {}, clock::get);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    LlmResponse second = gateway.complete(request(ModelTier.STANDARD));
+    assertThat(second.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(second.errorMessage()).contains("rpm queue timeout");
+    assertThat(transport.bodies).hasSize(1); // 第二次从未触达传输层
+    // 未占槽：窗口滑出后同一档位立即放行
+    clock.addAndGet(60_000);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    assertThat(transport.bodies).hasSize(2);
+  }
+
+  @Test
+  void sharedPhysicalEndpointSharesRpmWindow() {
+    // 三档同端点（M0 形态）：RPM 窗口按物理端点共享，而非按档位相加（per-model，02§4.5）
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    List<Long> waits = new ArrayList<>();
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            new LlmGatewayConfig(
+                LlmGatewayConfig.models(
+                    endpoint("std-model"), endpoint("std-model"), endpoint("std-model")),
+                List.of(),
+                java.util.Map.of(ModelTier.STANDARD, 1, ModelTier.LIGHT, 1),
+                1,
+                3,
+                120_000,
+                500,
+                10,
+                40,
+                null,
+                java.util.Map.of(),
+                null),
+            transport,
+            ms -> {
+              waits.add(ms);
+              clock.addAndGet(ms);
+            },
+            clock::get);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    LlmResponse light = gateway.complete(request(ModelTier.LIGHT));
+    assertThat(light.status()).isEqualTo(LlmStatus.OK);
+    // light 走同一物理端点：共享窗口已满（rpm=1），等待最早时间戳出窗（按档位分窗则此等待不存在）
+    assertThat(waits).hasSize(1);
+    assertThat(waits.get(0)).isEqualTo(60_001L);
+    assertThat(transport.bodies).hasSize(2);
   }
 }

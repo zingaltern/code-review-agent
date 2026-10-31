@@ -10,9 +10,9 @@ import org.cra.common.run.ReviewMode;
  * commit)} 键控——push 直推的载体是 commit comment（端点本身按 commit 作用域），夜间存量的载体是 issue（按标记内 commit
  * 过滤）。两种键共同表达"这个 head commit 是否已完整发布"。
  *
- * <p>标记格式（05§1.3）**不随键控扩展改变**：run 完成标记仍为 {@code v | run | commit | status | findings |
- * suppressed}，一份载体评论只承载一个末位标记——因此无 PR 形态的账本粒度是**载体评论级**（单条 commit comment / 单条 issue），不存在 PR 形态的多条
- * inline 评论拼合。
+ * <p>标记格式（05§1.3）<strong>不随键控扩展改变</strong>：run 完成标记仍为 {@code v | run | commit | status | findings |
+ * suppressed}，一份载体评论只承载一个末位标记——因此无 PR 形态的账本粒度是<strong>载体评论级</strong>（单条 commit comment / 单条
+ * issue），不存在 PR 形态的多条 inline 评论拼合。
  *
  * @param repoOwner 仓库属主
  * @param repoName 仓库名

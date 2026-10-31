@@ -182,7 +182,7 @@ cra-review:
 | `CRA_CROSSCHECKER_ENABLED` | 是否启用 CrossChecker，默认 `false` |
 | `CRA_REVIEW_TESTS` / `--review-tests` | 测试文件是否进入评审范围，默认 `false`（见下方"评审范围"） |
 | `CRA_AGENTS_BUDGET_<ROLE>_INPUT_TOKENS` / `_OUTPUT_TOKENS` | 单代理预算覆盖（`role` = `bug-hunter`/`security-reviewer`/`test-reviewer`/`convention-reviewer`/`perf-reviewer`/`cross-checker`/`verifier`/`judge`）；默认见 [docs/03 §6](docs/03-multi-agent-design.md) |
-| `--run-total-tokens` | run 级 token 预算，默认 `800000`（AI Coding 放宽档，原 500k） |
+| `--run-total-tokens` | run 级 token 预算，默认 `1600000`（2026-10-31 预算翻倍，原 800k） |
 | `--large-diff-lines` / `--hard-cap-lines` | 大 diff 降档线 / 硬上限（行），默认 `4000` / `16000` |
 
 ### 评审范围（默认不含测试文件）

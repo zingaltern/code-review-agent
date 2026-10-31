@@ -31,8 +31,8 @@ public record VerificationItem(
     if (findingId.isBlank()) {
       throw new IllegalArgumentException("findingId must be non-blank");
     }
-    Objects.requireNonNull(category, "category");
-    Objects.requireNonNull(severity, "severity");
+    Texts.requireNonBlank(category, "category");
+    Texts.requireNonBlank(severity, "severity");
     Texts.requireNonBlank(title, "title");
     Texts.requireNonBlank(description, "description");
     Texts.requireNonBlank(failureMode, "failureMode");

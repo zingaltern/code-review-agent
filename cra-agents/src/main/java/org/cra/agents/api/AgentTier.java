@@ -1,8 +1,8 @@
 package org.cra.agents.api;
 
 /**
- * 子代理模型档位（03§6 速查表：standard/strong/light）。M2 记录进 run plan 与 trace； 实际路由（per-model RPM/降级链）随 T2.9
- * 落地（05§5 cra.llm.models）。
+ * 子代理模型档位（03§6 速查表：standard/strong/light）。记录进 run plan 与 trace； 实际路由（per-model RPM/降级链）由 T2.9
+ * 路由层消费（05§5 cra.llm.models；AgentRunner 读 brief.modelTier）。
  */
 public enum AgentTier {
   /** 标准档（BugHunter/Test/Perf 默认） */

@@ -1,10 +1,13 @@
 package org.cra.agents.api;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.cra.common.exception.CraConfigException;
 
 /**
- * 模板装载契约（04§4：模板 = classpath 资源，占位符 {var}，引用 {&gt;path} 包含 shared 段； 模板即代码——改动走 PR +
+ * 模板装载契约（04§4：模板 = classpath 资源，占位符 {{var}}，引用 {&gt;path} 包含 shared 段； 模板即代码——改动走 PR +
  * 评测回归）。UNTRUSTED 定界格式是跨模块契约，随接口公开（04§3.3）。
  */
 public interface TemplateSupport {
@@ -19,7 +22,7 @@ public interface TemplateSupport {
   String BRIEF_SPLIT_MARKER = "\n# User\n";
 
   /**
-   * 渲染模板：解析 {@code {>path}} 包含段并替换 {@code {var}} 占位符（缺变量即抛错—— 模板错误在组装期暴露，不带病上线）。
+   * 渲染模板：解析 {@code {>path}} 包含段并替换 {@code {{var}}} 占位符（缺变量即抛错—— 模板错误在组装期暴露，不带病上线）。
    *
    * @param templatePath classpath 路径（prompts/ 下）
    * @param vars 变量表
@@ -59,8 +62,8 @@ public interface TemplateSupport {
    * @param scopedPaths 可读文件集合（相对仓库根）
    * @return 模板变量值
    */
-  static String scopedPathsNote(java.util.Collection<String> scopedPaths) {
-    return scopedPathsNote(scopedPaths, "read_file");
+  static String scopedPathsNote(Collection<String> scopedPaths) {
+    return scopedPathsNote(scopedPaths, ToolWhitelist.READ_FILE_NAME);
   }
 
   /**
@@ -70,7 +73,7 @@ public interface TemplateSupport {
    * @param tools 工具名描述（如 {@code read_file/grep_pattern}）
    * @return 模板变量值
    */
-  static String scopedPathsNote(java.util.Collection<String> scopedPaths, String tools) {
+  static String scopedPathsNote(Collection<String> scopedPaths, String tools) {
     return scopedPathsNote(scopedPaths, tools, Integer.MAX_VALUE);
   }
 
@@ -79,20 +82,20 @@ public interface TemplateSupport {
    *
    * @param scopedPaths 可读文件集合（相对仓库根）
    * @param tools 工具名描述
-   * @param maxPaths 最多列出的路径数（超出以省略声明收尾）
+   * @param maxPaths 最多列出的路径数（小于 1 时按 1 处理；超出以省略声明收尾）
    * @return 模板变量值
    */
-  static String scopedPathsNote(
-      java.util.Collection<String> scopedPaths, String tools, int maxPaths) {
+  static String scopedPathsNote(Collection<String> scopedPaths, String tools, int maxPaths) {
     if (scopedPaths == null || scopedPaths.isEmpty()) {
       return "（本代理无工具白名单：全部上下文已内联，不可请求工具）";
     }
-    java.util.List<String> sorted = scopedPaths.stream().sorted().toList();
+    List<String> sorted = scopedPaths.stream().sorted().toList();
     int shown = Math.min(sorted.size(), Math.max(1, maxPaths));
     String list =
-        sorted.subList(0, shown).stream()
+        sorted.stream()
+            .limit(shown)
             .map(path -> "- " + path.replace("\r", "\\r").replace("\n", "\\n"))
-            .collect(java.util.stream.Collectors.joining("\n"));
+            .collect(Collectors.joining("\n"));
     if (sorted.size() > shown) {
       list += "\n…（共 " + sorted.size() + " 个文件，仅列前 " + shown + " 个）";
     }
@@ -100,11 +103,7 @@ public interface TemplateSupport {
   }
 
   /**
-   * 渲染结果 → 自包含 brief 的统一拆分（03§2.1/04§4：System 段在标记前、"# User" 用户段在标记后）。
-   *
-   * <p>全部代理定义的 brief 组装收敛于此：{@code systemPrompt} = 标记前的渲染文本（不含标记前的换行）， {@code userPrompt} = 自 "#
-   * User" 标题行起的其余文本。模板缺标记 = 模板骨架被破坏（04§4）——组装期抛 CraConfigException 拒绝带病上线（经派发侧失败隔离收敛为该代理空产出 +
-   * 降级声明，不静默）。
+   * 渲染结果 → 自包含 brief 的统一拆分（standard 档；M0/M1 兼容形态）。
    *
    * @param templates 模板装载器（版本号取自同一装载器，保证与渲染同源）
    * @param templatePath classpath 模板路径（异常文案内嵌，定位模板骨架损坏）
@@ -122,6 +121,34 @@ public interface TemplateSupport {
       AgentRole role,
       ToolWhitelist tools,
       AgentBudget budget) {
+    return briefOf(templates, templatePath, rendered, role, tools, budget, AgentTier.STANDARD);
+  }
+
+  /**
+   * 渲染结果 → 自包含 brief 的统一拆分（03§2.1/04§4：System 段在标记前、"# User" 用户段在标记后）。
+   *
+   * <p>全部代理定义的 brief 组装收敛于此：{@code systemPrompt} = 标记前的渲染文本（不含标记前的换行）， {@code userPrompt} = 自 "#
+   * User" 标题行起的其余文本。模板缺标记 = 模板骨架被破坏（04§4）——组装期抛 CraConfigException 拒绝带病上线（经派发侧失败隔离收敛为该代理空产出 +
+   * 降级声明，不静默）。
+   *
+   * @param templates 模板装载器（版本号取自同一装载器，保证与渲染同源）
+   * @param templatePath classpath 模板路径（异常文案内嵌，定位模板骨架损坏）
+   * @param rendered {@link #render} 的渲染结果
+   * @param role 代理角色
+   * @param tools 工具白名单
+   * @param budget 预算硬限
+   * @param modelTier 模型档位（03§6；必须由定义透传，否则路由退化为 standard）
+   * @return 自包含简报
+   * @throws CraConfigException 渲染结果缺少 {@link #BRIEF_SPLIT_MARKER}（模板骨架损坏）
+   */
+  static AgentBrief briefOf(
+      TemplateSupport templates,
+      String templatePath,
+      String rendered,
+      AgentRole role,
+      ToolWhitelist tools,
+      AgentBudget budget,
+      AgentTier modelTier) {
     int splitAt = rendered.indexOf(BRIEF_SPLIT_MARKER);
     if (splitAt < 0) {
       throw new CraConfigException(templatePath + " 模板缺少 '# User' 分段");
@@ -132,6 +159,7 @@ public interface TemplateSupport {
         rendered.substring(splitAt + 1),
         templates.versionOf(templatePath),
         tools,
-        budget);
+        budget,
+        modelTier);
   }
 }

@@ -58,6 +58,23 @@ class LlmConfigFactoryTest {
   }
 
   @Test
+  void cliMaxConcurrencyEnvReachesGateway() {
+    // 05§5 max-concurrency：CRA_LLM_MAX_CONCURRENCY → CraConfig → LlmGatewayConfig（组合根全链）
+    java.util.Map<String, String> env =
+        Map.of(
+            "GITHUB_TOKEN", "t",
+            "CRA_LLM_API_KEY", "sk",
+            "CRA_LLM_BASE_URL", "https://llm.example/v1",
+            "CRA_LLM_MODEL", "glm-std",
+            "CRA_LLM_MAX_CONCURRENCY", "4");
+    var gateway =
+        LlmConfigFactory.create(
+            CliArgs.parse(
+                new String[] {"--repo", "o/r", "--pr", "1", "--base", "a", "--head", "b"}, env));
+    assertThat(gateway.maxConcurrency()).isEqualTo(4);
+  }
+
+  @Test
   void blankModelsInheritStandard() {
     // 直接构造 CraConfig 的调用方（非 CLI 解析）也必须享受"空白 = 继承"语义
     var gateway = LlmConfigFactory.create(config("standard,light", null, "", "  "));

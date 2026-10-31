@@ -20,6 +20,8 @@ import org.cra.common.git.LedgerMarkerParser.ParseOutcome;
 import org.cra.common.git.LedgerRunMarker;
 import org.cra.common.git.PullRequestRef;
 import org.cra.common.git.RepoRef;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * GitHub 账本 / 处置 / 周报列表读侧（CommentSource 实现，05§1.3、05§2.3、06§1.1）。
@@ -28,6 +30,8 @@ import org.cra.common.git.RepoRef;
  * adapter；分页触顶一律显式失败，不返回部分结果。
  */
 final class GitHubCommentReader implements CommentSource {
+
+  private static final Logger LOG = LoggerFactory.getLogger(GitHubCommentReader.class);
 
   private static final String CI_BOT_LOGIN = "github-actions[bot]";
   private static final int PAGE_SIZE = 100;
@@ -282,10 +286,16 @@ final class GitHubCommentReader implements CommentSource {
           reachedOlder = true;
           continue;
         }
+        String headSha = pr.path("head").path("sha").asText(null);
+        if (headSha == null || headSha.isBlank()) {
+          // 单个 PR 数据残缺不中止整轮列表（对齐 GitLabCommentReader 的 warn+跳过；05§2.5 如实降级）
+          LOG.warn("github PR #{} has no head sha; skipped from window", pr.path("number").asInt());
+          continue;
+        }
         out.add(
             new PullRequestRef(
                 pr.path("number").asInt(),
-                pr.path("head").path("sha").asText(""),
+                headSha,
                 pr.path("merge_commit_sha").isNull() ? null : pr.path("merge_commit_sha").asText(),
                 pr.path("state").asText(PullRequestRef.STATE_CLOSED),
                 updated == null ? Instant.EPOCH : updated,
