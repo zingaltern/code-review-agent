@@ -1,13 +1,16 @@
 package org.cra.git.internal;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -33,6 +36,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevSort;
 import org.eclipse.jgit.revwalk.RevWalk;
+import org.eclipse.jgit.revwalk.filter.RevFilter;
 import org.eclipse.jgit.storage.file.FileRepositoryBuilder;
 import org.eclipse.jgit.treewalk.CanonicalTreeParser;
 import org.eclipse.jgit.treewalk.TreeWalk;
@@ -57,12 +61,12 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     // jgit Repository 打开是惰性的：build() 对无 .git 目录不报错，必须显式校验（.git 为目录或文件皆可，
     // 文件形态 = worktree/submodule）
     Path gitDir = workspaceRoot.resolve(".git");
-    if (!java.nio.file.Files.isDirectory(gitDir) && !java.nio.file.Files.isRegularFile(gitDir)) {
+    if (!Files.isDirectory(gitDir) && !Files.isRegularFile(gitDir)) {
       throw new CraIntegrationException("目录不是 git 仓库（缺 .git）: " + workspaceRoot);
     }
     try {
       this.repository = new FileRepositoryBuilder().setWorkTree(workspaceRoot.toFile()).build();
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException("本地仓库打开失败: " + workspaceRoot, e);
     }
   }
@@ -75,7 +79,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
         throw new CraIntegrationException("ref/sha 不可解析: " + refOrSha);
       }
       return id.getName();
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException("ref/sha 解析失败: " + refOrSha, e);
     }
   }
@@ -91,7 +95,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     if (url == null || url.isBlank()) {
       return Optional.empty();
     }
-    String cleaned = url.replaceFirst("\\.git$", "");
+    String cleaned = normalizeRemoteUrl(url);
     int slash = cleaned.lastIndexOf('/');
     if (slash <= 0 || slash == cleaned.length() - 1) {
       return Optional.empty();
@@ -106,6 +110,25 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
       return Optional.empty();
     }
     return Optional.of(owner + "/" + cleaned.substring(slash + 1));
+  }
+
+  /** 去掉 query/fragment、尾斜杠与 `.git` 后缀（remote url 的常见书写变体）。 */
+  private static String normalizeRemoteUrl(String url) {
+    String cleaned = url.strip();
+    int end = cleaned.length();
+    int query = cleaned.indexOf('?');
+    int fragment = cleaned.indexOf('#');
+    if (query >= 0) {
+      end = Math.min(end, query);
+    }
+    if (fragment >= 0) {
+      end = Math.min(end, fragment);
+    }
+    cleaned = cleaned.substring(0, end);
+    while (cleaned.endsWith("/")) {
+      cleaned = cleaned.substring(0, cleaned.length() - 1);
+    }
+    return cleaned.replaceFirst("\\.git$", "");
   }
 
   @Override
@@ -136,7 +159,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
           headCommit.getName(),
           files,
           commitsBetween(walk, diffBase, headCommit));
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException(
           "本地 diff 失败: " + shortSha(baseSha) + ".." + shortSha(headSha), e);
     }
@@ -145,12 +168,12 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
   /** merge-base（三点 diff 基线）；无共同祖先返回 null。 */
   private String mergeBase(RevCommit base, RevCommit head) {
     try (RevWalk walk = new RevWalk(repository)) {
-      walk.setRevFilter(org.eclipse.jgit.revwalk.filter.RevFilter.MERGE_BASE);
+      walk.setRevFilter(RevFilter.MERGE_BASE);
       walk.markStart(walk.parseCommit(base));
       walk.markStart(walk.parseCommit(head));
       RevCommit first = walk.next();
       return first == null ? null : first.getName();
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException("merge-base 计算失败", e);
     }
   }
@@ -171,7 +194,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
           return new FileContent(path, null, true);
         }
       }
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException("本地读文件失败: " + path + " @" + shortSha(sha), e);
     }
   }
@@ -181,16 +204,12 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     try (RevWalk walk = new RevWalk(repository)) {
       RevCommit commit = parseCommit(walk, resolve(sha));
       // PathGlobs.compile 每次调用新编译（ADR-0016 单一实现），树遍历内复用同一实例
-      java.util.regex.Pattern glob =
-          pathGlob == null || pathGlob.isBlank() ? null : PathGlobs.compile(pathGlob);
+      Pattern glob = pathGlob == null || pathGlob.isBlank() ? null : PathGlobs.compile(pathGlob);
       List<String> out = new ArrayList<>();
       try (TreeWalk tw = new TreeWalk(repository)) {
         tw.addTree(commit.getTree());
         tw.setRecursive(true);
         while (tw.next()) {
-          if (tw.isSubtree()) {
-            continue;
-          }
           String path = tw.getPathString();
           if (glob == null || glob.matcher(path).matches()) {
             out.add(path);
@@ -198,7 +217,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
         }
       }
       return out;
-    } catch (java.io.IOException e) {
+    } catch (IOException e) {
       throw new CraIntegrationException("本地列文件失败 @" + shortSha(sha), e);
     }
   }
@@ -240,7 +259,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
 
   // ---------- jgit → common 模型映射 ----------
 
-  private RevCommit parseCommit(RevWalk walk, String sha) throws java.io.IOException {
+  private RevCommit parseCommit(RevWalk walk, String sha) throws IOException {
     ObjectId id = repository.resolve(sha);
     if (id == null) {
       throw new CraIntegrationException("commit 不可解析: " + sha);
@@ -248,15 +267,14 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     return walk.parseCommit(id);
   }
 
-  private CanonicalTreeParser toTree(RevWalk walk, RevCommit commit) throws java.io.IOException {
+  private CanonicalTreeParser toTree(RevWalk walk, RevCommit commit) throws IOException {
     CanonicalTreeParser parser = new CanonicalTreeParser();
     parser.reset(walk.getObjectReader(), commit.getTree());
     return parser;
   }
 
   private DiffFile toDiffFile(
-      DiffFormatter formatter, ByteArrayOutputStream buffer, DiffEntry entry)
-      throws java.io.IOException {
+      DiffFormatter formatter, ByteArrayOutputStream buffer, DiffEntry entry) throws IOException {
     boolean removed = entry.getChangeType() == DiffEntry.ChangeType.DELETE;
     String path = removed ? entry.getOldPath() : entry.getNewPath();
     String previousPath =
@@ -276,7 +294,7 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
   }
 
   private List<CommitSummary> commitsBetween(RevWalk walk, RevCommit base, RevCommit head)
-      throws java.io.IOException {
+      throws IOException {
     walk.reset();
     walk.sort(RevSort.COMMIT_TIME_DESC);
     walk.markStart(walk.parseCommit(head.getId()));

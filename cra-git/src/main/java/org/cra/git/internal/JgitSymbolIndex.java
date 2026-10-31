@@ -1,7 +1,6 @@
 package org.cra.git.internal;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -21,6 +20,7 @@ import org.cra.common.semantic.SymbolKind;
 import org.cra.common.semantic.SymbolReferenceSite;
 import org.cra.common.semantic.SymbolReferences;
 import org.cra.common.semantic.TypeImport;
+import org.cra.common.text.Texts;
 import org.cra.git.api.SymbolIndex;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
@@ -366,7 +366,7 @@ public final class JgitSymbolIndex implements SymbolIndex {
     return false;
   }
 
-  /** 读取 blob 文本（二进制/解码失败返回 null）。 */
+  /** 读取 blob 文本（二进制 / 非法 UTF-8 返回 null；ADR-0016 严格解码，不产出 U+FFFD 伪文本）。 */
   private static String readBlob(Repository repository, ObjectId blobId) {
     try {
       ObjectLoader loader = repository.getObjectDatabase().open(blobId);
@@ -376,7 +376,7 @@ public final class JgitSymbolIndex implements SymbolIndex {
           return null;
         }
       }
-      return new String(bytes, StandardCharsets.UTF_8);
+      return Texts.strictUtf8(bytes);
     } catch (IOException e) {
       return null;
     }
