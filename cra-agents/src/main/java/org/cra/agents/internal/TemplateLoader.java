@@ -6,16 +6,23 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.cra.agents.api.TemplateSupport;
 
 /**
- * 模板装载器（04§4）：classpath 资源 + {@code {>path}} 包含解析 + {@code {var}} 严格替换 + 内容哈希版本。零外部依赖（未引模板引擎——新依赖须走
- * PR 说明与白名单，09§7）。
+ * 模板装载器（04§4）：classpath 资源 + {@code {>path}} 包含解析 + {@code {{var}}} 严格替换 +
+ * 内容哈希版本。零外部依赖（未引模板引擎——新依赖须走 PR 说明与白名单，09§7）。
  */
 public final class TemplateLoader implements TemplateSupport {
+
+  /** include 递归深度上限（防循环包含）。 */
+  private static final int MAX_INCLUDE_DEPTH = 4;
+
+  /** 版本短码保留的哈希字节数（4 字节 = 8 位十六进制）。 */
+  private static final int HASH_PREFIX_BYTES = 4;
 
   private static final Pattern INCLUDE = Pattern.compile("\\{>([\\w./-]+)}");
   private static final Pattern VAR = Pattern.compile("\\{\\{(\\w+)}}");
@@ -51,7 +58,7 @@ public final class TemplateLoader implements TemplateSupport {
   }
 
   private String resolveIncludes(String path, int depth) {
-    if (depth > 4) {
+    if (depth > MAX_INCLUDE_DEPTH) {
       throw new IllegalStateException("模板包含深度超限: " + path);
     }
     String raw = load(path);
@@ -86,11 +93,7 @@ public final class TemplateLoader implements TemplateSupport {
     try {
       MessageDigest digest = MessageDigest.getInstance("SHA-256");
       byte[] hash = digest.digest(content.getBytes(StandardCharsets.UTF_8));
-      StringBuilder sb = new StringBuilder();
-      for (int i = 0; i < 4; i++) {
-        sb.append(String.format("%02x", hash[i]));
-      }
-      return sb.toString();
+      return HexFormat.of().formatHex(hash, 0, HASH_PREFIX_BYTES);
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException("SHA-256 unavailable", e);
     }
