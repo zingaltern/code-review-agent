@@ -1,6 +1,7 @@
 package org.cra.core.internal;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,7 +33,7 @@ final class ReviewRunFinisher {
 
   static String newRunId() {
     return "run_"
-        + LocalDateTime.now().format(TS)
+        + LocalDateTime.now(ZoneId.systemDefault()).format(TS)
         + "-"
         + String.format("%06x", ThreadLocalRandom.current().nextInt(1 << 24));
   }

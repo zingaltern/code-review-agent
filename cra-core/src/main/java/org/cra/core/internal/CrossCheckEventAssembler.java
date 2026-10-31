@@ -199,7 +199,7 @@ final class CrossCheckEventAssembler {
         if (message == null) {
           continue;
         }
-        for (String token : message.split("[^A-Za-z0-9_]+")) {
+        for (String token : message.split("\\W+")) {
           addToken(out, token);
           if (out.size() >= MAX_KEYWORDS) {
             break;
@@ -229,18 +229,18 @@ final class CrossCheckEventAssembler {
     StringBuilder current = new StringBuilder();
     for (int i = 0; i < value.length(); i++) {
       char c = value.charAt(i);
-      if (Character.isUpperCase(c) && current.length() > 0) {
+      if (Character.isUpperCase(c) && !current.isEmpty()) {
         parts.add(current.toString());
         current.setLength(0);
       }
       if (Character.isLetterOrDigit(c)) {
         current.append(c);
-      } else if (current.length() > 0) {
+      } else if (!current.isEmpty()) {
         parts.add(current.toString());
         current.setLength(0);
       }
     }
-    if (current.length() > 0) {
+    if (!current.isEmpty()) {
       parts.add(current.toString());
     }
     return parts;

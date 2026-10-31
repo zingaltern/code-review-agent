@@ -133,20 +133,24 @@ public final class ReviewQueue {
     }
     if (queue.offer(job)) {
       accepted.incrementAndGet();
-      LOG.info(
-          "review 已入队: delivery={} repo={} pr={} head={}",
-          job.deliveryId(),
-          job.repoKey(),
-          job.prNumber(),
-          job.headSha());
+      if (LOG.isInfoEnabled()) {
+        LOG.info(
+            "review 已入队: delivery={} repo={} pr={} head={}",
+            job.deliveryId(),
+            job.repoKey(),
+            job.prNumber(),
+            job.headSha());
+      }
       return SubmitResult.ACCEPTED;
     }
     rejected.incrementAndGet();
-    LOG.warn(
-        "review 队列已满（背压 503）: delivery={} repo={} pr={}",
-        job.deliveryId(),
-        job.repoKey(),
-        job.prNumber());
+    if (LOG.isWarnEnabled()) {
+      LOG.warn(
+          "review 队列已满（背压 503）: delivery={} repo={} pr={}",
+          job.deliveryId(),
+          job.repoKey(),
+          job.prNumber());
+    }
     return SubmitResult.FULL;
   }
 
@@ -228,9 +232,5 @@ public final class ReviewQueue {
         inFlight.decrementAndGet();
       }
     }
-  }
-
-  private int remainingCapacity() {
-    return ((ArrayBlockingQueue<?>) queue).remainingCapacity();
   }
 }

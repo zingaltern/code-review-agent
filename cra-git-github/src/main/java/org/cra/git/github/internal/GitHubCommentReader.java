@@ -70,7 +70,7 @@ final class GitHubCommentReader implements CommentSource {
       if (outcome.marker().isEmpty()) {
         continue;
       }
-      MarkerParseResult parsed = outcome.marker().get();
+      MarkerParseResult parsed = outcome.marker().orElseThrow();
       if (parsed instanceof MarkerParseResult.FindingMark f) {
         findings.add(
             new LedgerFindingMarker(
@@ -244,7 +244,7 @@ final class GitHubCommentReader implements CommentSource {
     if (outcome.marker().isEmpty()) {
       return false;
     }
-    MarkerParseResult parsed = outcome.marker().get();
+    MarkerParseResult parsed = outcome.marker().orElseThrow();
     if (parsed instanceof MarkerParseResult.RunMark r) {
       return r.commitSha().equalsIgnoreCase(commitSha);
     }

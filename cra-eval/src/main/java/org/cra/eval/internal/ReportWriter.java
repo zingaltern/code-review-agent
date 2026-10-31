@@ -2,7 +2,6 @@ package org.cra.eval.internal;
 
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -17,8 +16,7 @@ import org.cra.eval.api.EvalReport;
 public final class ReportWriter {
 
   private static final PrintStream OUT =
-      new PrintStream(
-          (OutputStream) new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8);
+      new PrintStream(new FileOutputStream(FileDescriptor.out), true, StandardCharsets.UTF_8);
 
   private ReportWriter() {}
 

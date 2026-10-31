@@ -111,9 +111,10 @@ final class WeeklyReportWriter {
             + r.sampleGate()
             + "）  推翻率: "
             + (r.overturnRate() == null ? "n/a" : percent(r.overturnRate())));
+    String overturnText = r.overturnRate() == null ? "n/a" : percent(r.overturnRate());
     lines.add(
         r.samplesSufficient()
-            ? "判定: 推翻率 " + (r.overturnRate() == null ? "n/a" : percent(r.overturnRate()))
+            ? "判定: 推翻率 " + overturnText
             : "⚠ 样本不足，不下结论（拒真池 " + r.pool() + " < " + r.sampleGate() + "）");
 
     WeeklyReport.Funnel f = report.funnel();

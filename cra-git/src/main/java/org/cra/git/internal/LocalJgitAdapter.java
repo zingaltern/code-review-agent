@@ -187,15 +187,25 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
           throw new CraIntegrationException("文件不存在于 " + shortSha(sha) + ": " + path);
         }
         byte[] bytes = repository.open(tw.getObjectId(0)).getBytes();
-        try {
-          // 严格 UTF-8（Texts，ADR-0016 收敛）：失败降级 binary 语义（text=null），不静默替换
-          return new FileContent(path, Texts.strictUtf8(bytes), false);
-        } catch (CharacterCodingException e) {
-          return new FileContent(path, null, true);
-        }
+        return decodedFile(path, bytes);
       }
     } catch (IOException e) {
       throw new CraIntegrationException("本地读文件失败: " + path + " @" + shortSha(sha), e);
+    }
+  }
+
+  /**
+   * 严格 UTF-8（Texts，ADR-0016 收敛）解码为文件内容：失败降级 binary 语义（text=null），不静默替换。
+   *
+   * @param path 文件路径（相对仓库根）
+   * @param bytes head blob 原始字节
+   * @return 文件内容（解码失败时 text=null、binary=true）
+   */
+  private static FileContent decodedFile(String path, byte[] bytes) {
+    try {
+      return new FileContent(path, Texts.strictUtf8(bytes), false);
+    } catch (CharacterCodingException e) {
+      return new FileContent(path, null, true);
     }
   }
 

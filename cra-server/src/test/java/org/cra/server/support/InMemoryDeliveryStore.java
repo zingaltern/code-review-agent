@@ -12,8 +12,8 @@ public final class InMemoryDeliveryStore implements DeliveryStore {
   private final Map<String, DeliveryRecord> records = new ConcurrentHashMap<>();
 
   @Override
-  public boolean claim(DeliveryRecord record) {
-    return records.putIfAbsent(record.deliveryId(), record) == null;
+  public boolean claim(DeliveryRecord delivery) {
+    return records.putIfAbsent(delivery.deliveryId(), delivery) == null;
   }
 
   @Override

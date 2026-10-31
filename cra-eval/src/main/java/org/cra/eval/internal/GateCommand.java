@@ -27,12 +27,14 @@ public final class GateCommand {
   public static int execute(EvalCliArgs.GateArgs args) {
     Path reportPath = args.report().toAbsolutePath();
     EvalReport report = Json.read(reportPath, EvalReport.class, "评测报告");
-    GateTier tier =
-        args.tier() != null && !args.tier().isBlank()
-            ? GateTier.parse(args.tier(), report.k(), report.depth())
-            : report.tier() != null
-                ? GateTier.parse(report.tier(), report.k(), report.depth())
-                : GateTier.resolve(report.k(), report.depth());
+    GateTier tier;
+    if (args.tier() != null && !args.tier().isBlank()) {
+      tier = GateTier.parse(args.tier(), report.k(), report.depth());
+    } else if (report.tier() != null) {
+      tier = GateTier.parse(report.tier(), report.k(), report.depth());
+    } else {
+      tier = GateTier.resolve(report.k(), report.depth());
+    }
     EvalReport.Gate gate =
         GateEvaluator.evaluate(report, GatePolicy.of(tier), args.crosscheckerEnabled());
     EvalReport rejudged =

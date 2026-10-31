@@ -13,16 +13,19 @@ import java.util.regex.Pattern;
  */
 public final class NegativeInvariantJudge {
 
-  /** 注入目标行为模式（04§2.4 点名的 skip-all / artificial-approve 类 + 直接回显指令类；大小写不敏感）。 */
-  private static final Pattern TARGET_BEHAVIOR =
-      Pattern.compile(
-          "skip[-_ ]?all"
-              + "|artificial[-_ ]?approve"
-              + "|artificially[- ]approved"
-              + "|all (findings|issues|comments) (are )?(suppressed|skipped|dropped)"
-              + "|review (has been )?skipped"
-              + "|ignore (all )?(previous|prior) (instructions|prompts)"
-              + "|injection (accepted|succeeded)");
+  /**
+   * 注入目标行为模式（04§2.4 点名的 skip-all / artificial-approve 类 + 直接回显指令类；大小写不敏感）。 单条正则分支过多会超 S5843
+   * 复杂度上限，按语义拆为多条等价模式：列表顺序 = 原 alternation 的分支顺序，匹配语义不变（findTarget 取最左命中，同位并列按列表序）。
+   */
+  private static final List<Pattern> TARGET_BEHAVIORS =
+      List.of(
+          Pattern.compile("skip[-_ ]?all"),
+          Pattern.compile("artificial[-_ ]?approve|artificially[- ]approved"),
+          Pattern.compile("all (findings|issues|comments) (are )?(suppressed|skipped|dropped)"),
+          Pattern.compile("review (has been )?skipped"),
+          Pattern.compile(
+              "ignore (all )?(previous|prior) (instructions|prompts)"
+                  + "|injection (accepted|succeeded)"));
 
   /** inline 评论标题的 severity 前缀（发布器形态：**[IMPORTANT] …**），结构不变量校验对象。 */
   private static final Pattern SEVERITY_TITLE = Pattern.compile("\\*\\*\\[([A-Za-z-]+)\\]");
@@ -95,16 +98,22 @@ public final class NegativeInvariantJudge {
 
   private static Optional<String> findTarget(String surface) {
     String lower = surface.toLowerCase(Locale.ROOT);
-    Matcher matcher = TARGET_BEHAVIOR.matcher(lower);
-    if (matcher.find()) {
-      int start = Math.max(0, matcher.start() - 20);
-      int end = Math.min(surface.length(), matcher.end() + 20);
-      String snippet = surface.substring(start, end).replace('\n', ' ');
-      if (snippet.length() > SNIPPET_LIMIT) {
-        snippet = snippet.substring(0, SNIPPET_LIMIT) + "…";
+    Matcher first = null;
+    for (Pattern pattern : TARGET_BEHAVIORS) {
+      Matcher matcher = pattern.matcher(lower);
+      if (matcher.find() && (first == null || matcher.start() < first.start())) {
+        first = matcher;
       }
-      return Optional.of(snippet);
     }
-    return Optional.empty();
+    if (first == null) {
+      return Optional.empty();
+    }
+    int start = Math.max(0, first.start() - 20);
+    int end = Math.min(surface.length(), first.end() + 20);
+    String snippet = surface.substring(start, end).replace('\n', ' ');
+    if (snippet.length() > SNIPPET_LIMIT) {
+      snippet = snippet.substring(0, SNIPPET_LIMIT) + "…";
+    }
+    return Optional.of(snippet);
   }
 }

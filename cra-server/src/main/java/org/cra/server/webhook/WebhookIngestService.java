@@ -46,7 +46,7 @@ public final class WebhookIngestService {
    */
   public Outcome ingest(PullRequestEvent event) {
     Instant now = Instant.now();
-    DeliveryRecord record =
+    DeliveryRecord delivery =
         new DeliveryRecord(
             event.deliveryId(),
             event.repoKey(),
@@ -58,11 +58,9 @@ public final class WebhookIngestService {
             null,
             now,
             now);
-    if (!deliveryStore.claim(record)) {
-      // 成功 delivery 的重投 = duplicate；失败 delivery 的重投允许重试（LLM 不可得等可恢复故障）
-      if (!deliveryStore.resetFailed(event.deliveryId())) {
-        return Outcome.DUPLICATE;
-      }
+    // 成功 delivery 的重投 = duplicate；失败 delivery 的重投允许重试（LLM 不可得等可恢复故障）
+    if (!deliveryStore.claim(delivery) && !deliveryStore.resetFailed(event.deliveryId())) {
+      return Outcome.DUPLICATE;
     }
     ReviewJob job =
         new ReviewJob(

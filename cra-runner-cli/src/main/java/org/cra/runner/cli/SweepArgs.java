@@ -130,23 +130,27 @@ final class SweepArgs {
     boolean dryRun = false;
     boolean crossChecker =
         Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_CROSSCHECKER_ENABLED", "false"));
-    for (int i = 0; i < args.length; i++) {
+    int i = 0;
+    while (i < args.length) {
       String arg = args[i];
       PlatformArgs.TriState dryRunFlag = PlatformArgs.matchTriState(arg, "--dry-run");
       if (dryRunFlag != null) {
         dryRun = dryRunFlag.value();
+        i++;
         continue;
       }
       PlatformArgs.TriState crossCheckerFlag = PlatformArgs.matchTriState(arg, "--crosschecker");
       if (crossCheckerFlag != null) {
         crossChecker = crossCheckerFlag.value();
+        i++;
         continue;
       }
       if (VALUE_FLAGS.contains(arg)) {
         if (i + 1 >= args.length) {
           throw new CraConfigException("参数缺值: " + arg);
         }
-        named.put(arg, args[++i]);
+        named.put(arg, args[i + 1]);
+        i += 2;
         continue;
       }
       int eq = arg.indexOf('=');

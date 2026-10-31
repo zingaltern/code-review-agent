@@ -150,11 +150,11 @@ final class JavaSourceScanner {
       List<TypeImport> imports,
       Map<String, List<Integer>> identifierLines,
       Map<String, Integer> identifierCounts,
-      String[] sourceLines) {
+      List<String> sourceLines) {
 
     /** 空扫描（读取失败等降级用）。 */
     static FileScan empty(String path) {
-      return new FileScan(path, "", List.of(), List.of(), Map.of(), Map.of(), new String[] {""});
+      return new FileScan(path, "", List.of(), List.of(), Map.of(), Map.of(), List.of(""));
     }
   }
 
@@ -171,7 +171,7 @@ final class JavaSourceScanner {
     if (text == null) {
       return FileScan.empty(path);
     }
-    String[] sourceLines = text.split("\n", -1);
+    List<String> sourceLines = List.of(text.split("\n", -1));
     List<Token> tokens = lex(text);
     List<TypeImport> imports = new ArrayList<>();
     Header header = parseHeader(path, tokens, imports);
@@ -271,11 +271,11 @@ final class JavaSourceScanner {
    * @param line 1 基行号
    * @return 摘录
    */
-  static String snippet(String[] sourceLines, int line) {
-    if (sourceLines == null || line < 1 || line > sourceLines.length) {
+  static String snippet(List<String> sourceLines, int line) {
+    if (sourceLines == null || line < 1 || line > sourceLines.size()) {
       return "";
     }
-    String trimmed = sourceLines[line - 1].strip();
+    String trimmed = sourceLines.get(line - 1).strip();
     if (trimmed.length() <= SNIPPET_MAX_CHARS) {
       return trimmed;
     }
@@ -458,7 +458,7 @@ final class JavaSourceScanner {
       int start,
       String owner,
       boolean ownerIsEnum,
-      String[] sourceLines,
+      List<String> sourceLines,
       List<SymbolDefinition> out) {
     int i = start;
     while (i < tokens.size() && "@".equals(tokens.get(i).text())) {
@@ -510,7 +510,7 @@ final class JavaSourceScanner {
     }
     if (next < tokens.size() && "{".equals(tokens.get(next).text())) {
       if (owner != null && owner.equals(first.text())) {
-        // record 紧凑构造器：TypeName { ... }
+        // record 紧凑构造器：TypeName 后直接跟类体，无参数列表
         out.add(method(path, first, owner, sourceLines));
         return i;
       }
@@ -648,7 +648,7 @@ final class JavaSourceScanner {
   }
 
   private static SymbolDefinition method(
-      String path, Token name, String owner, String[] sourceLines) {
+      String path, Token name, String owner, List<String> sourceLines) {
     return new SymbolDefinition(
         path,
         name.text(),
@@ -659,7 +659,7 @@ final class JavaSourceScanner {
   }
 
   private static SymbolDefinition field(
-      String path, Token name, String owner, String[] sourceLines) {
+      String path, Token name, String owner, List<String> sourceLines) {
     return new SymbolDefinition(
         path, name.text(), SymbolKind.FIELD, name.line(), owner, snippet(sourceLines, name.line()));
   }
