@@ -33,9 +33,11 @@ public final class ExactDedupMerger {
       int mergedAway,
       int clusters) {
     public Result {
-      kept = List.copyOf(kept);
+      kept = List.copyOf(kept == null ? List.of() : kept);
       Map<String, List<String>> mergedFromCopy = new LinkedHashMap<>();
-      mergedFrom.forEach((k, v) -> mergedFromCopy.put(k, List.copyOf(v)));
+      if (mergedFrom != null) {
+        mergedFrom.forEach((k, v) -> mergedFromCopy.put(k, v == null ? List.of() : List.copyOf(v)));
+      }
       mergedFrom = Collections.unmodifiableMap(mergedFromCopy);
     }
   }
