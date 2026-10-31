@@ -6,7 +6,8 @@ import java.util.Objects;
  * 一次 LLM 调用的结果（02§4.2 降级结果对象：UNAVAILABLE 携带原因，不抛异常）。
  *
  * @param content 回复内容（UNAVAILABLE 时为 null）
- * @param tokensIn 输入 token（usage 缺失时按 字符数/3.5 估算，04§2.1）
+ * @param tokensIn 输入 token（usage 缺失时按 UTF-8 字节数/3.5 估算，04§2.1；失败/降级结果含网关内已消耗的失败尝试估算——排队超时等未触达
+ *     模型的出口为 0）
  * @param tokensOut 输出 token（同上）
  * @param latencyMs 本次调用总耗时（含重试与排队）
  * @param status 结果状态
@@ -76,7 +77,7 @@ public record LlmResponse(
    * 降级结果工厂（UNAVAILABLE：content 为 null）。
    *
    * @param errorMessage 失败原因
-   * @param tokensIn 已消耗输入 token（可为 0）
+   * @param tokensIn 已消耗输入 token（服务端已处理的失败尝试计入估算；未触达模型为 0）
    * @param latencyMs 耗时
    * @return LlmResponse
    */

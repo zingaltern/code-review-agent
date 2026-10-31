@@ -1,6 +1,10 @@
 package org.cra.common.context;
 
-/** token 估算（04§2.1：字符数 / 3.5 近似）。cra-context 与 cra-llm 各自持有同公式实现（矩阵禁 context→llm 依赖）。 */
+/**
+ * token 估算（04§2.1：字符数 / 3.5 近似）。cra-context 与 cra-llm 各自持有一份（矩阵禁 context→llm 依赖），但公式并不相同——
+ * 已知口径分歧（勿当"同公式"引用）：本类按 {@code text.length()}（字符数）；cra-llm TokenEstimator 按 UTF-8 字节数——中文文本下
+ * 后者约为前者的 3 倍（前者用于 brief 预算门槛、后者用于 usage 缺失计量，统一属跨模块行为变更，需走 ADR）。
+ */
 public final class TokenMath {
 
   private TokenMath() {}

@@ -1,9 +1,12 @@
 package org.cra.llm.internal;
 
+import java.io.IOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -15,13 +18,20 @@ import org.cra.llm.api.LlmRequest;
 import org.cra.llm.api.LlmResponse;
 import org.cra.llm.api.LlmStatus;
 import org.cra.llm.api.ModelTier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * 网关默认实现（T2.9 路由形态，02§4.5）：per-model RPM 滑窗限流 → 全局并发信号量（上限 8）→ 重试循环（429/5xx/超时指数退避 ≤maxRetries，其余
- * 4xx 不重试）→ 降级链（请求档位失败后按 fallback-chain 换端点重走，02§4.2； 全链耗尽返回 UNAVAILABLE，底层异常绝不抛穿编排层，
- * 09§4）。中断终止整条链（线程在停，不再换端点）。共享可变状态仅限 RpmLimiter 与本类私有字段（09§6）。
+ * 网关默认实现（T2.9 路由形态，02§4.5）：per-model RPM 滑窗限流（窗口按物理端点建，等待受 queueTimeout 约束）→ 全局并发信号量（上限 8）→
+ * 重试循环（429/5xx/超时指数退避 ≤maxRetries，其余 4xx 不重试）→ 降级链（请求档位失败后按 fallback-chain 换端点重走，02§4.2；全链耗尽返回
+ * UNAVAILABLE，底层异常绝不抛穿编排层，09§4）。中断终止整条链（线程在停，不再换端点）。
+ *
+ * <p>token 计量（02§4.4）：成功结果含 usage（缺失按请求文本 UTF-8 字节估算）加网关内已消耗的失败尝试；失败结果携带"服务端已处理" 尝试（5xx、200
+ * 坏响应）的输入估算——未触达模型的出口（排队超时/4xx/连接失败）计 0，预算护栏不静默少计。共享可变状态仅限 RpmLimiter 与本类私有字段（09§6）。
  */
 public final class DefaultLlmGateway implements LlmGateway {
+
+  private static final Logger log = LoggerFactory.getLogger(DefaultLlmGateway.class);
 
   private final LlmGatewayConfig config;
   private final LlmTransport transport;
@@ -45,55 +55,67 @@ public final class DefaultLlmGateway implements LlmGateway {
   }
 
   @Override
-  public java.util.Optional<LlmGatewayConfig> config() {
-    return java.util.Optional.of(config);
+  public Optional<LlmGatewayConfig> config() {
+    return Optional.of(config);
   }
 
   @Override
   public LlmResponse complete(LlmRequest request) {
     long start = System.currentTimeMillis();
-    List<ModelTier> sequence = attemptSequence(request.tier());
+    ModelTier requested = request.tier();
+    List<ModelTier> sequence = attemptSequence(requested);
     List<String> attemptFailures = new ArrayList<>();
+    long consumed = 0; // 降级链上先前端点已消耗的输入 token（估算），并入最终结果
     try {
       for (int index = 0; index < sequence.size(); index++) {
         ModelTier tier = sequence.get(index);
-        LlmGatewayConfig.ModelEndpoint endpoint = config.models().get(tier);
-        LlmResponse response = attempt(endpoint, request, tier, attemptFailures);
+        if (index > 0) {
+          // fallback 链触发（09§5 WARN：降级发生）
+          log.warn(
+              "llm fallback chain triggered: tier={} after failures={}", tier, attemptFailures);
+        }
+        LlmResponse response =
+            retryLoop(config.models().get(tier), request, start, tier, attemptFailures);
         if (response.status() == LlmStatus.OK) {
-          if (index == 0) {
-            return response;
-          }
           String degradation =
-              "model-fallback:"
-                  + request.tier().name().toLowerCase(Locale.ROOT)
-                  + "→"
-                  + tier.name().toLowerCase(Locale.ROOT);
+              tier == requested
+                  ? null
+                  : "model-fallback:"
+                      + requested.name().toLowerCase(Locale.ROOT)
+                      + "→"
+                      + tier.name().toLowerCase(Locale.ROOT);
           return LlmResponse.ok(
               response.content(),
-              response.tokensIn(),
+              response.tokensIn() + consumed,
               response.tokensOut(),
               response.latencyMs(),
               response.model(),
               degradation);
         }
+        consumed += response.tokensIn();
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return LlmResponse.unavailable(
-          "interrupted during llm call", 0, System.currentTimeMillis() - start);
+          "interrupted during llm call", consumed, System.currentTimeMillis() - start);
     }
     return LlmResponse.unavailable(
         "llm unavailable on all endpoints: " + String.join("; ", attemptFailures),
-        0,
+        consumed,
         System.currentTimeMillis() - start);
   }
 
   /**
-   * 尝试序列（02§4.2 降级链）：请求档位先试，fallback-chain 中其余档位依序兜底（去重保序）。 链条由配置保证只含已配置端点（LlmGatewayConfig 校验）。
+   * 尝试序列（02§4.2 降级链）：请求档位先试，fallback-chain 中其余档位依序兜底（去重保序）。链内条目由配置保证已配置（LlmGatewayConfig 校验）；
+   * 请求档位未配置端点时回落 standard（配置强制项，05§5），不抛 NPE 穿出网关（09§4）。
    */
   private List<ModelTier> attemptSequence(ModelTier requested) {
     Set<ModelTier> sequence = new LinkedHashSet<>();
-    sequence.add(requested);
+    if (config.models().containsKey(requested)) {
+      sequence.add(requested);
+    } else {
+      sequence.add(ModelTier.STANDARD);
+    }
     sequence.addAll(config.fallbackChain());
     return List.copyOf(sequence);
   }
@@ -101,20 +123,12 @@ public final class DefaultLlmGateway implements LlmGateway {
   /**
    * 单端点尝试（02§4.5）：每次实际 HTTP 调用独立的 退避 → 并发许可 → RPM 取槽 → 请求。
    *
-   * <p>先取并发许可再取 RPM 槽：并发排队超时意味着请求从未触达模型，不消耗 RPM 配额（02§4.5 per-model RPM 按"实际请求"计）。代价是 RPM
-   * 排队期间持有并发许可——单档位等待由串行化排队兜底，不再放大其它档位的等待面。
+   * <p>先取并发许可再取 RPM 槽：并发排队超时意味着请求从未触达模型，不消耗 RPM 配额（02§4.5 per-model RPM 按"实际请求"计）。RPM 等待持有并发许可，
+   * 故同样受 queueTimeout 约束——许可被占的最坏时长收敛为 queueTimeout，不再无限等待放大其它档位的排队面。
    *
+   * @param start 本次 complete() 调用起点（latencyMs 含排队、重试与整条降级链，02§4.2）
    * @throws InterruptedException 退避/并发排队/RPM 等待被中断（上抛终止整条链）
    */
-  private LlmResponse attempt(
-      LlmGatewayConfig.ModelEndpoint endpoint,
-      LlmRequest request,
-      ModelTier tier,
-      List<String> attemptFailures)
-      throws InterruptedException {
-    return retryLoop(endpoint, request, System.currentTimeMillis(), tier, attemptFailures);
-  }
-
   private LlmResponse retryLoop(
       LlmGatewayConfig.ModelEndpoint endpoint,
       LlmRequest request,
@@ -127,40 +141,48 @@ public final class DefaultLlmGateway implements LlmGateway {
         OpenAiCodec.encodeRequest(
             endpoint.model(), request, config.temperature(), config.reasoningEffort());
     long estimatedInput = TokenEstimator.estimate(request.systemPrompt() + request.userPrompt());
+    long consumed = 0; // 本端点内"服务端已处理"的失败尝试（5xx、坏 200）的输入估算
     for (int attempt = 0; attempt <= config.maxRetries(); attempt++) {
       if (attempt > 0) {
-        sleeper.sleep(backoff.delayForAttempt(attempt));
+        long delay = backoff.delayForAttempt(attempt);
+        log.debug("llm retry: tier={} attempt={} delayMs={}", tier, attempt, delay);
+        sleeper.sleep(delay);
       }
-      LlmTransport.TransportResponse response;
-      boolean acquired;
-      try {
-        acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
-      } catch (InterruptedException e) {
-        throw e;
-      }
+      boolean acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!acquired) {
         // 未触达模型：不消耗 RPM 槽（02§4.5 per-model RPM 按实际请求计）
         String failure = tierName(tier) + ": concurrency queue timeout";
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
       }
+      LlmTransport.TransportResponse response;
       try {
-        // 许可已取得才排队 RPM：排队超时（上面分支）不占配额；RPM 等待期间持有许可由本端点串行队列约束
-        rpmLimiter.awaitSlot(tier, config.rpmOf(tier));
+        boolean slot =
+            rpmLimiter.awaitSlot(
+                new RpmLimiter.EndpointIdentity(endpoint.baseUrl(), endpoint.model()),
+                config.rpmOf(tier),
+                config.queueTimeoutMs());
+        if (!slot) {
+          // RPM 预算内无槽：请求未发出，不占配额（与并发排队超时同语义）
+          String failure = tierName(tier) + ": rpm queue timeout";
+          attemptFailures.add(failure);
+          return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+        }
         response =
             transport.post(
                 url,
                 endpoint.apiKey(),
                 body,
-                java.time.Duration.ofMillis(config.requestTimeoutMs()),
+                Duration.ofMillis(config.requestTimeoutMs()),
                 config.extraHeaders());
       } catch (IllegalArgumentException e) {
         // 非法 URL/请求头（组装期本应拒绝）：边界内收敛为不可得，不抛穿编排层（09§4）
         String failure = tierName(tier) + ": llm request invalid: " + e.getMessage();
         attemptFailures.add(failure);
         return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
-      } catch (java.io.IOException e) {
-        // 网络/超时：与 429/5xx 同类可重试故障；耗尽后换降级链下一端点（09§4 边界转换）
+      } catch (IOException e) {
+        // 网络/超时：与 429/5xx 同类可重试故障；耗尽后换降级链下一端点（09§4 边界转换）。
+        // 计 0：连接失败与服务端已处理（读超时）不可区分，不虚增也不静默归零给已确认路径
         if (attempt == config.maxRetries()) {
           String failure =
               tierName(tier) + ": llm transport failed after retries: " + e.getMessage();
@@ -172,9 +194,13 @@ public final class DefaultLlmGateway implements LlmGateway {
         concurrency.release();
       }
       if (response.statusCode() == 200) {
-        return parseOk(response.body(), estimatedInput, start);
+        return parseOk(response.body(), estimatedInput, start, consumed, attemptFailures);
       }
       if (isRetryable(response.statusCode())) {
+        if (response.statusCode() >= 500) {
+          // 5xx：服务端已接收并处理请求后失败，输入 token 确定消耗（429 被拒未计费，不计）
+          consumed += estimatedInput;
+        }
         continue; // 429/5xx：指数退避后重试（02§4.5）
       }
       String failure =
@@ -188,26 +214,32 @@ public final class DefaultLlmGateway implements LlmGateway {
     }
     String failure = tierName(tier) + ": llm retries exhausted (" + config.maxRetries() + ")";
     attemptFailures.add(failure);
-    return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+    return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
   }
 
-  private LlmResponse parseOk(String body, long estimatedInput, long start) {
+  private LlmResponse parseOk(
+      String body, long estimatedInput, long start, long consumed, List<String> attemptFailures) {
     try {
       OpenAiCodec.ParsedResponse parsed = OpenAiCodec.decodeResponse(body, estimatedInput);
       if (parsed.content() == null) {
+        // 200 但无内容：请求已被服务端处理，输入 token 确定消耗；原因入 attemptFailures（聚合消息可诊断）
+        String failure = "llm response missing content";
+        attemptFailures.add(failure);
         return LlmResponse.unavailable(
-            "llm response missing content", 0, System.currentTimeMillis() - start);
+            failure, consumed + estimatedInput, System.currentTimeMillis() - start);
       }
       return LlmResponse.ok(
           parsed.content(),
-          parsed.tokensIn(),
+          parsed.tokensIn() + consumed,
           parsed.tokensOut(),
           System.currentTimeMillis() - start,
           parsed.model());
-    } catch (java.io.IOException e) {
-      // 协议级坏响应不重试（重试无法修复），直接降级并说明
+    } catch (IOException e) {
+      // 协议级坏响应不重试（重试无法修复），直接降级并说明；请求已被服务端处理，输入 token 确定消耗
+      String failure = "llm response unparseable: " + e.getMessage();
+      attemptFailures.add(failure);
       return LlmResponse.unavailable(
-          "llm response unparseable: " + e.getMessage(), 0, System.currentTimeMillis() - start);
+          failure, consumed + estimatedInput, System.currentTimeMillis() - start);
     }
   }
 

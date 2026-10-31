@@ -1,5 +1,6 @@
 package org.cra.llm.internal;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -8,6 +9,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 
 /** JDK HttpClient 实现（无额外依赖；openai-code-review 的 HttpUtil 语义收敛到唯一传输层）。 */
 public final class JdkHttpTransport implements LlmTransport {
@@ -28,7 +30,7 @@ public final class JdkHttpTransport implements LlmTransport {
   @Override
   public TransportResponse post(String url, String apiKey, String jsonBody, Duration timeout)
       throws IOException, InterruptedException {
-    return post(url, apiKey, jsonBody, timeout, java.util.Map.of());
+    return post(url, apiKey, jsonBody, timeout, Map.of());
   }
 
   @Override
@@ -37,7 +39,7 @@ public final class JdkHttpTransport implements LlmTransport {
       String apiKey,
       String jsonBody,
       Duration timeout,
-      java.util.Map<String, String> extraHeaders)
+      Map<String, String> extraHeaders)
       throws IOException, InterruptedException {
     HttpRequest.Builder builder =
         HttpRequest.newBuilder()
@@ -57,8 +59,9 @@ public final class JdkHttpTransport implements LlmTransport {
     }
   }
 
-  private static String readBounded(InputStream in) throws IOException {
-    java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+  /** 包私有以便单测直测上限逻辑（08§2.2：HTTP 行为在集成层，纯读取逻辑本地覆盖）。 */
+  static String readBounded(InputStream in) throws IOException {
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
     byte[] buffer = new byte[8192];
     int n;
     while ((n = in.read(buffer)) > 0) {

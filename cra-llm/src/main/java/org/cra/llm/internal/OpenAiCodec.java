@@ -58,7 +58,7 @@ final class OpenAiCodec {
    *
    * @param body 响应体
    * @param estimatedInputTokens usage 缺失时的输入 token 估算值（调用方按**请求**文本估算，≤0 表示回退到响应体估算）
-   * @return 解析结果（content + usage；usage 缺失按 字符数/3.5 估算，04§2.1）
+   * @return 解析结果（content + usage；usage 缺失按 UTF-8 字节数/3.5 估算，04§2.1）
    * @throws IOException body 非 JSON 或结构不符合协议
    */
   static ParsedResponse decodeResponse(String body, long estimatedInputTokens) throws IOException {

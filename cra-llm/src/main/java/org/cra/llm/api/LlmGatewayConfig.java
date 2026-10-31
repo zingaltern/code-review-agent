@@ -1,5 +1,6 @@
 package org.cra.llm.api;
 
+import java.net.URI;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -14,7 +15,7 @@ import java.util.Objects;
  * @param perModelRpm 每模型 RPM 限制（05§5 per-model-rpm，默认 standard=60/strong=30/light=60）
  * @param maxConcurrency 并发信号量上限（全局，默认 8，02§4.5）
  * @param maxRetries 429/5xx/超时单端点最大重试次数（默认 3，02§4.5）
- * @param queueTimeoutMs 信号量排队超时（超时该端点失败并试降级链下一端点，02§4.5）
+ * @param queueTimeoutMs 排队等待预算（并发许可与 RPM 槽等待共用该值；超时视为未触达模型，该端点失败并试降级链下一端点，02§4.5）
  * @param requestTimeoutMs 单次请求超时
  * @param backoffBaseMs 指数退避基值（第 n 次重试等待 base * 2^(n-1)，封顶 backoffMaxMs）
  * @param backoffMaxMs 退避封顶
@@ -72,7 +73,8 @@ public record LlmGatewayConfig(
       }
     }
     if (maxConcurrency <= 0 || maxRetries < 0) {
-      throw new IllegalArgumentException("maxConcurrency/maxRetries must be positive");
+      throw new IllegalArgumentException(
+          "maxConcurrency must be positive, maxRetries must be non-negative");
     }
     if (queueTimeoutMs <= 0
         || requestTimeoutMs <= 0
@@ -80,9 +82,15 @@ public record LlmGatewayConfig(
         || backoffMaxMs < backoffBaseMs) {
       throw new IllegalArgumentException("timeouts must be positive and backoff capped");
     }
-    for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
-      requireHeader(header.getKey(), "附加头名");
-      requireHeader(header.getValue(), "附加头值");
+    if (extraHeaders == null) {
+      extraHeaders = Map.of();
+    } else {
+      for (Map.Entry<String, String> header : extraHeaders.entrySet()) {
+        requireHeader(header.getKey(), "附加头名");
+        requireHeader(header.getValue(), "附加头值");
+      }
+      // 防御拷贝（与 models/perModelRpm 同纪律，09§6）：外部 Map 后续变更不影响已装配配置
+      extraHeaders = Map.copyOf(extraHeaders);
     }
   }
 
@@ -110,7 +118,7 @@ public record LlmGatewayConfig(
       }
       // 组装期拒绝非法 URL（运行期 URI.create 抛 IAE 会穿出网关；09§4 / 05§5 fail-fast）
       try {
-        java.net.URI uri = java.net.URI.create(baseUrl);
+        URI uri = URI.create(baseUrl);
         String scheme = uri.getScheme();
         if (scheme == null
             || !("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
