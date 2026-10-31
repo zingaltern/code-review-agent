@@ -17,7 +17,14 @@ final class GitHubPayloadSupport {
 
   static String encodePath(String path) {
     return String.join(
-        "/", Arrays.stream(path.split("/")).map(GitHubPayloadSupport::urlEncode).toList());
+        "/", Arrays.stream(path.split("/")).map(GitHubPayloadSupport::encodePathSegment).toList());
+  }
+
+  /**
+   * 路径段编码：URLEncoder 面向表单（空格 → {@code +}），但路径里的 {@code +} 是字面字符； 空格必须编成 {@code %20}（GitLab 侧同为该语义）。
+   */
+  static String encodePathSegment(String segment) {
+    return urlEncode(segment).replace("+", "%20");
   }
 
   static String urlEncode(String value) {
