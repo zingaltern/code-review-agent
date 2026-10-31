@@ -458,6 +458,7 @@ public final class JgitSymbolIndex implements SymbolIndex {
       candidates.add(new Candidate(path, treeWalk.getObjectId(0).copy(), size));
     } catch (IOException e) {
       // 对象不可读：与既有 continue 语义一致，跳过该候选
+      return;
     }
   }
 
