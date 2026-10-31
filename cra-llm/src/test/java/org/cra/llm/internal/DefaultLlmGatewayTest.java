@@ -75,7 +75,11 @@ class DefaultLlmGatewayTest {
   }
 
   private static LlmGatewayConfig.ModelEndpoint endpoint(String model) {
-    return new LlmGatewayConfig.ModelEndpoint(model, "http://llm.test/v1/", "test-key");
+    return endpointAt("http://llm.test/v1/", model);
+  }
+
+  private static LlmGatewayConfig.ModelEndpoint endpointAt(String baseUrl, String model) {
+    return new LlmGatewayConfig.ModelEndpoint(model, baseUrl, "test-key");
   }
 
   /** M0 形态：三档同端点、降级链只含 standard（既有行为回归基准）。 */
@@ -406,7 +410,8 @@ class DefaultLlmGatewayTest {
 
   @Test
   void unconfiguredRequestedTierFallsBackToStandard() {
-    // 请求档位未配置端点：回落 standard（配置强制项，05§5），不抛 NPE 穿出网关（09§4），并打降级注记
+    // 请求档位未配置端点：回落 standard（配置强制项，05§5），不抛 NPE 穿出网关（09§4）。
+    // 请求档位从未尝试，注记用 tier-unconfigured 而非 model-fallback（降级链语义留给真实换端点）
     ScriptedTransport transport = new ScriptedTransport(200);
     LlmGatewayConfig onlyStandard =
         new LlmGatewayConfig(
@@ -426,7 +431,69 @@ class DefaultLlmGatewayTest {
     LlmResponse response = gateway.complete(request(ModelTier.STRONG));
     assertThat(response.status()).isEqualTo(LlmStatus.OK);
     assertThat(transport.bodies.get(0)).contains("std-model");
-    assertThat(response.degradation()).isEqualTo("model-fallback:strong→standard");
+    assertThat(response.degradation()).isEqualTo("tier-unconfigured:strong→standard");
+  }
+
+  @Test
+  void fourHundredAfterFiveHundredKeepsConsumedInput() {
+    // 第 0 次尝试 500（已确认消耗），第 1 次尝试 400 不可重试：消耗保留，不因换出口清零
+    ScriptedTransport transport = new ScriptedTransport(500, 400);
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage()).contains("http 400");
+    assertThat(response.tokensIn()).isEqualTo(TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void ioFailureAfterFiveHundredKeepsConsumedInput() {
+    // IOException 耗尽：本次尝试不可判定计 0，先前 5xx 的已确认消耗保留
+    ScriptedTransport transport =
+        new ScriptedTransport(500, new IOException("boom"), new IOException("boom"));
+    DefaultLlmGateway gateway = new DefaultLlmGateway(config(1, 1_000), transport, d -> {});
+    LlmResponse response = gateway.complete(request());
+    assertThat(response.status()).isEqualTo(LlmStatus.UNAVAILABLE);
+    assertThat(response.errorMessage()).contains("transport failed");
+    assertThat(response.tokensIn()).isEqualTo(TokenEstimator.estimate("sysuser"));
+  }
+
+  @Test
+  void rpmWindowSharedAcrossTrailingSlashVariants() {
+    // 两档 base-url 仅差尾斜杠 = 同一物理端点：RPM 窗口共享（identity 与 URL 拼接同用去尾斜杠形态）
+    ScriptedTransport transport = new ScriptedTransport(200, 200);
+    AtomicLong clock = new AtomicLong(0);
+    List<Long> waits = new ArrayList<>();
+    DefaultLlmGateway gateway =
+        new DefaultLlmGateway(
+            new LlmGatewayConfig(
+                LlmGatewayConfig.models(
+                    endpointAt("http://llm.test/v1/", "std-model"),
+                    endpointAt("http://llm.test/v1", "std-model"),
+                    endpointAt("http://llm.test/v1", "std-model")),
+                List.of(),
+                java.util.Map.of(ModelTier.STANDARD, 1, ModelTier.LIGHT, 1),
+                1,
+                3,
+                120_000,
+                500,
+                10,
+                40,
+                null,
+                java.util.Map.of(),
+                null),
+            transport,
+            ms -> {
+              waits.add(ms);
+              clock.addAndGet(ms);
+            },
+            clock::get);
+    assertThat(gateway.complete(request(ModelTier.STANDARD)).status()).isEqualTo(LlmStatus.OK);
+    LlmResponse light = gateway.complete(request(ModelTier.LIGHT));
+    assertThat(light.status()).isEqualTo(LlmStatus.OK);
+    // 同一物理端点窗口已满：等待最早时间戳出窗（若分窗则此等待不存在）
+    assertThat(waits).hasSize(1);
+    assertThat(waits.get(0)).isEqualTo(60_001L);
+    assertThat(transport.bodies).hasSize(2);
   }
 
   // ---------- RPM 语义（per-model 窗口 + 等待预算，02§4.5） ----------

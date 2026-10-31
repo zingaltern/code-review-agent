@@ -77,13 +77,18 @@ public final class DefaultLlmGateway implements LlmGateway {
         LlmResponse response =
             retryLoop(config.models().get(tier), request, start, tier, attemptFailures);
         if (response.status() == LlmStatus.OK) {
-          String degradation =
-              tier == requested
-                  ? null
-                  : "model-fallback:"
-                      + requested.name().toLowerCase(Locale.ROOT)
-                      + "→"
-                      + tier.name().toLowerCase(Locale.ROOT);
+          String degradation = null;
+          if (tier != requested) {
+            // 语义区分：请求档位确实尝试过且失败后换端点 = model-fallback（02§4.2 降级链）；
+            // 请求档位未配置端点、从未尝试 = tier-unconfigured（回落而非降级，指标可区分）
+            String kind =
+                config.models().containsKey(requested) ? "model-fallback:" : "tier-unconfigured:";
+            degradation =
+                kind
+                    + requested.name().toLowerCase(Locale.ROOT)
+                    + "→"
+                    + tier.name().toLowerCase(Locale.ROOT);
+          }
           return LlmResponse.ok(
               response.content(),
               response.tokensIn() + consumed,
@@ -107,7 +112,8 @@ public final class DefaultLlmGateway implements LlmGateway {
 
   /**
    * 尝试序列（02§4.2 降级链）：请求档位先试，fallback-chain 中其余档位依序兜底（去重保序）。链内条目由配置保证已配置（LlmGatewayConfig 校验）；
-   * 请求档位未配置端点时回落 standard（配置强制项，05§5），不抛 NPE 穿出网关（09§4）。
+   * 请求档位未配置端点时回落 standard——standard 必配由 LlmGatewayConfig 紧凑构造器强制（"models 必须至少配置 standard 档"）， 因此
+   * sequence 内不含未配置档位，不会取到 null endpoint 抛 NPE 穿出网关（09§4）。
    */
   private List<ModelTier> attemptSequence(ModelTier requested) {
     Set<ModelTier> sequence = new LinkedHashSet<>();
@@ -136,7 +142,9 @@ public final class DefaultLlmGateway implements LlmGateway {
       ModelTier tier,
       List<String> attemptFailures)
       throws InterruptedException {
-    String url = endpoint.baseUrl().replaceAll("/+$", "") + "/chat/completions";
+    // 尾斜杠归一只做一次，URL 拼接与 RPM 物理端点标识共用同一形态（避免仅差尾斜杠的配置分窗）
+    String base = endpoint.baseUrl().replaceAll("/+$", "");
+    String url = base + "/chat/completions";
     String body =
         OpenAiCodec.encodeRequest(
             endpoint.model(), request, config.temperature(), config.reasoningEffort());
@@ -150,23 +158,23 @@ public final class DefaultLlmGateway implements LlmGateway {
       }
       boolean acquired = concurrency.tryAcquire(config.queueTimeoutMs(), TimeUnit.MILLISECONDS);
       if (!acquired) {
-        // 未触达模型：不消耗 RPM 槽（02§4.5 per-model RPM 按实际请求计）
+        // 未触达模型：不消耗 RPM 槽（02§4.5 per-model RPM 按实际请求计）；consumed 为本端点先前尝试的已确认消耗
         String failure = tierName(tier) + ": concurrency queue timeout";
         attemptFailures.add(failure);
-        return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+        return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
       }
       LlmTransport.TransportResponse response;
       try {
         boolean slot =
             rpmLimiter.awaitSlot(
-                new RpmLimiter.EndpointIdentity(endpoint.baseUrl(), endpoint.model()),
+                new RpmLimiter.EndpointIdentity(base, endpoint.model()),
                 config.rpmOf(tier),
                 config.queueTimeoutMs());
         if (!slot) {
           // RPM 预算内无槽：请求未发出，不占配额（与并发排队超时同语义）
           String failure = tierName(tier) + ": rpm queue timeout";
           attemptFailures.add(failure);
-          return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+          return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
         }
         response =
             transport.post(
@@ -179,15 +187,15 @@ public final class DefaultLlmGateway implements LlmGateway {
         // 非法 URL/请求头（组装期本应拒绝）：边界内收敛为不可得，不抛穿编排层（09§4）
         String failure = tierName(tier) + ": llm request invalid: " + e.getMessage();
         attemptFailures.add(failure);
-        return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+        return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
       } catch (IOException e) {
         // 网络/超时：与 429/5xx 同类可重试故障；耗尽后换降级链下一端点（09§4 边界转换）。
-        // 计 0：连接失败与服务端已处理（读超时）不可区分，不虚增也不静默归零给已确认路径
+        // 本次尝试计 0（连接失败与服务端已处理不可区分），但先前 5xx 尝试的已确认消耗保留
         if (attempt == config.maxRetries()) {
           String failure =
               tierName(tier) + ": llm transport failed after retries: " + e.getMessage();
           attemptFailures.add(failure);
-          return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+          return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
         }
         continue;
       } finally {
@@ -210,7 +218,8 @@ public final class DefaultLlmGateway implements LlmGateway {
               + ": "
               + Texts.truncate(response.body(), 200);
       attemptFailures.add(failure);
-      return LlmResponse.unavailable(failure, 0, System.currentTimeMillis() - start);
+      // 4xx 本次请求被拒未计费，但先前 5xx 尝试的已确认消耗保留（不因换出口清零）
+      return LlmResponse.unavailable(failure, consumed, System.currentTimeMillis() - start);
     }
     String failure = tierName(tier) + ": llm retries exhausted (" + config.maxRetries() + ")";
     attemptFailures.add(failure);

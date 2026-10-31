@@ -13,8 +13,9 @@ import java.util.Objects;
  * @param status 结果状态
  * @param errorMessage 失败原因（OK 时为 null）
  * @param model 实际响应的模型名（响应体 model 字段，finding origin.model 用；UNAVAILABLE 为 null）
- * @param degradation 降级注记（T2.9：经降级链换端点成功时形如 {@code model-fallback:standard→light}； 直达成功为
- *     null——编排侧汇入 stats.degradations，02§6 summary 指标行可见）
+ * @param degradation 降级注记（T2.9：经降级链换端点成功时形如 {@code model-fallback:standard→light}； 请求档位未配置端点回落
+ *     standard 时形如 {@code tier-unconfigured:strong→standard}——从未尝试请求档位，非降级链语义； 直达成功为 null——编排侧汇入
+ *     stats.degradations，02§6 summary 指标行可见）
  */
 public record LlmResponse(
     String content,
