@@ -59,7 +59,8 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
                     : input.reviewPolicySection(),
                 "scoped_paths_note",
                 scopedPathsNote(input)));
-    return TemplateSupport.briefOf(templates, TEMPLATE, rendered, ROLE, tools(), budget());
+    return TemplateSupport.briefOf(
+        templates, TEMPLATE, rendered, ROLE, tools(), budget(), modelTier());
   }
 
   @Override
@@ -79,6 +80,7 @@ public final class SecurityReviewerDefinition implements SubAgent<ReviewAgentInp
   }
 
   private static String scopedPathsNote(ReviewAgentInput input) {
-    return TemplateSupport.scopedPathsNote(input.scopedPaths(), "read_file/grep_pattern");
+    return TemplateSupport.scopedPathsNote(
+        input.scopedPaths(), ToolWhitelist.READ_FILE_NAME + "/" + ToolWhitelist.GREP_PATTERN_NAME);
   }
 }
