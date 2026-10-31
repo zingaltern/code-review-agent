@@ -1,6 +1,7 @@
 package org.cra.core.internal.pipeline;
 
 import java.util.List;
+import org.cra.common.context.TokenMath;
 
 /**
  * L2 跨文件切片产出（ADR-0014）。
@@ -44,6 +45,6 @@ public record CrossFileSlices(
    * @return 估算 token
    */
   public long estimatedTokens() {
-    return org.cra.common.context.TokenMath.estimateTokens(text);
+    return TokenMath.estimateTokens(text);
   }
 }

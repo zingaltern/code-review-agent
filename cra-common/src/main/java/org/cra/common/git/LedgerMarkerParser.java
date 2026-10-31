@@ -1,6 +1,7 @@
 package org.cra.common.git;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -201,7 +202,7 @@ public final class LedgerMarkerParser {
       suspects.add(SuspectReason.BAD_FIELD_ORDER);
       return new ParseOutcome(Optional.empty(), suspects);
     }
-    Map<String, String> byKey = new java.util.LinkedHashMap<>();
+    Map<String, String> byKey = new LinkedHashMap<>();
     List<String> keys = fields.stream().map(f -> f[0]).toList();
     for (String[] f : fields) {
       byKey.put(f[0], f[1]);

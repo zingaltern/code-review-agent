@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import org.cra.agents.api.AgentBudgetOverrides;
 import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
@@ -23,7 +24,7 @@ import org.springframework.scheduling.support.CronExpression;
  *
  * @param webhookSecret webhook 密钥（GitHub：X-Hub-Signature-256 HMAC；GitLab：X-Gitlab-Token secret
  *     token）
- * @param platform Git 平台（`github`|`gitlab`；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0013）
+ * @param platform Git 平台（{@code github|gitlab}；CRA_SERVER_PLATFORM，默认 github；M4e 第二半，ADR-0013）
  * @param gitlabBaseUrl GitLab API 根（含 /api/v4；CRA_GITLAB_BASE_URL）
  * @param gitlabToken GitLab access token（CRA_GITLAB_TOKEN / CRA_GITLAB_TOKEN_FILE；gitlab 模式必填）
  * @param gitlabBotUsername `/user` 不可读时的 bot 身份回退（CRA_GITLAB_BOT_USERNAME，ADR-0011 决策 3）
@@ -135,7 +136,7 @@ public record ServerConfig(
     int semanticContextMaxFiles,
     long semanticContextMaxFileBytes,
     long semanticContextSliceTokens,
-    org.cra.agents.api.AgentBudgetOverrides agentBudgets) {
+    AgentBudgetOverrides agentBudgets) {
 
   public ServerConfig {
     requireText(webhookSecret, "CRA_SERVER_WEBHOOK_SECRET");
@@ -241,8 +242,7 @@ public record ServerConfig(
     if (eventHistoryCron == null || eventHistoryCron.isBlank()) {
       throw new CraConfigException("CRA_SERVER_EVENT_HISTORY_CRON 不能为空");
     }
-    agentBudgets =
-        agentBudgets == null ? org.cra.agents.api.AgentBudgetOverrides.none() : agentBudgets;
+    agentBudgets = agentBudgets == null ? AgentBudgetOverrides.none() : agentBudgets;
     eventHistoryCron = eventHistoryCron.strip();
     try {
       CronExpression.parse(eventHistoryCron);
@@ -259,6 +259,8 @@ public record ServerConfig(
    * @return 服务配置
    */
   public static ServerConfig from(Environment env) {
+    // 未设置/空白 = 默认 github（CI 的空 input 是 ""，不是 null）
+    String platform = firstNonBlank(env.getProperty("CRA_SERVER_PLATFORM"), "github");
     PipelineOptions defaults = PipelineOptions.defaults();
     DegradeThresholds degradeAt =
         parseDegradeAt(
@@ -267,11 +269,10 @@ public record ServerConfig(
             defaults.degradeAtSecond());
     return new ServerConfig(
         env.getProperty("CRA_SERVER_WEBHOOK_SECRET", ""),
-        env.getProperty("CRA_SERVER_PLATFORM", "github"),
+        platform,
         env.getProperty("CRA_GITLAB_BASE_URL", "https://gitlab.com/api/v4"),
-        firstNonBlank(
-            env.getProperty("CRA_GITLAB_TOKEN"),
-            LlmParsing.readGitLabTokenFile(env.getProperty("CRA_GITLAB_TOKEN_FILE"))),
+        // 未选 GitLab 平台时不读取任何 GitLab token 输入（ADR-0013 决策 1/3）
+        "gitlab".equals(platform) ? resolveGitLabToken(env) : null,
         blankToNull(env.getProperty("CRA_GITLAB_BOT_USERNAME")),
         env.getProperty("CRA_SERVER_API_TOKEN", ""),
         env.getProperty("CRA_SERVER_SIGNING_KEY", ""),
@@ -328,18 +329,17 @@ public record ServerConfig(
   /**
    * 单代理预算覆盖（05§5 {@code agents.budget.<role>.*}；环境变量形如 {@code
    * CRA_AGENTS_BUDGET_VERIFIER_INPUT_TOKENS}）。非法值失败于启动期（fail fast）。键构建公共体见 {@link
-   * LlmParsing#agentBudgetValues}（R4：与 CLI 同语义收敛）。
+   * LlmParsing#agentBudgetValues}（与 CLI 同语义）。
    *
    * @param env Spring Environment
    * @return 覆盖（无配置时为空覆盖）
    */
-  static org.cra.agents.api.AgentBudgetOverrides agentBudgetOverrides(Environment env) {
+  static AgentBudgetOverrides agentBudgetOverrides(Environment env) {
     Map<String, String> values =
         LlmParsing.agentBudgetValues(
-            org.cra.agents.api.AgentBudgetOverrides.CONFIGURABLE_ROLES,
-            (flag, envKey) -> env.getProperty(envKey));
+            AgentBudgetOverrides.CONFIGURABLE_ROLES, (flag, envKey) -> env.getProperty(envKey));
     try {
-      return org.cra.agents.api.AgentBudgetOverrides.fromConfig(values);
+      return AgentBudgetOverrides.fromConfig(values);
     } catch (IllegalArgumentException e) {
       throw new CraConfigException("agents.budget 非法: " + e.getMessage());
     }
@@ -443,6 +443,21 @@ public record ServerConfig(
     if (value == null || value.isBlank()) {
       throw new CraConfigException(name + " 未设置（fail closed：服务不在缺失密钥时启动）");
     }
+  }
+
+  /**
+   * GitLab token 解析（ADR-0013 决策 3：{@code CRA_GITLAB_TOKEN} 优先，其次 {@code
+   * CRA_GITLAB_TOKEN_FILE}；文件读取公共体见 {@link LlmParsing#readGitLabTokenFile}）。
+   *
+   * @param env Spring Environment
+   * @return token；均未配置为 null
+   */
+  private static String resolveGitLabToken(Environment env) {
+    String token = blankToNull(env.getProperty("CRA_GITLAB_TOKEN"));
+    if (token != null) {
+      return token;
+    }
+    return LlmParsing.readGitLabTokenFile(blankToNull(env.getProperty("CRA_GITLAB_TOKEN_FILE")));
   }
 
   private static String firstNonBlank(String first, String second) {

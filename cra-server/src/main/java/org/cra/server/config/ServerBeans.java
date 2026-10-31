@@ -1,5 +1,6 @@
 package org.cra.server.config;
 
+import java.time.Clock;
 import java.util.Set;
 import javax.sql.DataSource;
 import org.cra.agents.api.AgentsAssembly;
@@ -11,9 +12,11 @@ import org.cra.common.event.EventHistoryStore;
 import org.cra.common.exception.CraConfigException;
 import org.cra.core.api.CrossCheckerOptions;
 import org.cra.core.api.PipelineOptions;
+import org.cra.core.api.SemanticContextOptions;
 import org.cra.git.api.GitAssembly;
 import org.cra.git.api.GitPlatformAdapter;
 import org.cra.git.api.LocalRepoContext;
+import org.cra.git.api.SymbolIndex;
 import org.cra.git.github.api.GitHubAssembly;
 import org.cra.git.gitlab.api.GitLabAssembly;
 import org.cra.llm.api.LlmAssembly;
@@ -40,6 +43,7 @@ import org.cra.server.pipeline.ReviewJobHandler;
 import org.cra.server.queue.ReviewQueue;
 import org.cra.server.store.ServerSchemaMigrator;
 import org.cra.server.web.ApiTokenFilter;
+import org.cra.server.webhook.GitLabWebhookTokenVerifier;
 import org.cra.server.webhook.WebhookSignatureVerifier;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -86,8 +90,7 @@ public class ServerBeans {
   }
 
   /**
-   * LLM 网关（三档路由；缺失配置即拒绝启动）。三档装配与 opencode 适配的公共体见 {@link LlmParsing#threeTierConfig}（R4：与 CLI
-   * 同语义收敛）。
+   * LLM 网关（三档路由；缺失配置即拒绝启动）。三档装配与 opencode 适配的公共体见 {@link LlmParsing#threeTierConfig}（与 CLI 同语义）。
    *
    * @param config 服务配置
    * @return LlmGateway
@@ -183,8 +186,8 @@ public class ServerBeans {
    * @return SemanticContextOptions
    */
   @Bean
-  public org.cra.core.api.SemanticContextOptions semanticContextOptions(ServerConfig config) {
-    return org.cra.core.api.SemanticContextOptions.of(
+  public SemanticContextOptions semanticContextOptions(ServerConfig config) {
+    return SemanticContextOptions.of(
         config.semanticContextEnabled(),
         config.semanticContextMaxFiles(),
         config.semanticContextMaxFileBytes(),
@@ -198,8 +201,8 @@ public class ServerBeans {
    * @return SymbolIndex
    */
   @Bean
-  public org.cra.git.api.SymbolIndex symbolIndex(ServerConfig config) {
-    return org.cra.git.api.GitAssembly.createSymbolIndex(config.workspace());
+  public SymbolIndex symbolIndex(ServerConfig config) {
+    return GitAssembly.createSymbolIndex(config.workspace());
   }
 
   /**
@@ -310,8 +313,8 @@ public class ServerBeans {
       PipelineOptions pipelineOptions,
       CrossCheckerOptions crossCheckerOptions,
       EventHistoryStore eventHistoryStore,
-      org.cra.core.api.SemanticContextOptions semanticContextOptions,
-      org.cra.git.api.SymbolIndex symbolIndex,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex,
       ServerConfig config) {
     return new CoreReviewExecutor(
         dataSource,
@@ -372,9 +375,8 @@ public class ServerBeans {
    * @return verifier
    */
   @Bean
-  public org.cra.server.webhook.GitLabWebhookTokenVerifier gitLabWebhookTokenVerifier(
-      ServerConfig config) {
-    return new org.cra.server.webhook.GitLabWebhookTokenVerifier(config.webhookSecret());
+  public GitLabWebhookTokenVerifier gitLabWebhookTokenVerifier(ServerConfig config) {
+    return new GitLabWebhookTokenVerifier(config.webhookSecret());
   }
 
   /**
@@ -402,22 +404,19 @@ public class ServerBeans {
     }
     EventCollectionSettings settings =
         new EventCollectionSettings(
-            config.eventHistoryLookbackDays(),
             config.eventHistoryOverlapHours(),
             config.eventHistoryMaxAttempts(),
             config.eventHistoryRetryBackoffMillis(),
             config.eventHistoryMaxEvents());
     return new IncrementalEventHistoryCollector(
         new JsonlEventHistorySource(
-            config.eventHistorySource(),
-            config.eventHistoryMaxBytes(),
-            java.time.Clock.systemUTC()),
+            config.eventHistorySource(), config.eventHistoryMaxBytes(), Clock.systemUTC()),
         store,
         settings);
   }
 
   /**
-   * 事件史采集调度骨架。
+   * 事件史采集调度任务（M4f-full 真实采集）。
    *
    * @param config 服务配置
    * @param collector 采集端口

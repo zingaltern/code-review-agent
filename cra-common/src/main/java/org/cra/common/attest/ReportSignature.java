@@ -1,11 +1,13 @@
 package org.cra.common.attest;
 
 import java.nio.charset.StandardCharsets;
+import java.security.InvalidKeyException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -172,7 +174,7 @@ public final class ReportSignature {
     if (envelope == null || actualReportSha256 == null) {
       return false;
     }
-    String actual = actualReportSha256.strip().toLowerCase(java.util.Locale.ROOT);
+    String actual = actualReportSha256.strip().toLowerCase(Locale.ROOT);
     if (!actual.matches("[0-9a-f]{64}") || !actual.equals(envelope.reportSha256())) {
       return false;
     }
@@ -252,7 +254,7 @@ public final class ReportSignature {
   }
 
   private static String requireSha256(String value, String field) {
-    String normalized = requireText(value, field).toLowerCase(java.util.Locale.ROOT);
+    String normalized = requireText(value, field).toLowerCase(Locale.ROOT);
     if (normalized.length() != SHA256_HEX_LENGTH || !normalized.matches("[0-9a-f]+")) {
       throw new IllegalArgumentException(field + " 必须为 64 位十六进制");
     }
@@ -270,7 +272,7 @@ public final class ReportSignature {
       Mac mac = Mac.getInstance(HMAC_ALGORITHM);
       mac.init(new SecretKeySpec(secret, HMAC_ALGORITHM));
       return HexFormat.of().formatHex(mac.doFinal(message.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException | java.security.InvalidKeyException e) {
+    } catch (NoSuchAlgorithmException | InvalidKeyException e) {
       throw new IllegalStateException("HMAC-SHA256 不可用", e);
     }
   }

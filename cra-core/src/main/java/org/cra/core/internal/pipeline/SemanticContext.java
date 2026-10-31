@@ -11,6 +11,7 @@ import org.cra.common.semantic.SymbolDefinition;
 import org.cra.common.semantic.SymbolIndexSnapshot;
 import org.cra.common.semantic.SymbolReferenceSite;
 import org.cra.common.semantic.TypeImport;
+import org.cra.common.text.Texts;
 import org.cra.core.api.SemanticContextOptions;
 
 /**
@@ -87,15 +88,6 @@ public final class SemanticContext {
   }
 
   /**
-   * 单 brief 切片预算（token）。
-   *
-   * @return 预算
-   */
-  public long sliceTokens() {
-    return options.sliceTokens();
-  }
-
-  /**
    * 组装给定文件的 L2 切片（关闭/不可得返回空切片，无声明）。
    *
    * @param files 评审范围文件（chunk 或单文件）
@@ -124,7 +116,7 @@ public final class SemanticContext {
     }
     notes.add(
         "L2 跨文件切片启用（语义索引 @"
-            + org.cra.common.text.Texts.shortSha(snapshot.headSha(), 7, "unknown")
+            + Texts.shortSha(snapshot.headSha(), 7, "unknown")
             + "）：扫描 "
             + snapshot.filesScanned()
             + " 个 Java 文件 / 定义 "

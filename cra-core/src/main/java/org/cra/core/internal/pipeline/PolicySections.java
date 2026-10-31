@@ -1,6 +1,7 @@
 package org.cra.core.internal.pipeline;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.cra.common.context.ReviewPolicy;
 
@@ -50,7 +51,7 @@ public final class PolicySections {
     return out;
   }
 
-  private static void appendItems(StringBuilder out, String title, java.util.List<String> items) {
+  private static void appendItems(StringBuilder out, String title, List<String> items) {
     if (items.isEmpty()) {
       return;
     }

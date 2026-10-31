@@ -3,9 +3,9 @@ package org.cra.server.delivery;
 import java.time.Instant;
 
 /**
- * webhook delivery 记录（幂等键 = GitHub delivery id；02§5 服务形态）。
+ * webhook delivery 记录（幂等键 = 平台事件 id；02§5 服务形态）。
  *
- * @param deliveryId GitHub delivery id（主键）
+ * @param deliveryId 平台 delivery 键（GitHub delivery id / GitLab event UUID；主键）
  * @param repo 仓库（owner/name）
  * @param prNumber PR 编号
  * @param headSha 目标 sha
