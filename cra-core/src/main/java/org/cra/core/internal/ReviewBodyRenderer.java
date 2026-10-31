@@ -258,41 +258,67 @@ final class ReviewBodyRenderer {
       int unverifiedUnpublished,
       boolean noReviewableChanges) {
     if (ordered.isEmpty()) {
-      // 02§4.2：验证不可得 ≠ 无问题——计数声明，不把 UNVERIFIED 静默当空结果
-      if (noReviewableChanges) {
-        body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
-      } else if (unverifiedUnpublished > 0) {
-        body.append("本次无已确认发现；")
-            .append(unverifiedUnpublished)
-            .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
-      } else if (skippedDuplicate > 0) {
-        body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
-      } else {
-        body.append("本次未发现问题（评审返回空结果）。\n\n");
-      }
+      appendEmptyDetailMessage(body, skippedDuplicate, unverifiedUnpublished, noReviewableChanges);
       return;
     }
     body.append("### 发现详情\n\n");
     for (FindingAggregator.Scored s : ordered) {
-      CandidateFinding f = s.finding();
-      boolean unverified = unverifiedIds.contains(f.id());
-      body.append("#### ")
-          .append(unverified ? "[UNVERIFIED][" : "[")
-          .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
-          .append("] ")
-          .append(escape(f.title()))
-          .append(" — ")
-          .append(codeSpan(f.file() + ":" + f.line()))
-          .append("\n\n");
-      if (unverified) {
-        body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
-      }
-      body.append(escape(f.description())).append("\n\n");
-      body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
-      body.append("**证据**：\n").append(codeBlock(f.evidence())).append("\n\n");
-      if (f.suggestion() != null && !f.suggestion().isBlank()) {
-        body.append("**建议**：\n").append(codeBlock(f.suggestion())).append("\n\n");
-      }
+      appendFindingDetail(body, s, unverifiedIds.contains(s.finding().id()));
+    }
+  }
+
+  /**
+   * 无可发布详情时的空结果说明（区分不可评审/验证不可得/去重抑制/确无发现）。
+   *
+   * @param body 输出
+   * @param skippedDuplicate 去重跳过数
+   * @param unverifiedUnpublished 未验证未发布数
+   * @param noReviewableChanges 是否无评审范围
+   */
+  private static void appendEmptyDetailMessage(
+      StringBuilder body,
+      int skippedDuplicate,
+      int unverifiedUnpublished,
+      boolean noReviewableChanges) {
+    if (noReviewableChanges) {
+      body.append("本次无可评审变更（仅测试文件或全部变更被策略跳过），按策略不评审。\n\n");
+    } else if (unverifiedUnpublished > 0) {
+      body.append("本次无已确认发现；")
+          .append(unverifiedUnpublished)
+          .append(" 条候选验证不可得（UNVERIFIED，默认不发布）。\n\n");
+    } else if (skippedDuplicate > 0) {
+      body.append("本次无新发现（候选均被指纹去重抑制 ").append(skippedDuplicate).append(" 条）。\n\n");
+    } else {
+      body.append("本次未发现问题（评审返回空结果）。\n\n");
+    }
+  }
+
+  /**
+   * 单条 finding 的详情块（标题/位置/未验证告警/描述/失败模式/证据/建议）。
+   *
+   * @param body 输出
+   * @param s 候选
+   * @param unverified 是否未验证
+   */
+  private static void appendFindingDetail(
+      StringBuilder body, FindingAggregator.Scored s, boolean unverified) {
+    CandidateFinding f = s.finding();
+    body.append("#### ")
+        .append(unverified ? "[UNVERIFIED][" : "[")
+        .append(f.severityProposed().name().toUpperCase(Locale.ROOT))
+        .append("] ")
+        .append(escape(f.title()))
+        .append(" — ")
+        .append(codeSpan(f.file() + ":" + f.line()))
+        .append("\n\n");
+    if (unverified) {
+      body.append("> ⚠️ 验证不可得（复核者超时/预算击穿），本条未经独立复核即发布（publish-unverified=labeled）。\n\n");
+    }
+    body.append(escape(f.description())).append("\n\n");
+    body.append("**失败模式**：").append(escape(f.failureMode())).append("\n\n");
+    body.append("**证据**：\n").append(codeBlock(f.evidence())).append("\n\n");
+    if (f.suggestion() != null && !f.suggestion().isBlank()) {
+      body.append("**建议**：\n").append(codeBlock(f.suggestion())).append("\n\n");
     }
   }
 

@@ -63,9 +63,7 @@ final class PipelineDataLoader {
         policyParser,
         localRepoContext,
         crossCheckerOptions,
-        null,
-        SemanticContextOptions.disabled(),
-        null,
+        new LoaderPorts(null, SemanticContextOptions.disabled(), null),
         Clock.systemUTC());
   }
 
@@ -85,15 +83,12 @@ final class PipelineDataLoader {
         policyParser,
         localRepoContext,
         crossCheckerOptions,
-        eventHistoryQuery,
-        SemanticContextOptions.disabled(),
-        null,
-        clock);
+        new LoaderPorts(eventHistoryQuery, SemanticContextOptions.disabled(), null),
+        Clock.systemUTC());
   }
 
   /**
-   * @param semanticContextOptions 语义上下文配置（M4e；null = 关闭）
-   * @param symbolIndex 符号索引端口（null = 未装配 → 开启时按不可得声明）
+   * @param ports 事件史/语义上下文端口组（M4f/M4e）
    * @param clock 事件检索窗口锚点（测试可固定）
    */
   PipelineDataLoader(
@@ -101,20 +96,32 @@ final class PipelineDataLoader {
       ReviewPolicyParser policyParser,
       LocalRepoContext localRepoContext,
       CrossCheckerOptions crossCheckerOptions,
-      EventHistoryQuery eventHistoryQuery,
-      SemanticContextOptions semanticContextOptions,
-      SymbolIndex symbolIndex,
+      LoaderPorts ports,
       Clock clock) {
     this.adapter = adapter;
     this.policyParser = policyParser;
     this.localRepoContext = localRepoContext;
     this.crossCheckerOptions = crossCheckerOptions;
-    this.eventHistoryQuery = eventHistoryQuery;
+    this.eventHistoryQuery = ports.eventHistoryQuery();
     this.semanticContextOptions =
-        semanticContextOptions == null ? SemanticContextOptions.disabled() : semanticContextOptions;
-    this.symbolIndex = symbolIndex;
+        ports.semanticContextOptions() == null
+            ? SemanticContextOptions.disabled()
+            : ports.semanticContextOptions();
+    this.symbolIndex = ports.symbolIndex();
     this.clock = clock;
   }
+
+  /**
+   * 事件史/语义上下文端口组（三者在装配期恒同时出现）。
+   *
+   * @param eventHistoryQuery 事件史查询端口（null = 未装配）
+   * @param semanticContextOptions 语义上下文配置（null = 关闭）
+   * @param symbolIndex 符号索引端口（null = 未装配）
+   */
+  record LoaderPorts(
+      EventHistoryQuery eventHistoryQuery,
+      SemanticContextOptions semanticContextOptions,
+      SymbolIndex symbolIndex) {}
 
   DiffResult fetchDiff(ReviewRequest request) {
     return adapter.fetchDiff(

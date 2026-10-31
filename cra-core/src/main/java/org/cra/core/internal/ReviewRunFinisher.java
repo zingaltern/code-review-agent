@@ -61,30 +61,33 @@ final class ReviewRunFinisher {
         trace,
         runId,
         request,
-        status,
-        stats,
-        summaryLine,
-        suggestions,
-        SignoffAdvice.disabled(request.headSha(), request.signoff()));
+        new FinishOutcome(
+            status,
+            stats,
+            summaryLine,
+            suggestions,
+            SignoffAdvice.disabled(request.headSha(), request.signoff())));
   }
 
+  /**
+   * 写 run_end trace 并组装结果（唯一出口）。
+   *
+   * @param trace 追踪写入
+   * @param runId run 标识
+   * @param request 评审请求
+   * @param outcome 收尾内容（状态/统计/摘要/建议/签字）
+   * @return 评审结果
+   */
   static ReviewResult finish(
-      TraceWriter trace,
-      String runId,
-      ReviewRequest request,
-      RunStatus status,
-      ReviewStats stats,
-      String summaryLine,
-      List<ReviewSuggestion> suggestions,
-      SignoffAdvice signoff) {
+      TraceWriter trace, String runId, ReviewRequest request, FinishOutcome outcome) {
     Map<String, Object> end = new LinkedHashMap<>();
-    end.put("status", status.name().toLowerCase(Locale.ROOT));
-    end.put("findings_published", stats.findingsPublished());
-    end.put("skipped_duplicate", stats.skippedDuplicate());
-    end.put("suppressed_by_truncation", stats.suppressedByTruncation());
-    end.put("tokens_in", stats.tokensIn());
-    end.put("tokens_out", stats.tokensOut());
-    end.put("latency_ms", stats.latencyMs());
+    end.put("status", outcome.status().name().toLowerCase(Locale.ROOT));
+    end.put("findings_published", outcome.stats().findingsPublished());
+    end.put("skipped_duplicate", outcome.stats().skippedDuplicate());
+    end.put("suppressed_by_truncation", outcome.stats().suppressedByTruncation());
+    end.put("tokens_in", outcome.stats().tokensIn());
+    end.put("tokens_out", outcome.stats().tokensOut());
+    end.put("latency_ms", outcome.stats().latencyMs());
     trace.emit("run_end", end);
     return new ReviewResult(
         runId,
@@ -92,13 +95,29 @@ final class ReviewRunFinisher {
         request.repoName(),
         request.prNumber(),
         request.headSha(),
-        status,
-        stats,
+        outcome.status(),
+        outcome.stats(),
         "file://" + trace.runDir(),
-        summaryLine,
-        suggestions,
-        signoff);
+        outcome.summaryLine(),
+        outcome.suggestions(),
+        outcome.signoff());
   }
+
+  /**
+   * 收尾内容（状态/统计/摘要/建议/签字）。
+   *
+   * @param status 终态
+   * @param stats 统计
+   * @param summaryLine 摘要行
+   * @param suggestions 建议清单
+   * @param signoff 签字建议
+   */
+  record FinishOutcome(
+      RunStatus status,
+      ReviewStats stats,
+      String summaryLine,
+      List<ReviewSuggestion> suggestions,
+      SignoffAdvice signoff) {}
 
   /** 聚合后建议快照（本地 pre-PR 报告的建议清单数据源，02§5 本地形态；CI 形态不消费）。 */
   static List<ReviewSuggestion> suggestionsOf(List<FindingAggregator.Scored> ordered) {
@@ -144,38 +163,76 @@ final class ReviewRunFinisher {
     return new PublishCounters(fallbackCount, preExistingCount, filesReviewed, securityCount);
   }
 
+  /**
+   * 发布集合的统计快照（Summary/stats 口径，02§4.4）。
+   *
+   * @param counts run 级发现计数
+   * @param counters 发布集合计数
+   * @param suppressedByTruncation 截断抑制数
+   * @param usage token/耗时
+   * @param degradations 降级记录
+   * @param coverage 覆盖声明
+   * @return 统计
+   */
   static ReviewStats stats(
+      RunCounts counts,
+      PublishCounters counters,
+      int suppressedByTruncation,
+      RunUsage usage,
+      List<String> degradations,
+      CoverageInfo coverage) {
+    return new ReviewStats(
+        counts.candidateCount(),
+        counts.publishedCount(),
+        counts.skippedDuplicate(),
+        counts.confirmedCount(),
+        counts.rejectedCount(),
+        counts.unverifiedCount(),
+        counters.fallbackCount(),
+        counters.preExistingCount(),
+        suppressedByTruncation,
+        usage.tokensIn(),
+        usage.tokensOut(),
+        usage.latencyMs(),
+        degradations,
+        counters.securityCount(),
+        new Coverage(coverage.changedFiles(), counters.filesReviewed(), coverage.coverageNote()));
+  }
+
+  /**
+   * run 级发现计数。
+   *
+   * @param candidateCount 候选数
+   * @param publishedCount 发布数
+   * @param skippedDuplicate 去重跳过数
+   * @param confirmedCount 确认数
+   * @param rejectedCount 拒绝数
+   * @param unverifiedCount 未验证数
+   */
+  record RunCounts(
       int candidateCount,
       int publishedCount,
       int skippedDuplicate,
       int confirmedCount,
       int rejectedCount,
-      int unverifiedCount,
-      PublishCounters counters,
-      int suppressedByTruncation,
-      long tokensIn,
-      long tokensOut,
-      long latencyMs,
-      List<String> degradations,
-      int changedFiles,
-      String coverageNote) {
-    return new ReviewStats(
-        candidateCount,
-        publishedCount,
-        skippedDuplicate,
-        confirmedCount,
-        rejectedCount,
-        unverifiedCount,
-        counters.fallbackCount(),
-        counters.preExistingCount(),
-        suppressedByTruncation,
-        tokensIn,
-        tokensOut,
-        latencyMs,
-        degradations,
-        counters.securityCount(),
-        new Coverage(changedFiles, counters.filesReviewed(), coverageNote));
-  }
+      int unverifiedCount) {}
+
+  /**
+   * token 与耗时。
+   *
+   * @param tokensIn 输入 token
+   * @param tokensOut 输出 token
+   * @param latencyMs 耗时
+   */
+  record RunUsage(long tokensIn, long tokensOut, long latencyMs) {}
+
+  /**
+   * 覆盖声明。
+   *
+   * @param changedFiles 变更文件数
+   * @param coverageNote 覆盖说明
+   */
+  record CoverageInfo(int changedFiles, String coverageNote) {}
 
   static ReviewStats llmUnavailableStats(
       long tokensIn, long tokensOut, long latencyMs, List<String> degradations, int changedFiles) {

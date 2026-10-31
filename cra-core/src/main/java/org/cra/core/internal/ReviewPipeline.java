@@ -267,9 +267,8 @@ public final class ReviewPipeline implements Orchestrator {
             ContextAssembly.createReviewPolicyParser(),
             localRepoContext,
             effectiveCrossChecker,
-            eventHistoryQuery,
-            semanticContextOptions,
-            symbolIndex,
+            new PipelineDataLoader.LoaderPorts(
+                eventHistoryQuery, semanticContextOptions, symbolIndex),
             Clock.systemUTC());
     this.gatekeeper = new FindingGatekeeper(dataLoader, localRepoContext);
     this.citedResolver = new CitedEvidenceResolver(localRepoContext, eventHistoryQuery);
@@ -278,6 +277,93 @@ public final class ReviewPipeline implements Orchestrator {
     // 09§6：进程级共享验证池（daemon，不随 pipeline 实例创建/泄漏）
     this.verifyPool = CorePools.verifyPool();
   }
+
+  /**
+   * 解析账本门禁数据（commit 幂等 + 已发布指纹 + 可疑标记 + 收敛轮次）。
+   *
+   * @param request 评审请求
+   * @param trace 追踪写入
+   * @return 门禁数据
+   */
+  private LedgerGate parseLedgerGate(ReviewRequest request, TraceWriter trace) {
+    Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
+    trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
+    // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）+ 账本解析分层（05§1.3 规则 5）
+    List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.key());
+    List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.key());
+    int suspectCount = ledger.suspectMarkerCount(request.key());
+    boolean anyValidMarker = !publishedMarkers.isEmpty() || !completedRuns.isEmpty();
+    trace.emit(
+        "ledger_parse",
+        Map.of(
+            "valid",
+            publishedMarkers.size() + completedRuns.size(),
+            "suspect",
+            suspectCount,
+            "fallback",
+            anyValidMarker ? "none" : "commit-gate"));
+    // 规则 2（05§1.3）：可疑标记 ≥3 时 Summary 告警疑似注入尝试
+    String suspectWarning =
+        suspectCount >= LEDGER_SUSPECT_THRESHOLD
+            ? "检测到 " + suspectCount + " 个可疑账本标记（LEDGER_SUSPECT），疑似注入尝试"
+            : "";
+    // T2.7：收敛决议（03§5）——轮次按账本完成标记计数；非首轮 diff-only 复审只评审增量
+    ConvergenceGuard.RoundPlan roundPlan =
+        ConvergenceGuard.resolve(completedRuns, request.headSha());
+    trace.emit(
+        "convergence",
+        Map.of(
+            "round",
+            roundPlan.round(),
+            "breached",
+            roundPlan.breached(),
+            "review_base",
+            roundPlan.lastReviewedHead().map(ReviewBodyRenderer::shortSha).orElse("pr-base")));
+    return new LedgerGate(completion, publishedMarkers, suspectWarning, roundPlan);
+  }
+
+  /**
+   * 应用 run 级降级判定（schema 全丢/预算中止/全代理失败/角色失败）。
+   *
+   * @param outcome 评审阶段结果
+   * @param degradations 降级记录（可变）
+   * @return 是否降级
+   */
+  private static boolean applyDegradations(
+      ReviewStage.StageOutcome outcome, List<String> degradations) {
+    boolean degraded = false;
+    if (!outcome.schemaErrors().isEmpty() && outcome.findings().isEmpty()) {
+      // 候选全部被 schema 校验丢弃：run 降级收尾（仍发布完成标记，02§4.1 降级完成语义）
+      degradations.add(Degradations.SCHEMA_VIOLATION_ALL_DROPPED);
+      degraded = true;
+    }
+    if (outcome.stoppedByBudget()) {
+      degraded = true;
+    }
+    if (outcome.degradations().contains(Degradations.ALL_REVIEW_AGENTS_FAILED)) {
+      // 全代理执行失败（非 LLM 不可得）：零候选可信产出，降级收尾并声明（02§4.2 失败隔离语义）
+      degraded = true;
+    }
+    // 02§4.1/§4.2：角色超时/预算击穿/LLM 不可得导致缺失 = DEGRADED；验证侧不可得同理
+    if (outcome.degradations().stream().anyMatch(Degradations::isAgentFailure)) {
+      degraded = true;
+    }
+    return degraded;
+  }
+
+  /**
+   * 账本门禁数据。
+   *
+   * @param completion commit 级完成标记（存在即跳过）
+   * @param publishedMarkers 已发布指纹
+   * @param suspectWarning 可疑标记告警（空串 = 无）
+   * @param roundPlan 收敛轮次计划
+   */
+  private record LedgerGate(
+      Optional<LedgerRunMarker> completion,
+      List<LedgerFindingMarker> publishedMarkers,
+      String suspectWarning,
+      ConvergenceGuard.RoundPlan roundPlan) {}
 
   @Override
   public ReviewResult run(ReviewRequest request) {
@@ -298,8 +384,11 @@ public final class ReviewPipeline implements Orchestrator {
 
       // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
       // 保持历史原样，避免 CI 重跑反复 PATCH 旧评论；更新语义如有需要随流水线线统一加）
-      Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
-      trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
+      LedgerGate ledgerGate = parseLedgerGate(request, trace);
+      Optional<LedgerRunMarker> completion = ledgerGate.completion();
+      List<LedgerFindingMarker> publishedMarkers = ledgerGate.publishedMarkers();
+      String suspectWarning = ledgerGate.suspectWarning();
+      ConvergenceGuard.RoundPlan roundPlan = ledgerGate.roundPlan();
       if (completion.isPresent()) {
         return ReviewRunFinisher.finish(
             trace,
@@ -313,39 +402,6 @@ public final class ReviewPipeline implements Orchestrator {
                 + completion.get().status()
                 + "），全量跳过");
       }
-
-      // 第二道闸数据面：已发布指纹（补发缺失、已发布不重发，02§4.1）+ 账本解析分层（05§1.3 规则 5）
-      List<LedgerFindingMarker> publishedMarkers = ledger.publishedFindings(request.key());
-      List<LedgerRunMarker> completedRuns = ledger.completedRuns(request.key());
-      int suspectCount = ledger.suspectMarkerCount(request.key());
-      boolean anyValidMarker = !publishedMarkers.isEmpty() || !completedRuns.isEmpty();
-      trace.emit(
-          "ledger_parse",
-          Map.of(
-              "valid",
-              publishedMarkers.size() + completedRuns.size(),
-              "suspect",
-              suspectCount,
-              "fallback",
-              anyValidMarker ? "none" : "commit-gate"));
-      // 规则 2（05§1.3）：可疑标记 ≥3 时 Summary 告警疑似注入尝试
-      String suspectWarning =
-          suspectCount >= LEDGER_SUSPECT_THRESHOLD
-              ? "检测到 " + suspectCount + " 个可疑账本标记（LEDGER_SUSPECT），疑似注入尝试"
-              : "";
-
-      // T2.7：收敛决议（03§5）——轮次按账本完成标记计数；非首轮 diff-only 复审只评审增量
-      ConvergenceGuard.RoundPlan roundPlan =
-          ConvergenceGuard.resolve(completedRuns, request.headSha());
-      trace.emit(
-          "convergence",
-          Map.of(
-              "round",
-              roundPlan.round(),
-              "breached",
-              roundPlan.breached(),
-              "review_base",
-              roundPlan.lastReviewedHead().map(ReviewBodyRenderer::shortSha).orElse("pr-base")));
 
       DiffResult diff = dataLoader.fetchDiff(request);
       // 07§5 M4a：风险分级与签字建议（确定性规则，不依赖 LLM；绑定本次 head commit）
@@ -366,7 +422,9 @@ public final class ReviewPipeline implements Orchestrator {
       // Summary 明确建议打回重新设计；不再执行评审与验证（人的职责是踩刹车）
       if (roundPlan.breached()) {
         return ConvergenceBreachHandler.handle(
-            request, runId, trace, publisher, diff, suspectWarning, roundPlan, start, signoff);
+            new ConvergenceBreachHandler.RunContext(request, runId, trace, start),
+            new ConvergenceBreachHandler.PublishContext(
+                publisher, diff, suspectWarning, roundPlan, signoff));
       }
 
       // T1.5/T1.6：深度档位 + 大 diff 降档 + 分 chunk（02§4.3/02§4.4/04§2.2；T2.7 diff-only：非首轮按增量）
@@ -442,36 +500,21 @@ public final class ReviewPipeline implements Orchestrator {
             trace,
             runId,
             request,
-            RunStatus.FAILED,
-            ReviewRunFinisher.llmUnavailableStats(
-                outcome.tokensIn(),
-                outcome.tokensOut(),
-                System.currentTimeMillis() - start,
-                List.copyOf(outcome.degradations()),
-                diff.files().size()),
-            "LLM 不可得: " + outcome.llmError(),
-            List.of(),
-            signoff);
+            new ReviewRunFinisher.FinishOutcome(
+                RunStatus.FAILED,
+                ReviewRunFinisher.llmUnavailableStats(
+                    outcome.tokensIn(),
+                    outcome.tokensOut(),
+                    System.currentTimeMillis() - start,
+                    List.copyOf(outcome.degradations()),
+                    diff.files().size()),
+                "LLM 不可得: " + outcome.llmError(),
+                List.of(),
+                signoff));
       }
       List<String> degradations = new ArrayList<>(outcome.degradations());
       degradations.addAll(earlyDegradations);
-      boolean degraded = false;
-      if (!outcome.schemaErrors().isEmpty() && outcome.findings().isEmpty()) {
-        // 候选全部被 schema 校验丢弃：run 降级收尾（仍发布完成标记，02§4.1 降级完成语义）
-        degradations.add(Degradations.SCHEMA_VIOLATION_ALL_DROPPED);
-        degraded = true;
-      }
-      if (outcome.stoppedByBudget()) {
-        degraded = true;
-      }
-      if (outcome.degradations().contains(Degradations.ALL_REVIEW_AGENTS_FAILED)) {
-        // 全代理执行失败（非 LLM 不可得）：零候选可信产出，降级收尾并声明（02§4.2 失败隔离语义）
-        degraded = true;
-      }
-      // 02§4.1/§4.2：角色超时/预算击穿/LLM 不可得导致缺失 = DEGRADED；验证侧不可得同理
-      if (outcome.degradations().stream().anyMatch(Degradations::isAgentFailure)) {
-        degraded = true;
-      }
+      boolean degraded = applyDegradations(outcome, degradations);
 
       // T2.8：run 内精确去重 merge（03§4.5：同 file ±3 行同 category；语义去重留 M3）
       ExactDedupMerger.Result merged = ExactDedupMerger.merge(outcome.findings());
@@ -545,15 +588,9 @@ public final class ReviewPipeline implements Orchestrator {
       // T2.5/T2.6：晋升规则（M2 形态）+ Judge 仲裁与抽查复核（03§4.3/03§4.4）
       FindingPromoter.Outcome promotion =
           promoter.promote(
-              runId,
-              candidates,
-              waveResult,
-              headFiles,
-              policy,
-              budget,
-              trace,
-              repoKey,
-              waveResult.callSiteIndexByFinding());
+              new FindingPromoter.PromotionRun(runId, trace, budget, policy),
+              new FindingPromoter.PromotionInputs(candidates, waveResult, headFiles),
+              new FindingPromoter.ContextRefs(repoKey, waveResult.callSiteIndexByFinding()));
       tokensIn += promotion.tokensIn();
       tokensOut += promotion.tokensOut();
       List<FindingAggregator.Scored> confirmedCandidates = promotion.confirmed();
@@ -590,10 +627,9 @@ public final class ReviewPipeline implements Orchestrator {
       List<String> coverageLines =
           new ArrayList<>(
               CoverageReportBuilder.lines(
+                  new CoverageReportBuilder.ReviewPlan(depthPlan, plan),
                   diff,
                   policy,
-                  depthPlan,
-                  plan,
                   outcome,
                   gateOutcome.blameOutcome(),
                   policyModified,
@@ -608,22 +644,21 @@ public final class ReviewPipeline implements Orchestrator {
       }
       int publishedCount =
           publisher.publish(
-              request,
-              runId,
-              trace,
-              toPublish,
-              skippedDuplicate,
-              aggregation.suppressedByTruncation(),
-              degradations,
-              degraded,
-              suspectWarning,
-              coverageLines,
-              null,
-              unverifiedLabeled.stream().map(s -> s.finding().id()).collect(Collectors.toSet()),
-              unverifiedCount,
-              !plan.hasReviewableFiles(),
-              outcome.templateVersions(),
-              signoff);
+              new ReviewPublisher.RunHeader(request, runId, trace),
+              new ReviewPublisher.FindingSet(
+                  toPublish,
+                  skippedDuplicate,
+                  aggregation.suppressedByTruncation(),
+                  unverifiedLabeled.stream().map(s -> s.finding().id()).collect(Collectors.toSet()),
+                  unverifiedCount),
+              new ReviewPublisher.SummaryMeta(
+                  degradations,
+                  degraded,
+                  suspectWarning,
+                  coverageLines,
+                  null,
+                  !plan.hasReviewableFiles()),
+              new ReviewPublisher.PublishMeta(outcome.templateVersions(), signoff));
       if (degradations.stream().anyMatch(Degradations::isSummaryPublishFailed)) {
         // Summary 未发出 = 无 DONE 标记 = 不完整发布（02§4.1），不得报 SUCCESS
         degraded = true;
@@ -632,20 +667,20 @@ public final class ReviewPipeline implements Orchestrator {
       RunStatus status = degraded ? RunStatus.DEGRADED : RunStatus.SUCCESS;
       ReviewStats stats =
           ReviewRunFinisher.stats(
-              outcome.findings().size(),
-              publishedCount,
-              skippedDuplicate,
-              confirmedCount,
-              rejectedCount,
-              unverifiedCount,
+              new ReviewRunFinisher.RunCounts(
+                  outcome.findings().size(),
+                  publishedCount,
+                  skippedDuplicate,
+                  confirmedCount,
+                  rejectedCount,
+                  unverifiedCount),
               counters,
               aggregation.suppressedByTruncation(),
-              tokensIn,
-              tokensOut,
-              System.currentTimeMillis() - start,
+              new ReviewRunFinisher.RunUsage(
+                  tokensIn, tokensOut, System.currentTimeMillis() - start),
               List.copyOf(degradations),
-              diff.files().size(),
-              CoverageReportBuilder.note(coverageLines));
+              new ReviewRunFinisher.CoverageInfo(
+                  diff.files().size(), CoverageReportBuilder.note(coverageLines)));
       String summaryLine =
           ReviewRunFinisher.summaryLine(
               runId,
@@ -659,11 +694,8 @@ public final class ReviewPipeline implements Orchestrator {
           trace,
           runId,
           request,
-          status,
-          stats,
-          summaryLine,
-          ReviewRunFinisher.suggestionsOf(toPublish),
-          signoff);
+          new ReviewRunFinisher.FinishOutcome(
+              status, stats, summaryLine, ReviewRunFinisher.suggestionsOf(toPublish), signoff));
     } catch (RuntimeException e) {
       // run 级不可恢复故障统一捕获：落盘 FAILED + trace，不阻塞 PR（02§4.2）
       return ReviewRunFinisher.finish(
