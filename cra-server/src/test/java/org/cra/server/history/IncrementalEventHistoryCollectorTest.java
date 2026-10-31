@@ -45,7 +45,7 @@ class IncrementalEventHistoryCollectorTest {
     assertThat(first.tickets()).isEqualTo(1);
     assertThat(first.incidents()).isEqualTo(1);
     assertThat(store.rows).hasSize(2);
-    assertThat(store.checkpoints.get(source.id())).isEqualTo(NOW.minusSeconds(24 * 3600));
+    assertThat(store.checkpoints).containsEntry(source.id(), NOW.minusSeconds(24 * 3600));
 
     EventHistoryCollector.CollectionResult second =
         collector.collect(NOW.minusSeconds(7 * 24 * 3600));
@@ -181,7 +181,7 @@ class IncrementalEventHistoryCollectorTest {
     assertThat(result.inserted()).isEqualTo(2);
     assertThat(result.skipped()).isEqualTo(1);
     assertThat(result.note()).contains("单次上限");
-    assertThat(store.checkpoints.get(source.id())).isEqualTo(NOW.minusSeconds(2 * 3600));
+    assertThat(store.checkpoints).containsEntry(source.id(), NOW.minusSeconds(2 * 3600));
   }
 
   private static IncrementalEventHistoryCollector collector(
