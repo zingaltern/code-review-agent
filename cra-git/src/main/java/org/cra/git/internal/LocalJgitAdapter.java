@@ -11,6 +11,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import org.cra.common.context.PathGlobs;
 import org.cra.common.exception.CraIntegrationException;
 import org.cra.common.finding.AnchorStatus;
@@ -309,10 +311,10 @@ public final class LocalJgitAdapter implements LocalGitAdapter {
     walk.sort(RevSort.COMMIT_TIME_DESC);
     walk.markStart(walk.parseCommit(head.getId()));
     walk.markUninteresting(walk.parseCommit(base.getId()));
-    List<CommitSummary> commits = new ArrayList<>();
-    for (RevCommit c : walk) {
-      commits.add(new CommitSummary(c.getName(), c.getShortMessage()));
-    }
+    List<CommitSummary> commits =
+        StreamSupport.stream(walk.spliterator(), false)
+            .map(c -> new CommitSummary(c.getName(), c.getShortMessage()))
+            .collect(Collectors.toCollection(ArrayList::new));
     Collections.reverse(commits); // 时间升序 = GitHub compare 顺序
     return commits;
   }

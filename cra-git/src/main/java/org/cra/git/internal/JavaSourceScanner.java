@@ -175,93 +175,160 @@ final class JavaSourceScanner {
     List<Token> tokens = lex(text);
     List<TypeImport> imports = new ArrayList<>();
     Header header = parseHeader(path, tokens, imports);
-    int index = header.index();
-    String packageName = header.packageName();
-
-    List<SymbolDefinition> definitions = new ArrayList<>();
-    Map<String, List<Integer>> identifierLines = new LinkedHashMap<>();
-    Map<String, Integer> identifierCounts = new LinkedHashMap<>();
-    int depth = 0;
-    List<String> typeStack = new ArrayList<>();
-    List<Boolean> enumBodies = new ArrayList<>();
-    List<Integer> bodyDepths = new ArrayList<>();
-    String pendingType = null;
-    boolean pendingEnum = false;
-    int pendingTypeDepth = -1;
-    int lastMemberName = -1;
-    Token previous = null;
-    int i = index;
+    ScanContext context = new ScanContext(path, tokens, sourceLines);
+    int i = header.index();
     while (i < tokens.size()) {
       Token token = tokens.get(i);
       if (token.kind() == TokenKind.IDENT) {
         if (!KEYWORDS.contains(token.text())) {
-          recordIdentifier(identifierLines, identifierCounts, token);
+          recordIdentifier(context.identifierLines, context.identifierCounts, token);
         }
-        if (TYPE_KEYWORDS.contains(token.text())
-            && i + 1 < tokens.size()
-            && tokens.get(i + 1).kind() == TokenKind.IDENT
-            && !KEYWORDS.contains(tokens.get(i + 1).text())) {
-          Token name = tokens.get(i + 1);
-          definitions.add(
-              new SymbolDefinition(
-                  path,
-                  name.text(),
-                  SymbolKind.TYPE,
-                  name.line(),
-                  null,
-                  snippet(sourceLines, name.line())));
-          pendingType = name.text();
-          pendingEnum = "enum".equals(token.text());
-          pendingTypeDepth = depth;
+        if (isTypeDefinition(tokens, i)) {
+          recordTypeDefinition(context, i);
         }
       }
-      if (isBraceOpen(token)) {
-        depth++;
-        if (pendingType != null && depth == pendingTypeDepth + 1) {
-          typeStack.add(pendingType);
-          enumBodies.add(pendingEnum);
-          bodyDepths.add(depth);
-          pendingType = null;
-          pendingEnum = false;
-          pendingTypeDepth = -1;
-        }
-      } else if (isBraceClose(token)) {
-        if (!bodyDepths.isEmpty() && bodyDepths.get(bodyDepths.size() - 1) == depth) {
-          bodyDepths.remove(bodyDepths.size() - 1);
-          typeStack.remove(typeStack.size() - 1);
-          enumBodies.remove(enumBodies.size() - 1);
-        }
-        if (depth > 0) {
-          depth--;
-        }
-      } else if (!bodyDepths.isEmpty()
-          && depth == bodyDepths.get(bodyDepths.size() - 1)
-          && i > lastMemberName
-          && (previous == null || MEMBER_START_PREV.contains(previous.text()))) {
-        int nameIndex =
-            tryMember(
-                path,
-                tokens,
-                i,
-                typeStack.get(typeStack.size() - 1),
-                enumBodies.get(enumBodies.size() - 1),
-                sourceLines,
-                definitions);
-        if (nameIndex >= 0) {
-          lastMemberName = nameIndex;
-        }
-      }
-      previous = token;
+      trackStructure(context, i, token);
+      context.previous = token;
       i++;
     }
     return new FileScan(
         path,
-        packageName,
-        List.copyOf(definitions),
+        header.packageName(),
+        List.copyOf(context.definitions),
         List.copyOf(imports),
-        identifierLines,
-        identifierCounts,
+        context.identifierLines,
+        context.identifierCounts,
         sourceLines);
+  }
+
+  /**
+   * 主扫描可变状态（括号深度、类型体栈、待定类型与成员起点）。
+   *
+   * <p>从 scan 抽出的状态载体：主循环每步只做标识符/类型/括号/成员四类派发，状态显式化便于评审。
+   */
+  private static final class ScanContext {
+
+    private final String path;
+    private final List<Token> tokens;
+    private final List<String> sourceLines;
+    private final List<SymbolDefinition> definitions = new ArrayList<>();
+    private final Map<String, List<Integer>> identifierLines = new LinkedHashMap<>();
+    private final Map<String, Integer> identifierCounts = new LinkedHashMap<>();
+    private final List<String> typeStack = new ArrayList<>();
+    private final List<Boolean> enumBodies = new ArrayList<>();
+    private final List<Integer> bodyDepths = new ArrayList<>();
+    private int depth;
+    private String pendingType;
+    private boolean pendingEnum;
+    private int pendingTypeDepth = -1;
+    private int lastMemberName = -1;
+    private Token previous;
+
+    private ScanContext(String path, List<Token> tokens, List<String> sourceLines) {
+      this.path = path;
+      this.tokens = tokens;
+      this.sourceLines = sourceLines;
+    }
+  }
+
+  /**
+   * 当前 token 是否是类型声明（class/interface/enum/record + 合法名字）。
+   *
+   * @param tokens 记号流
+   * @param i 当前下标
+   * @return true 若是类型声明起点
+   */
+  private static boolean isTypeDefinition(List<Token> tokens, int i) {
+    return TYPE_KEYWORDS.contains(tokens.get(i).text())
+        && i + 1 < tokens.size()
+        && tokens.get(i + 1).kind() == TokenKind.IDENT
+        && !KEYWORDS.contains(tokens.get(i + 1).text());
+  }
+
+  /**
+   * 记录类型定义并挂起类型体识别（下一个开括号进入该类型体）。
+   *
+   * @param context 扫描状态
+   * @param i 类型关键字下标
+   */
+  private static void recordTypeDefinition(ScanContext context, int i) {
+    Token name = context.tokens.get(i + 1);
+    context.definitions.add(
+        new SymbolDefinition(
+            context.path,
+            name.text(),
+            SymbolKind.TYPE,
+            name.line(),
+            null,
+            snippet(context.sourceLines, name.line())));
+    context.pendingType = name.text();
+    context.pendingEnum = "enum".equals(context.tokens.get(i).text());
+    context.pendingTypeDepth = context.depth;
+  }
+
+  /**
+   * 跟踪括号结构与类型体内成员起点。
+   *
+   * @param context 扫描状态
+   * @param i 当前下标（成员识别用）
+   * @param token 当前 token
+   */
+  private static void trackStructure(ScanContext context, int i, Token token) {
+    if (isBraceOpen(token)) {
+      openBody(context);
+    } else if (isBraceClose(token)) {
+      closeBody(context);
+    } else if (!context.bodyDepths.isEmpty()
+        && context.depth == context.bodyDepths.get(context.bodyDepths.size() - 1)
+        && i > context.lastMemberName
+        && (context.previous == null || MEMBER_START_PREV.contains(context.previous.text()))) {
+      int nameIndex =
+          tryMember(
+              context.path,
+              context.tokens,
+              i,
+              context.typeStack.get(context.typeStack.size() - 1),
+              context.enumBodies.get(context.enumBodies.size() - 1),
+              context.sourceLines,
+              context.definitions);
+      if (nameIndex >= 0) {
+        context.lastMemberName = nameIndex;
+      }
+    }
+  }
+
+  /**
+   * 进入一层花括号：若刚识别的类型声明在此层开体，则压入类型栈。
+   *
+   * @param context 扫描状态
+   */
+  private static void openBody(ScanContext context) {
+    context.depth++;
+    if (context.pendingType != null && context.depth == context.pendingTypeDepth + 1) {
+      context.typeStack.add(context.pendingType);
+      context.enumBodies.add(context.pendingEnum);
+      context.bodyDepths.add(context.depth);
+      context.pendingType = null;
+      context.pendingEnum = false;
+      context.pendingTypeDepth = -1;
+    }
+  }
+
+  /**
+   * 退出一层花括号：命中类型体起点深度则弹出类型栈。
+   *
+   * @param context 扫描状态
+   */
+  private static void closeBody(ScanContext context) {
+    if (!context.bodyDepths.isEmpty()
+        && context.bodyDepths.get(context.bodyDepths.size() - 1) == context.depth) {
+      context.bodyDepths.remove(context.bodyDepths.size() - 1);
+      context.typeStack.remove(context.typeStack.size() - 1);
+      context.enumBodies.remove(context.enumBodies.size() - 1);
+    }
+    if (context.depth > 0) {
+      context.depth--;
+    }
   }
 
   /**
@@ -295,76 +362,138 @@ final class JavaSourceScanner {
       if (c == '\n') {
         line++;
         i++;
-        continue;
-      }
-      if (Character.isWhitespace(c)) {
+      } else if (Character.isWhitespace(c)) {
         i++;
-        continue;
-      }
-      if (c == '/' && i + 1 < n) {
-        char next = text.charAt(i + 1);
-        if (next == '/') {
-          while (i < n && text.charAt(i) != '\n') {
-            i++;
-          }
-          continue;
-        }
-        if (next == '*') {
-          i += 2;
-          while (i < n && !(text.charAt(i) == '*' && i + 1 < n && text.charAt(i + 1) == '/')) {
-            if (text.charAt(i) == '\n') {
-              line++;
-            }
-            i++;
-          }
-          i = Math.min(n, i + 2);
-          continue;
-        }
-      }
-      if (text.startsWith("\"\"\"", i)) {
-        i += 3;
-        while (i < n && !text.startsWith("\"\"\"", i)) {
-          if (text.charAt(i) == '\n') {
-            line++;
-          }
-          i++;
-        }
-        i = Math.min(n, i + 3);
-        continue;
-      }
-      if (c == '"' || c == '\'') {
-        int end = skipQuoted(text, i, c);
-        for (int j = i; j < end; j++) {
-          if (text.charAt(j) == '\n') {
-            line++;
-          }
-        }
+      } else if (c == '/' && i + 1 < n && text.charAt(i + 1) == '/') {
+        i = skipLineComment(text, i);
+      } else if (c == '/' && i + 1 < n && text.charAt(i + 1) == '*') {
+        int end = skipBlockComment(text, i);
+        line += countNewlines(text, i, end);
         i = end;
-        continue;
+      } else if (text.startsWith("\"\"\"", i)) {
+        int end = skipTextBlock(text, i);
+        line += countNewlines(text, i, end);
+        i = end;
+      } else if (c == '"' || c == '\'') {
+        int end = skipQuoted(text, i, c);
+        line += countNewlines(text, i, end);
+        i = end;
+      } else if (Character.isJavaIdentifierStart(c)) {
+        i = lexIdentifier(text, i, line, tokens);
+      } else if (Character.isDigit(c)) {
+        i = lexNumber(text, i, line, tokens);
+      } else {
+        tokens.add(new Token(String.valueOf(c), line, TokenKind.PUNCT));
+        i++;
       }
-      if (Character.isJavaIdentifierStart(c)) {
-        int start = i;
-        while (i < n && Character.isJavaIdentifierPart(text.charAt(i))) {
-          i++;
-        }
-        tokens.add(new Token(text.substring(start, i), line, TokenKind.IDENT));
-        continue;
-      }
-      if (Character.isDigit(c)) {
-        int start = i;
-        while (i < n
-            && (Character.isLetterOrDigit(text.charAt(i))
-                || text.charAt(i) == '.'
-                || text.charAt(i) == '_')) {
-          i++;
-        }
-        tokens.add(new Token(text.substring(start, i), line, TokenKind.NUMBER));
-        continue;
-      }
-      tokens.add(new Token(String.valueOf(c), line, TokenKind.PUNCT));
-      i++;
     }
     return tokens;
+  }
+
+  /**
+   * 跳过单行注释（停在换行符前，换行由主循环计行）。
+   *
+   * @param text 源文本
+   * @param start {@code //} 起点
+   * @return 换行符下标或文本末尾
+   */
+  private static int skipLineComment(String text, int start) {
+    int i = start;
+    while (i < text.length() && text.charAt(i) != '\n') {
+      i++;
+    }
+    return i;
+  }
+
+  /**
+   * 跳过块注释（未闭合时吞到文本末尾）。
+   *
+   * @param text 源文本
+   * @param start {@code /*} 起点
+   * @return 收尾之后的下标
+   */
+  private static int skipBlockComment(String text, int start) {
+    int i = start + 2;
+    int n = text.length();
+    while (i < n && !(text.charAt(i) == '*' && i + 1 < n && text.charAt(i + 1) == '/')) {
+      i++;
+    }
+    return Math.min(n, i + 2);
+  }
+
+  /**
+   * 跳过文本块（{@code """} 定界；未闭合吞到末尾）。
+   *
+   * @param text 源文本
+   * @param start 起始三引号下标
+   * @return 收尾之后的下标
+   */
+  private static int skipTextBlock(String text, int start) {
+    int i = start + 3;
+    int n = text.length();
+    while (i < n && !text.startsWith("\"\"\"", i)) {
+      i++;
+    }
+    return Math.min(n, i + 3);
+  }
+
+  /**
+   * 词法化一个标识符。
+   *
+   * @param text 源文本
+   * @param start 标识符起点
+   * @param line 当前行号
+   * @param tokens 输出
+   * @return 下一个待处理下标
+   */
+  private static int lexIdentifier(String text, int start, int line, List<Token> tokens) {
+    int i = start;
+    int n = text.length();
+    while (i < n && Character.isJavaIdentifierPart(text.charAt(i))) {
+      i++;
+    }
+    tokens.add(new Token(text.substring(start, i), line, TokenKind.IDENT));
+    return i;
+  }
+
+  /**
+   * 词法化一个数字字面量。
+   *
+   * @param text 源文本
+   * @param start 数字起点
+   * @param line 当前行号
+   * @param tokens 输出
+   * @return 下一个待处理下标
+   */
+  private static int lexNumber(String text, int start, int line, List<Token> tokens) {
+    int i = start;
+    int n = text.length();
+    while (i < n
+        && (Character.isLetterOrDigit(text.charAt(i))
+            || text.charAt(i) == '.'
+            || text.charAt(i) == '_')) {
+      i++;
+    }
+    tokens.add(new Token(text.substring(start, i), line, TokenKind.NUMBER));
+    return i;
+  }
+
+  /**
+   * 统计区间内换行数（跳过多行注释/文本块/字面量后补行号）。
+   *
+   * @param text 源文本
+   * @param from 起点（含）
+   * @param to 终点（不含）
+   * @return 换行数
+   */
+  private static int countNewlines(String text, int from, int to) {
+    int count = 0;
+    for (int i = from; i < to; i++) {
+      if (text.charAt(i) == '\n') {
+        count++;
+      }
+    }
+    return count;
   }
 
   /** 跳过字符串/字符字面量（返回结束后的下标；未闭合时在换行处容错退出）。 */
@@ -398,46 +527,68 @@ final class JavaSourceScanner {
   private static Header parseHeader(String path, List<Token> tokens, List<TypeImport> imports) {
     StringBuilder packageName = new StringBuilder();
     int i = 0;
-    while (i < tokens.size()) {
+    while (i < tokens.size() && tokens.get(i).kind() == TokenKind.IDENT) {
       Token token = tokens.get(i);
-      if (token.kind() != TokenKind.IDENT) {
+      if ("package".equals(token.text())) {
+        i = parsePackage(tokens, i, packageName);
+      } else if ("import".equals(token.text())) {
+        i = parseImport(tokens, i, path, imports);
+      } else {
         break;
       }
-      if ("package".equals(token.text())) {
-        i++;
-        while (i < tokens.size() && !";".equals(tokens.get(i).text())) {
-          packageName.append(tokens.get(i).text());
-          i++;
-        }
-        i = Math.min(tokens.size(), i + 1);
-        continue;
-      }
-      if ("import".equals(token.text())) {
-        int line = token.line();
-        i++;
-        boolean staticImport = i < tokens.size() && "static".equals(tokens.get(i).text());
-        if (staticImport) {
-          i++;
-        }
-        StringBuilder qualified = new StringBuilder();
-        boolean wildcard = false;
-        while (i < tokens.size() && !";".equals(tokens.get(i).text())) {
-          String piece = tokens.get(i).text();
-          if ("*".equals(piece)) {
-            wildcard = true;
-          }
-          qualified.append(piece);
-          i++;
-        }
-        i = Math.min(tokens.size(), i + 1);
-        String imported = qualified.toString();
-        String simpleName = wildcard ? "*" : lastSegment(imported);
-        imports.add(new TypeImport(path, imported, simpleName, staticImport, line, null));
-        continue;
-      }
-      break;
     }
     return new Header(i, packageName.toString());
+  }
+
+  /**
+   * 解析 package 声明，返回分号之后的下标。
+   *
+   * @param tokens 记号流
+   * @param start package 关键字下标
+   * @param packageName 包名输出
+   * @return 下一个待处理下标
+   */
+  private static int parsePackage(List<Token> tokens, int start, StringBuilder packageName) {
+    int i = start + 1;
+    while (i < tokens.size() && !";".equals(tokens.get(i).text())) {
+      packageName.append(tokens.get(i).text());
+      i++;
+    }
+    return Math.min(tokens.size(), i + 1);
+  }
+
+  /**
+   * 解析 import 声明并登记，返回分号之后的下标。
+   *
+   * @param tokens 记号流
+   * @param start import 关键字下标
+   * @param path 文件路径
+   * @param imports import 输出
+   * @return 下一个待处理下标
+   */
+  private static int parseImport(
+      List<Token> tokens, int start, String path, List<TypeImport> imports) {
+    int line = tokens.get(start).line();
+    int i = start + 1;
+    boolean staticImport = i < tokens.size() && "static".equals(tokens.get(i).text());
+    if (staticImport) {
+      i++;
+    }
+    StringBuilder qualified = new StringBuilder();
+    boolean wildcard = false;
+    while (i < tokens.size() && !";".equals(tokens.get(i).text())) {
+      String piece = tokens.get(i).text();
+      if ("*".equals(piece)) {
+        wildcard = true;
+      }
+      qualified.append(piece);
+      i++;
+    }
+    i = Math.min(tokens.size(), i + 1);
+    String imported = qualified.toString();
+    String simpleName = wildcard ? "*" : lastSegment(imported);
+    imports.add(new TypeImport(path, imported, simpleName, staticImport, line, null));
+    return i;
   }
 
   private static String lastSegment(String qualified) {
@@ -460,6 +611,40 @@ final class JavaSourceScanner {
       boolean ownerIsEnum,
       List<String> sourceLines,
       List<SymbolDefinition> out) {
+    int i = skipLeading(tokens, start);
+    if (i < 0 || i >= tokens.size() || tokens.get(i).kind() != TokenKind.IDENT) {
+      return -1;
+    }
+    Token first = tokens.get(i);
+    if (KEYWORDS.contains(first.text()) && !PRIMITIVES.contains(first.text())) {
+      return -1;
+    }
+    int next = i + 1;
+    if (next < tokens.size() && "(".equals(tokens.get(next).text())) {
+      // 构造器（或 record 紧凑构造器形态外的无返回类型方法——语法上仅构造器合法）
+      return namedMember(path, first, owner, ownerIsEnum, sourceLines, out, i);
+    }
+    if (next < tokens.size() && isFieldSeparator(tokens.get(next).text())) {
+      // 裸声明符 / enum 常量
+      return bareDeclaration(path, first, owner, sourceLines, out, i);
+    }
+    if (next < tokens.size() && "{".equals(tokens.get(next).text())) {
+      int named = namedMember(path, first, owner, ownerIsEnum, sourceLines, out, i);
+      if (named >= 0) {
+        return named;
+      }
+    }
+    return typedMember(path, tokens, i, owner, sourceLines, out);
+  }
+
+  /**
+   * 跳过成员前导（注解、修饰符、可选泛型参数段），返回首个候选 token 下标。
+   *
+   * @param tokens 记号流
+   * @param start 成员起点
+   * @return 首个候选下标；泛型段不平衡返回 -1
+   */
+  private static int skipLeading(List<Token> tokens, int start) {
     int i = start;
     while (i < tokens.size() && "@".equals(tokens.get(i).text())) {
       int after = skipAnnotation(tokens, i);
@@ -476,52 +661,86 @@ final class JavaSourceScanner {
       }
       i = skipModifiers(tokens, after);
     }
-    if (i >= tokens.size() || tokens.get(i).kind() != TokenKind.IDENT) {
-      return -1;
+    return i;
+  }
+
+  /**
+   * 名字后直接跟 {@code (} 或 {@code {} 的成员：构造器 / 带实参的 enum 常量 / record 紧凑构造器。
+   *
+   * @param path 文件路径
+   * @param first 名字 token
+   * @param owner 所属类型
+   * @param ownerIsEnum 所属类型是否 enum
+   * @param sourceLines 源码行
+   * @param out 定义输出
+   * @param index 名字下标
+   * @return 名字下标；不是成员返回 -1
+   */
+  private static int namedMember(
+      String path,
+      Token first,
+      String owner,
+      boolean ownerIsEnum,
+      List<String> sourceLines,
+      List<SymbolDefinition> out,
+      int index) {
+    if (owner != null && owner.equals(first.text())) {
+      out.add(method(path, first, owner, sourceLines));
+      return index;
     }
-    Token first = tokens.get(i);
-    if (KEYWORDS.contains(first.text()) && !PRIMITIVES.contains(first.text())) {
-      return -1;
-    }
-    int next = i + 1;
-    if (next < tokens.size() && "(".equals(tokens.get(next).text())) {
-      // 构造器（或 record 紧凑构造器形态外的无返回类型方法——语法上仅构造器合法）
-      if (owner != null && owner.equals(first.text())) {
-        out.add(method(path, first, owner, sourceLines));
-        return i;
-      }
-      if (ownerIsEnum) {
-        // 带实参的 enum 常量（A(1)）：类型体内成员起点出现"名字 + ( "且不是构造器，只能是常量
-        out.add(field(path, first, owner, sourceLines));
-        return i;
-      }
-      return -1;
-    }
-    if (next < tokens.size()
-        && ("=".equals(tokens.get(next).text())
-            || ";".equals(tokens.get(next).text())
-            || ",".equals(tokens.get(next).text()))) {
-      // 裸声明符 / enum 常量
-      if (PRIMITIVES.contains(first.text()) || KEYWORDS.contains(first.text())) {
-        return -1;
-      }
+    if (ownerIsEnum) {
+      // 带实参/类体的 enum 常量（A(1) / A { ... }）：类型体内此形态只能是常量
       out.add(field(path, first, owner, sourceLines));
-      return i;
+      return index;
     }
-    if (next < tokens.size() && "{".equals(tokens.get(next).text())) {
-      if (owner != null && owner.equals(first.text())) {
-        // record 紧凑构造器：TypeName 后直接跟类体，无参数列表
-        out.add(method(path, first, owner, sourceLines));
-        return i;
-      }
-      if (ownerIsEnum) {
-        // 带类体、无实参的 enum 常量（A { ... }）
-        out.add(field(path, first, owner, sourceLines));
-        return i;
-      }
+    return -1;
+  }
+
+  /**
+   * 裸声明符 / enum 常量（名字后直接 {@code =|;|,}）。
+   *
+   * @param path 文件路径
+   * @param first 名字 token
+   * @param owner 所属类型
+   * @param sourceLines 源码行
+   * @param out 定义输出
+   * @param index 名字下标
+   * @return 名字下标；原名是类型/关键字时返回 -1
+   */
+  private static int bareDeclaration(
+      String path,
+      Token first,
+      String owner,
+      List<String> sourceLines,
+      List<SymbolDefinition> out,
+      int index) {
+    if (PRIMITIVES.contains(first.text()) || KEYWORDS.contains(first.text())) {
+      return -1;
     }
-    int afterType = parseTypeRef(tokens, i);
-    if (afterType <= i
+    out.add(field(path, first, owner, sourceLines));
+    return index;
+  }
+
+  /**
+   * 带返回类型的成员（类型 + 名字 + {@code (} / 字段分隔符）。
+   *
+   * @param path 文件路径
+   * @param tokens 记号流
+   * @param start 类型起点
+   * @param owner 所属类型
+   * @param sourceLines 源码行
+   * @param out 定义输出
+   * @return 名字下标；不是成员返回 -1
+   */
+  private static int typedMember(
+      String path,
+      List<Token> tokens,
+      int start,
+      String owner,
+      List<String> sourceLines,
+      List<SymbolDefinition> out) {
+    int afterType = parseTypeRef(tokens, start);
+    if (afterType <= start
         || afterType >= tokens.size()
         || tokens.get(afterType).kind() != TokenKind.IDENT) {
       return -1;
@@ -536,14 +755,21 @@ final class JavaSourceScanner {
       return afterType;
     }
     int afterDims = skipArrayDims(tokens, afterName);
-    if (afterDims < tokens.size()
-        && ("=".equals(tokens.get(afterDims).text())
-            || ";".equals(tokens.get(afterDims).text())
-            || ",".equals(tokens.get(afterDims).text()))) {
+    if (afterDims < tokens.size() && isFieldSeparator(tokens.get(afterDims).text())) {
       out.add(field(path, name, owner, sourceLines));
       return afterType;
     }
     return -1;
+  }
+
+  /**
+   * 字段分隔符（裸声明符 / enum 常量形态）。
+   *
+   * @param text token 文本
+   * @return true 若是 {@code =|;|,}
+   */
+  private static boolean isFieldSeparator(String text) {
+    return "=".equals(text) || ";".equals(text) || ",".equals(text);
   }
 
   /** 解析类型引用（限定名 + 泛型参数 + 数组维度），返回类型之后的下标；不成立返回起始下标。 */
@@ -602,17 +828,15 @@ final class JavaSourceScanner {
       String text = tokens.get(i).text();
       if (MODIFIERS.contains(text)) {
         i++;
-        continue;
-      }
-      // non-sealed（三个 token：non - sealed）
-      if ("non".equals(text)
+      } else if ("non".equals(text)
           && i + 2 < tokens.size()
           && "-".equals(tokens.get(i + 1).text())
           && "sealed".equals(tokens.get(i + 2).text())) {
+        // non-sealed（三个 token：non - sealed）
         i += 3;
-        continue;
+      } else {
+        break;
       }
-      break;
     }
     return i;
   }
