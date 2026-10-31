@@ -85,53 +85,56 @@ final class CliArgs {
     Advanced advanced = parseAdvanced(scan, env);
     SignoffConfig signoff = parseSignoff(scan, env);
     LlmTuning tuning = parseLlmTuning(scan.named(), env);
-    return new CraConfig(
-        target.ownerRepo() == null ? null : target.ownerRepo().owner(),
-        target.ownerRepo() == null ? null : target.ownerRepo().name(),
-        target.prNumber(),
-        target.base(),
-        target.head(),
-        target.depth(),
-        dryRun(scan),
-        scan.securityBlock(),
+    return CraConfig.builder()
+        .repoOwner(target.ownerRepo() == null ? null : target.ownerRepo().owner())
+        .repoName(target.ownerRepo() == null ? null : target.ownerRepo().name())
+        .prNumber(target.prNumber())
+        .baseSha(target.base())
+        .headSha(target.head())
+        .depth(target.depth())
+        .dryRun(dryRun(scan))
+        .securityBlock(scan.securityBlock())
         // GitLab 模式下 token 只属于 GitLabSettings：带上 githubToken 会让 push 基线解析把 PAT 发给 GitHub
-        gitlab ? null : target.token(),
-        scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE),
-        llm.apiKey(),
-        llm.baseUrl(),
-        llm.model(),
-        scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT),
-        scan.named().getOrDefault("--workspace", "."),
-        limits.largeDiffLines(),
-        limits.hardCapLines(),
-        limits.nitBudget(),
-        limits.runTotalTokens(),
-        limits.degradeFirst(),
-        limits.degradeSecond(),
-        limits.publishUnverified(),
-        limits.spotCheckPercent(),
-        scan.local(),
-        scan.named().getOrDefault("--exec", DEFAULT_EXEC),
-        expandUserHome(scan.named().getOrDefault("--ledger-db", CraConfig.DEFAULT_LEDGER_DB)),
-        tuning.strongModel(),
-        tuning.lightModel(),
-        tuning.fallbackChain(),
-        tuning.rpm(),
-        advanced.crossCheckerEnabled(),
-        advanced.crossCheckerModes(),
-        advanced.historyWeeks(),
-        tuning.temperature(),
-        advanced.pushLookback(),
-        scan.push() ? ReviewMode.COMMIT : ReviewMode.PULL_REQUEST,
-        signoff,
-        platform,
+        .githubToken(gitlab ? null : target.token())
+        .githubApi(scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE))
+        .llmApiKey(llm.apiKey())
+        .llmBaseUrl(llm.baseUrl())
+        .llmModel(llm.model())
+        .runRoot(scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT))
+        .workspace(scan.named().getOrDefault("--workspace", "."))
+        .largeDiffLines(limits.largeDiffLines())
+        .hardCapLines(limits.hardCapLines())
+        .nitBudget(limits.nitBudget())
+        .runTotalTokens(limits.runTotalTokens())
+        .degradeAtFirst(limits.degradeFirst())
+        .degradeAtSecond(limits.degradeSecond())
+        .publishUnverified(limits.publishUnverified())
+        .spotCheckPercent(limits.spotCheckPercent())
+        .local(scan.local())
+        .execCommand(scan.named().getOrDefault("--exec", DEFAULT_EXEC))
+        .ledgerDb(
+            expandUserHome(scan.named().getOrDefault("--ledger-db", CraConfig.DEFAULT_LEDGER_DB)))
+        .llmModelStrong(tuning.strongModel())
+        .llmModelLight(tuning.lightModel())
+        .fallbackChain(tuning.fallbackChain())
+        .rpm(tuning.rpm())
+        .crossCheckerEnabled(advanced.crossCheckerEnabled())
+        .crossCheckerModes(advanced.crossCheckerModes())
+        .crossCheckerHistoryWeeks(advanced.historyWeeks())
+        .llmTemperature(tuning.temperature())
+        .pushLookback(advanced.pushLookback())
+        .reviewMode(scan.push() ? ReviewMode.COMMIT : ReviewMode.PULL_REQUEST)
+        .signoff(signoff)
+        .platform(platform)
         // 本地形态与平台无关（05§3）：不读取 GitLab token/文件，避免残留 CRA_GITLAB_TOKEN_FILE 拖垮本地启动
-        gitlab && !scan.local()
-            ? PlatformArgs.gitlabSettings(scan.named(), env)
-            : GitLabSettings.none(),
-        advanced.semanticContext(),
-        advanced.includeTestFiles(),
-        agentBudgets(scan.named(), env));
+        .gitlab(
+            gitlab && !scan.local()
+                ? PlatformArgs.gitlabSettings(scan.named(), env)
+                : GitLabSettings.none())
+        .semanticContext(advanced.semanticContext())
+        .includeTestFiles(advanced.includeTestFiles())
+        .agentBudgets(agentBudgets(scan.named(), env))
+        .build();
   }
 
   /** 参数扫描结果（named 值参数 + tri-state 取值 + 三个布尔开关）。 */

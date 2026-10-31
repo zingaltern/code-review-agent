@@ -12,37 +12,35 @@ import org.junit.jupiter.api.Test;
 class LlmConfigFactoryTest {
 
   private static CraConfig config(String fallbackChain, String rpm, String strong, String light) {
-    return new CraConfig(
-        "o",
-        "r",
-        1,
-        "a",
-        "b",
-        "standard",
-        false,
-        false,
-        "t",
-        "api",
-        "sk",
-        "https://llm.example/v1",
-        "glm-std",
-        ".",
-        ".",
-        2000,
-        8000,
-        3,
-        500_000L,
-        0.70,
-        0.85,
-        "never",
-        20,
-        false,
-        "mvn -B -ntp verify",
-        "~/.cra/ledger.db",
-        strong,
-        light,
-        fallbackChain,
-        rpm);
+    return CraConfig.builder()
+        .repoOwner("o")
+        .repoName("r")
+        .prNumber(1)
+        .baseSha("a")
+        .headSha("b")
+        .depth("standard")
+        .githubToken("t")
+        .githubApi("api")
+        .llmApiKey("sk")
+        .llmBaseUrl("https://llm.example/v1")
+        .llmModel("glm-std")
+        .runRoot(".")
+        .workspace(".")
+        .largeDiffLines(2000)
+        .hardCapLines(8000)
+        .nitBudget(3)
+        .runTotalTokens(500_000L)
+        .degradeAtFirst(0.70)
+        .degradeAtSecond(0.85)
+        .publishUnverified("never")
+        .spotCheckPercent(20)
+        .execCommand("mvn -B -ntp verify")
+        .ledgerDb("~/.cra/ledger.db")
+        .llmModelStrong(strong)
+        .llmModelLight(light)
+        .fallbackChain(fallbackChain)
+        .rpm(rpm)
+        .build();
   }
 
   @Test
@@ -124,47 +122,11 @@ class LlmConfigFactoryTest {
         .hasMessageContaining("--rpm 条目非法");
   }
 
-  /** 测试辅助：用指定 baseUrl 构造网关（其余沿用既有 config 默认）。 */
+  /** 测试辅助：用指定 baseUrl 构造网关（其余沿用既有 config 默认；回填走 toBuilder）。 */
   static final class LlmConfigFactoryTestSupport {
     org.cra.llm.api.LlmGatewayConfig createWithBaseUrl(String baseUrl) {
-      CraConfig base = config("standard,light", null, null, null);
-      CraConfig withUrl =
-          new CraConfig(
-              base.repoOwner(),
-              base.repoName(),
-              base.prNumber(),
-              base.baseSha(),
-              base.headSha(),
-              base.depth(),
-              base.dryRun(),
-              base.securityBlock(),
-              base.githubToken(),
-              base.githubApi(),
-              base.llmApiKey(),
-              baseUrl,
-              base.llmModel(),
-              base.runRoot(),
-              base.workspace(),
-              base.largeDiffLines(),
-              base.hardCapLines(),
-              base.nitBudget(),
-              base.runTotalTokens(),
-              base.degradeAtFirst(),
-              base.degradeAtSecond(),
-              base.publishUnverified(),
-              base.spotCheckPercent(),
-              base.local(),
-              base.execCommand(),
-              base.ledgerDb(),
-              base.llmModelStrong(),
-              base.llmModelLight(),
-              base.fallbackChain(),
-              base.rpm(),
-              base.crossCheckerEnabled(),
-              base.crossCheckerModes(),
-              base.crossCheckerHistoryWeeks(),
-              base.llmTemperature());
-      return LlmConfigFactory.create(withUrl);
+      return LlmConfigFactory.create(
+          config("standard,light", null, null, null).toBuilder().llmBaseUrl(baseUrl).build());
     }
   }
 }

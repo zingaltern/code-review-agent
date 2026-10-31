@@ -15,12 +15,12 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
  * `cra review` 命令执行（05§3）：装配组合根 → run → 退出码映射。 退出码：0 正常完成（有 finding 不是失败；SKIPPED/SUCCESS/DEGRADED
  * 均为正常收尾）； 2 自身故障（配置非法 / run FAILED / 未预期异常）；3 --security-block 下存在 security finding。
  */
-final class ReviewCommand {
+final class ReviewCommandRunner {
 
-  private static final Logger LOG = LoggerFactory.getLogger(ReviewCommand.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ReviewCommandRunner.class);
 
   /**
-   * 执行评审命令（CI 形态；本地 pre-PR 模式经 --local 分发至 {@link LocalPrePrCommand}）。
+   * 执行评审命令（CI 形态；本地 pre-PR 模式经 --local 分发至 {@link LocalPrePrCommandRunner}）。
    *
    * @param config 运行配置（CliArgs.parse 产物）
    * @return 进程退出码
@@ -28,7 +28,7 @@ final class ReviewCommand {
   int execute(CraConfig config) {
     try {
       if (config.local()) {
-        return new LocalPrePrCommand().execute(config);
+        return new LocalPrePrCommandRunner().execute(config);
       }
       CraConfig effective =
           config.reviewMode() == ReviewMode.COMMIT

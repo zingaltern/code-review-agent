@@ -34,9 +34,9 @@ import org.springframework.context.annotation.AnnotationConfigApplicationContext
  *
  * <p>退出码：0 = 正常（含无 PR、全跳过）；2 = 自身故障（配置/平台/任一 PR 失败/汇总发布失败；逐 PR issue 不回滚）。
  */
-final class SweepCommand {
+final class SweepCommandRunner {
 
-  private static final Logger LOG = LoggerFactory.getLogger(SweepCommand.class);
+  private static final Logger LOG = LoggerFactory.getLogger(SweepCommandRunner.class);
 
   /** 汇总 issue 标签（平台无该标签时忽略；幂等只看汇总正文首行，05§2.5）。 */
   private static final List<String> NIGHTLY_LABELS = List.of("cra-nightly");
@@ -114,7 +114,7 @@ final class SweepCommand {
                 pr.number(),
                 pr.baseSha(),
                 pr.headSha(),
-                ReviewCommand.toDepth(config.depth()),
+                ReviewCommandRunner.toDepth(config.depth()),
                 config.dryRun(),
                 false,
                 ReviewMode.ISSUE);

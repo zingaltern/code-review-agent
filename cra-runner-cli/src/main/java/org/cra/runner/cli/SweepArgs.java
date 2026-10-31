@@ -66,53 +66,59 @@ final class SweepArgs {
     String temperature = temperature(scan.named(), env);
     PipelineOptions defaults = PipelineOptions.defaults();
     CraConfig config =
-        new CraConfig(
-            ownerRepo.owner(),
-            ownerRepo.name(),
-            0,
-            "",
-            "",
-            depth,
-            scan.dryRun(),
-            false,
+        CraConfig.builder()
+            .repoOwner(ownerRepo.owner())
+            .repoName(ownerRepo.name())
+            .prNumber(0)
+            .baseSha("")
+            .headSha("")
+            .depth(depth)
+            .dryRun(scan.dryRun())
+            .securityBlock(false)
             // GitLab 模式下 token 只属于 GitLabSettings（与 CliArgs 同一密钥隔离不变量，ADR-0013）
-            gitlab ? null : token,
-            scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE),
-            llm.apiKey(),
-            llm.baseUrl(),
-            llm.model(),
-            scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT),
-            scan.named().getOrDefault("--workspace", "."),
-            defaults.largeDiffLines(),
-            defaults.hardCapLines(),
-            defaults.nitBudgetDefault(),
-            defaults.runTotalTokens(),
-            defaults.degradeAtFirst(),
-            defaults.degradeAtSecond(),
-            defaults.publishUnverified(),
-            defaults.importantRefutedSpotCheckPercent(),
-            false,
-            CliArgs.DEFAULT_EXEC,
-            CraConfig.DEFAULT_LEDGER_DB,
-            PlatformArgs.blankToNull(
-                scan.named().getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))),
-            PlatformArgs.blankToNull(
-                scan.named().getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))),
-            PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN),
-            PlatformArgs.envOr(env, "CRA_LLM_RPM", ""),
-            scan.crossChecker(),
-            modes,
-            historyWeeks,
-            temperature,
-            CraConfig.DEFAULT_PUSH_LOOKBACK,
-            ReviewMode.ISSUE,
-            SignoffConfig.defaults(),
-            platform,
-            gitlab ? PlatformArgs.gitlabSettings(scan.named(), env) : GitLabSettings.none(),
-            SemanticContextConfig.defaults(),
+            .githubToken(gitlab ? null : token)
+            .githubApi(
+                scan.named().getOrDefault("--github-api", PlatformArgs.DEFAULT_GITHUB_API_BASE))
+            .llmApiKey(llm.apiKey())
+            .llmBaseUrl(llm.baseUrl())
+            .llmModel(llm.model())
+            .runRoot(scan.named().getOrDefault("--run-root", CraConfig.DEFAULT_RUN_ROOT))
+            .workspace(scan.named().getOrDefault("--workspace", "."))
+            .largeDiffLines(defaults.largeDiffLines())
+            .hardCapLines(defaults.hardCapLines())
+            .nitBudget(defaults.nitBudgetDefault())
+            .runTotalTokens(defaults.runTotalTokens())
+            .degradeAtFirst(defaults.degradeAtFirst())
+            .degradeAtSecond(defaults.degradeAtSecond())
+            .publishUnverified(defaults.publishUnverified())
+            .spotCheckPercent(defaults.importantRefutedSpotCheckPercent())
+            .local(false)
+            .execCommand(CliArgs.DEFAULT_EXEC)
+            .ledgerDb(CraConfig.DEFAULT_LEDGER_DB)
+            .llmModelStrong(
+                PlatformArgs.blankToNull(
+                    scan.named().getOrDefault("--model-strong", env.get("CRA_LLM_MODEL_STRONG"))))
+            .llmModelLight(
+                PlatformArgs.blankToNull(
+                    scan.named().getOrDefault("--model-light", env.get("CRA_LLM_MODEL_LIGHT"))))
+            .fallbackChain(
+                PlatformArgs.envOr(env, "CRA_LLM_FALLBACK_CHAIN", CraConfig.DEFAULT_FALLBACK_CHAIN))
+            .rpm(PlatformArgs.envOr(env, "CRA_LLM_RPM", ""))
+            .crossCheckerEnabled(scan.crossChecker())
+            .crossCheckerModes(modes)
+            .crossCheckerHistoryWeeks(historyWeeks)
+            .llmTemperature(temperature)
+            .pushLookback(CraConfig.DEFAULT_PUSH_LOOKBACK)
+            .reviewMode(ReviewMode.ISSUE)
+            .signoff(SignoffConfig.defaults())
+            .platform(platform)
+            .gitlab(gitlab ? PlatformArgs.gitlabSettings(scan.named(), env) : GitLabSettings.none())
+            .semanticContext(SemanticContextConfig.defaults())
             // 02§4.4：测试文件默认不评审；sweep 无独立 flag，沿用同一环境变量开关
-            Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_REVIEW_TESTS", "false")),
-            CliArgs.agentBudgets(scan.named(), env));
+            .includeTestFiles(
+                Boolean.parseBoolean(PlatformArgs.envOr(env, "CRA_REVIEW_TESTS", "false")))
+            .agentBudgets(CliArgs.agentBudgets(scan.named(), env))
+            .build();
     return new Parsed(config, since, maxPrs);
   }
 
