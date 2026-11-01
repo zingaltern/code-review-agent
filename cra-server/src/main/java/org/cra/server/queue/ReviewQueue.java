@@ -17,6 +17,9 @@ import org.slf4j.LoggerFactory;
  *
  * <p>worker 数固定；stop 先停止接收，再等待 worker 把已入队任务执行完（排水超时后中断）——Spring 优雅停机（server.shutdown=graceful）
  * 之后执行，避免把已接受的 webhook 丢掉。
+ *
+ * <p>并发契约：submit 的"接收判定 + offer"与 stop 的接收翻转共用同一锁对象（stateLock）——停机窗内到达的 submit 如实返回
+ * SHUTDOWN（不假成功入队），stop 前已入队任务仍被 worker 正常排水（worker 在 accepting=false 且队列空时退出）。
  */
 public final class ReviewQueue {
 
@@ -73,6 +76,13 @@ public final class ReviewQueue {
   private final long drainTimeoutMillis;
   private final JobHandler handler;
   private final ExecutorService workers;
+
+  /**
+   * submit 的"接收判定 + offer"与 stop 的接收翻转共用的状态锁：offer 必须与 accepting 判定同临界区，否则停机窗内可 offer 成功而 worker
+   * 已全部退出（任务滞留、HTTP 已回 202）。锁内不做等待与 I/O（日志在临界区外记录）。
+   */
+  private final Object stateLock = new Object();
+
   private final AtomicBoolean accepting = new AtomicBoolean();
   private final AtomicInteger inFlight = new AtomicInteger();
   private final AtomicLong accepted = new AtomicLong();
@@ -124,17 +134,25 @@ public final class ReviewQueue {
   }
 
   /**
-   * 入队（非阻塞；满即背压）。
+   * 入队（非阻塞；满即背压）。接收判定与 offer 在 {@link #stateLock} 同一临界区内完成，与 {@link #stop} 的接收翻转互斥。
    *
    * @param job 评审任务
    * @return 入队结果
    */
   public SubmitResult submit(ReviewJob job) {
-    if (!accepting.get()) {
-      return SubmitResult.SHUTDOWN;
+    SubmitResult result;
+    synchronized (stateLock) {
+      if (!accepting.get()) {
+        result = SubmitResult.SHUTDOWN;
+      } else if (queue.offer(job)) {
+        accepted.incrementAndGet();
+        result = SubmitResult.ACCEPTED;
+      } else {
+        rejected.incrementAndGet();
+        result = SubmitResult.FULL;
+      }
     }
-    if (queue.offer(job)) {
-      accepted.incrementAndGet();
+    if (result == SubmitResult.ACCEPTED) {
       if (LOG.isInfoEnabled()) {
         LOG.info(
             "review 已入队: delivery={} repo={} pr={} head={}",
@@ -143,23 +161,27 @@ public final class ReviewQueue {
             job.prNumber(),
             job.headSha());
       }
-      return SubmitResult.ACCEPTED;
+    } else if (result == SubmitResult.FULL) {
+      if (LOG.isWarnEnabled()) {
+        LOG.warn(
+            "review 队列已满（背压 503）: delivery={} repo={} pr={}",
+            job.deliveryId(),
+            job.repoKey(),
+            job.prNumber());
+      }
     }
-    rejected.incrementAndGet();
-    if (LOG.isWarnEnabled()) {
-      LOG.warn(
-          "review 队列已满（背压 503）: delivery={} repo={} pr={}",
-          job.deliveryId(),
-          job.repoKey(),
-          job.prNumber());
-    }
-    return SubmitResult.FULL;
+    return result;
   }
 
-  /** 优雅停机（Spring destroyMethod）：停止接收 → 等待 worker 排水（超时中断）。 */
+  /**
+   * 优雅停机（Spring destroyMethod）：停止接收 → 等待 worker 排水（超时中断）。接收翻转在 {@link #stateLock} 临界区内完成（与 submit 的
+   * offer 互斥）；排水等待在锁外，不阻塞在途 submit 的拒绝返回。
+   */
   public void stop() {
-    if (!accepting.compareAndSet(true, false)) {
-      return;
+    synchronized (stateLock) {
+      if (!accepting.compareAndSet(true, false)) {
+        return;
+      }
     }
     LOG.info("review 队列停机开始: queued={} inFlight={}", queue.size(), inFlight.get());
     // shutdown 不中断运行中的 loop：worker 在 accepting=false 且队列空时自然退出，awaitTermination 覆盖已取走未计数的在途任务

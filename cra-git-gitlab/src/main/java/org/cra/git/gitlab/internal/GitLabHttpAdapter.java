@@ -296,7 +296,8 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
     } catch (CraIntegrationException e) {
       LOG.warn(
           "summary note publish failed; run has no DONE marker, rerun will republish: {}",
-          e.getMessage());
+          e.getMessage(),
+          e);
       return Optional.empty();
     }
   }
@@ -335,7 +336,9 @@ public class GitLabHttpAdapter implements GitPlatformAdapter, CommentSource {
         throw e;
       }
       LOG.warn(
-          "gitlab MR versions unavailable; falling back to current diff_refs: {}", e.getMessage());
+          "gitlab MR versions unavailable; falling back to current diff_refs: {}",
+          e.getMessage(),
+          e);
     }
     if (current != null) {
       LOG.warn(

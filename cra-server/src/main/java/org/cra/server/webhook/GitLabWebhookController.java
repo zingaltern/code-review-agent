@@ -75,7 +75,7 @@ public final class GitLabWebhookController {
     try {
       parsed = parser.parse(eventName, eventUuid, body);
     } catch (IllegalArgumentException e) {
-      LOG.warn("gitlab webhook payload 非法: event={} err={}", eventName, e.getMessage());
+      LOG.warn("gitlab webhook payload 非法: event={} err={}", eventName, e.getMessage(), e);
       return ResponseEntity.badRequest().body(Map.of("status", "bad_payload"));
     }
     if (!parsed.accepted()) {

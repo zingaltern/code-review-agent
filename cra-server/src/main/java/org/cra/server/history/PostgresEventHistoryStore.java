@@ -286,7 +286,7 @@ public final class PostgresEventHistoryStore implements EventHistoryStore {
       return MAPPER.readValue(raw, new TypeReference<List<String>>() {});
     } catch (JsonProcessingException e) {
       // 本类写入的始终是 JSON 数组；解析失败说明行被外部改坏——降级为空并留下告警，不静默假装无关联
-      LOG.warn("事件字段 JSON 解析失败，按空列表降级: {}", e.getMessage());
+      LOG.warn("事件字段 JSON 解析失败，按空列表降级: {}", e.getMessage(), e);
       return List.of();
     }
   }

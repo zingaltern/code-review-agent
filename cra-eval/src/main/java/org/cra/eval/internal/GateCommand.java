@@ -81,7 +81,7 @@ public final class GateCommand {
     try {
       java.nio.file.Files.createDirectories(dir);
     } catch (java.io.IOException e) {
-      throw new CraConfigException("重判报告目录创建失败: " + dir + "（" + e.getMessage() + "）");
+      throw new CraConfigException("重判报告目录创建失败: " + dir + "（" + e.getMessage() + "）", e);
     }
   }
 }

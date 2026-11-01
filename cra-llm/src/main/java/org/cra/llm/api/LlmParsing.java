@@ -238,7 +238,7 @@ public final class LlmParsing {
       String value = Files.readString(Path.of(path.strip()), StandardCharsets.UTF_8);
       return value.isBlank() ? null : value.strip();
     } catch (IOException | InvalidPathException e) {
-      throw new CraConfigException("CRA_GITLAB_TOKEN_FILE 读取失败: " + path);
+      throw new CraConfigException("CRA_GITLAB_TOKEN_FILE 读取失败: " + path, e);
     }
   }
 

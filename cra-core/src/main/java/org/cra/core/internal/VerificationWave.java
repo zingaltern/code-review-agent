@@ -473,8 +473,9 @@ final class VerificationWave {
 
   /**
    * 单 finding 的受控补查（INSUFFICIENT_EVIDENCE → followup_file 全文注入，03§4.2 判定要求第三条）：查找 + emit {@code
-   * verify_followup}（status provided/unreadable）→ 有内容则重建 brief 并 persistBrief("-fu") + 执行 + tokens
-   * 累加 + 更新判定；非 INSUFFICIENT_EVIDENCE 或判定缺失时原样透传。
+   * verify_followup}（status provided/unreadable；followup 执行后判定未更新——LLM 不可用/解析失败/该 finding 无新判定
+   * ——再补一条 status=provided-unchanged，#92 备案观测缺口的 trace 可见性）→ 有内容则重建 brief 并 persistBrief("-fu") +
+   * 执行 + tokens 累加 + 更新判定；非 INSUFFICIENT_EVIDENCE 或判定缺失时原样透传。
    *
    * @param verdict 首轮判定（可能为 null = 判定缺失）
    * @param input 本批验证输入（followup 重建 brief 的基底）
@@ -516,12 +517,20 @@ final class VerificationWave {
                 followupBrief, runId, (json, model) -> adapt(VerdictJsonCodec.parse(json)), trace);
         tokensIn += followupRun.tokensIn();
         tokensOut += followupRun.tokensOut();
+        VerdictJsonCodec.ParsedVerdict updated = null;
         if (!followupRun.llmUnavailable() && followupRun.output() != null) {
-          VerdictJsonCodec.ParsedVerdict updated =
-              followupRun.output().verdicts().get(finding.id());
-          if (updated != null) {
-            verdict = updated;
-          }
+          updated = followupRun.output().verdicts().get(finding.id());
+        }
+        if (updated != null) {
+          verdict = updated;
+        } else {
+          // followup 已执行但判定未更新（LLM 不可用/解析失败/该 finding 无新判定）：如实留痕（#92 备案观测缺口），判定维持原状
+          trace.emit(
+              "verify_followup",
+              Map.of(
+                  "finding_id", finding.id(),
+                  "file", String.valueOf(followupFile),
+                  "status", "provided-unchanged"));
         }
       }
     }

@@ -65,7 +65,7 @@ final class ReviewCommandRunner {
         return exitCode(result, effective);
       }
     } catch (CraException e) {
-      LOG.error("cra review config/bootstrap failure: {}", e.getMessage());
+      LOG.error("cra review config/bootstrap failure: {}", e.getMessage(), e);
       return 2;
     } catch (RuntimeException e) {
       LOG.error("cra review unexpected failure", e);
