@@ -277,7 +277,8 @@ public class GitHubHttpAdapter implements GitPlatformAdapter, CommentSource {
     } catch (CraIntegrationException e) {
       LOG.warn(
           "summary publish failed; run has no DONE marker, rerun will republish: {}",
-          e.getMessage());
+          e.getMessage(),
+          e);
       return Optional.empty();
     }
   }

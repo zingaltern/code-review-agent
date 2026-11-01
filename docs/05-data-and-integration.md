@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.12（2026-11-01，§1.4 `verify_followup` 的 status 增 `provided-unchanged` 取值（#92 备案项：followup 执行后判定未更新的 trace 可见性）；事件名与判定逻辑不变）
 > 文档版本：v1.11（2026-10-31，默认预算翻倍：run 1.6M、单代理 03§6 全部 ×2（降档阈值不变））
 > 文档版本：v1.10（2026-10-31，§5 配置面补全：`CRA_LLM_MAX_CONCURRENCY`（1..64，有效并发 = min(值, 线程池宽度)）与 `CRA_REVIEW_*` 七项（review/sweep/server 共用）；`review.large-diff-lines` / `hard-cap-lines` 示例值同步 4000/16000）
 > 文档版本：v1.9（2026-10-30，02§4.4 评审范围：§3/§5 新增 `--review-tests` / `CRA_REVIEW_TESTS` / `review.include-test-files`（默认 false——测试文件默认不评审））
@@ -160,7 +161,7 @@
 {"ts":"…","event":"verification","finding_id":"f_…","verdict":"CONFIRMED|REFUTED|INSUFFICIENT_EVIDENCE","rationale":"…（≤400 字）","followup":false}
 {"ts":"…","event":"test_index","available":true,"files":42}
 {"ts":"…","event":"verify_retry","file_batch":"Foo.java","reason":"…"}
-{"ts":"…","event":"verify_followup","finding_id":"f_…","file":"src/…","status":"provided|unreadable"}
+{"ts":"…","event":"verify_followup","finding_id":"f_…","file":"src/…","status":"provided|unreadable|provided-unchanged"}
 {"ts":"…","event":"anti_anchor_check","finding_id":"f_…","status":"PASS|FAIL","overlap":0.0,"refs":2}
 {"ts":"…","event":"judge_start","agent":"judge","finding_id":"f_…","brief_path":"…","reason":"…"}
 {"ts":"…","event":"judge","finding_id":"f_…","verdict":"CONFIRMED|REJECTED|unavailable","rationale":"…"}
@@ -173,6 +174,8 @@
 **v1.2 补登（M2 T2.4–T2.8 实现面）**：`convergence`（轮次与 diff-only 基点，03§5）、`merge`/`merge_summary`（run 内精确去重，03§4.5）、`verify`（三值判定计数，03§4.2）、`verify_retry`（验证不可得缩上下文重试，02§4.2）、`verify_followup`（INSUFFICIENT 受控补查，03§4.2）、`anti_anchor_check`（反锚定质控信号 PASS/FAIL，不阻断晋升）、`judge_start`/`judge`（仲裁与抽查复核，03§4.4）、`promotion`（晋升决定与抽查保险丝命中，03§4.3）。
 
 **v1.4 字段扩展（M4c/M4d）**：`run_start` 增 `mode`（`pull_request|commit|issue`）；`publish` 增 `mode` 与 `carrier`（PR 形态无 `carrier`；无 PR 形态为 `commit_comment|issue`，`comments` 为该载体条数 0/1）。事件名不变，旧消费方按缺省字段兼容。
+
+**v1.12 注记（2026-11-01，#92 备案观测缺口处置）**：`verify_followup` 的 `status` 增 **`provided-unchanged`** 取值——补查内容已提供（同 finding 先记一条 `status=provided`）且 followup run 已执行、但该 finding 判定未更新（LLM 不可用/输出解析失败/无该 finding 的新判定）；不新增事件名，判定逻辑不变，仅 trace 可见性。
 
 brief 全文随 trace 存于同 artifact（`briefs/*.md`）。
 

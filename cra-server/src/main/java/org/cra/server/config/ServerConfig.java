@@ -516,7 +516,7 @@ public record ServerConfig(
     return LlmParsing.parseCsvSet(
         crossCheckerModes,
         CrossCheckerOptions.Mode::parse,
-        (raw, e) -> new CraConfigException(e.getMessage()),
+        (raw, e) -> new CraConfigException("CRA_CROSSCHECKER_MODES 非法: " + e.getMessage()),
         "CRA_CROSSCHECKER_MODES 不能为空（assumption|sniff）");
   }
 

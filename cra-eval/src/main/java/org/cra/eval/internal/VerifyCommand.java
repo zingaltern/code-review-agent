@@ -193,7 +193,7 @@ public final class VerifyCommand {
     try {
       envelope = ReportSignature.parse(Files.readString(args.signature(), StandardCharsets.UTF_8));
     } catch (IOException e) {
-      throw new CraConfigException("签名信封读取失败: " + args.signature() + "（" + e.getMessage() + "）");
+      throw new CraConfigException("签名信封读取失败: " + args.signature() + "（" + e.getMessage() + "）", e);
     } catch (IllegalArgumentException e) {
       failures.add("签名信封格式非法: " + e.getMessage());
       return;
@@ -300,7 +300,7 @@ public final class VerifyCommand {
         return key.getBytes(StandardCharsets.UTF_8);
       } catch (IOException e) {
         throw new CraConfigException(
-            "签名密钥文件读取失败: " + args.signingKeyFile() + "（" + e.getMessage() + "）");
+            "签名密钥文件读取失败: " + args.signingKeyFile() + "（" + e.getMessage() + "）", e);
       }
     }
     String envName = args.signingKeyEnv();

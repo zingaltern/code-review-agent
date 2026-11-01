@@ -115,7 +115,7 @@ final class LocalPrePrCommandRunner {
       return new ReviewPhase(runReview(config, git, signoffContext), null, null);
     } catch (CraException e) {
       // 评审段自身故障（配置/账本/网关）：不掩盖实跑结论，报告中如实声明
-      LOG.error("本地评审段失败: {}", e.getMessage());
+      LOG.error("本地评审段失败: {}", e.getMessage(), e);
       return new ReviewPhase(null, null, failureMessage(e));
     } catch (RuntimeException e) {
       // 组合根装配/网关构造的非预期故障：同样保住已完成的实跑报告（先修构建再看建议）

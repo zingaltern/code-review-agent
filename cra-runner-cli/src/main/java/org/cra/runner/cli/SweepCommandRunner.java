@@ -85,7 +85,7 @@ final class SweepCommandRunner {
           rollupOk ? "OK" : "FAILED");
       return exitCodeFor(failed, rollupOk);
     } catch (CraException e) {
-      LOG.error("cra sweep config/bootstrap failure: {}", e.getMessage());
+      LOG.error("cra sweep config/bootstrap failure: {}", e.getMessage(), e);
       return 2;
     } catch (RuntimeException e) {
       LOG.error("cra sweep unexpected failure", e);

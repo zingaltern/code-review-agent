@@ -1,5 +1,6 @@
 # 09 · 代码编写规范
 
+> 文档版本：v1.3（2026-11-01，§6 加注：单次 daemon 读取线程豁免见 ADR-0018——pre-PR 实跑子进程输出读取线程非"线程池/调度器"）
 > 文档版本：v1.2（2026-10-31，ADR-0017：新增 `*CommandRunner` 后缀——CLI 子命令执行器；`*Command` 回归跨层边界 DTO）
 > 文档版本：v1.1（2026-10-27，M4e 第一半：包名示例补 cra-git-gitlab → org.cra.git.gitlab）
 > 文档版本：v1.0（2026-10-25，开发前规范包）
@@ -124,7 +125,7 @@ public abstract class CraException extends RuntimeException { … }
 
 - **【强制】cra-common 数据模型优先 record 或全不可变类**（CandidateFinding、Verdict、ReviewRun 等，05§1）：无 setter；集合字段用 `List.copyOf` 防御性拷贝；生命周期变迁（candidate→verified→published）**不回写实体**——用 with 式复制或独立的 `Map<FindingId, FindingStatus>` 状态表（03§4.5 的 `f.status = …` 是伪代码示意，落地按本条）。
 - 共享可变状态【强制】只允许存在于编排器与网关内部：LlmGateway 的并发信号量与 per-model RPM 计数（02§4.5）、Orchestrator 的 run 级预算账目（02§4.4），且必须私有字段 + 构造器注入，不外泄引用。
-- 子代理执行模型【强制】= 共享**固定**线程池（大小即 LLM 并发 8，02§4.5）+ 带超时 Future（`orTimeout`/`get(timeout)`），池在 cra-core 单例创建；各组件禁止自建线程池/调度器。
+- 子代理执行模型【强制】= 共享**固定**线程池（大小即 LLM 并发 8，02§4.5）+ 带超时 Future（`orTimeout`/`get(timeout)`），池在 cra-core 单例创建；各组件禁止自建线程池/调度器（单次 daemon 读取线程豁免见 ADR-0018）。
 - **【强制】业务路径禁 `parallelStream`**：公共 ForkJoinPool 与 LLM 信号量互不感知，破坏并发上限与延迟可预测性；检查：规则自检测试。
 - 【建议】锁范围最小化：优先不可变快照与 `ConcurrentHashMap.compute`；`synchronized` 块内禁做 I/O 与 LLM 调用。
 

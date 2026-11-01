@@ -178,7 +178,7 @@ final class ReplayWindowSource implements ReportWindowSource {
     try {
       return Json.MAPPER.readTree(file.toFile());
     } catch (IOException e) {
-      throw new CraConfigException("回放 fixture 解析失败: " + file + "（" + e.getMessage() + "）");
+      throw new CraConfigException("回放 fixture 解析失败: " + file + "（" + e.getMessage() + "）", e);
     }
   }
 

@@ -193,7 +193,7 @@ final class BuildVerifyRunner {
                 }
               } catch (IOException e) {
                 readFailed.set(true);
-                LOG.warn("实跑输出读取失败（日志可能不完整）: {}", e.getMessage());
+                LOG.warn("实跑输出读取失败（日志可能不完整）: {}", e.getMessage(), e);
               }
             },
             "cra-pre-pr-reader");
@@ -215,7 +215,7 @@ final class BuildVerifyRunner {
       try {
         Files.deleteIfExists(effectiveLog);
       } catch (IOException e) {
-        LOG.warn("实跑日志文件清理失败（保留部分日志）: {}", e.getMessage());
+        LOG.warn("实跑日志文件清理失败（保留部分日志）: {}", e.getMessage(), e);
       }
       effectiveLog = null;
     }
@@ -237,7 +237,7 @@ final class BuildVerifyRunner {
       return writer;
     } catch (IOException e) {
       closeQuietly(writer);
-      LOG.warn("实跑日志文件创建失败，报告不含日志路径: {}", e.getMessage());
+      LOG.warn("实跑日志文件创建失败，报告不含日志路径: {}", e.getMessage(), e);
       return null;
     }
   }
@@ -272,7 +272,7 @@ final class BuildVerifyRunner {
         writer.close();
       }
     } catch (IOException e) {
-      LOG.warn("实跑日志文件关闭失败: {}", e.getMessage());
+      LOG.warn("实跑日志文件关闭失败: {}", e.getMessage(), e);
     }
   }
 
@@ -283,7 +283,7 @@ final class BuildVerifyRunner {
     try {
       writer.close();
     } catch (IOException e) {
-      LOG.warn("实跑日志文件初始化失败后清理失败: {}", e.getMessage());
+      LOG.warn("实跑日志文件初始化失败后清理失败: {}", e.getMessage(), e);
     }
   }
 

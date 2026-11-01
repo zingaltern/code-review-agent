@@ -77,7 +77,11 @@ public final class WebhookController {
       parsed = parser.parse(eventName, deliveryId, body);
     } catch (IllegalArgumentException e) {
       LOG.warn(
-          "webhook payload 非法: delivery={} event={} err={}", deliveryId, eventName, e.getMessage());
+          "webhook payload 非法: delivery={} event={} err={}",
+          deliveryId,
+          eventName,
+          e.getMessage(),
+          e);
       return ResponseEntity.badRequest().body(Map.of("status", "bad_payload"));
     }
     if (parsed.isEmpty()) {

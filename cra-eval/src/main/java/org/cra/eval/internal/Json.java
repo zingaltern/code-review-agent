@@ -54,7 +54,7 @@ public final class Json {
     try {
       return MAPPER.readValue(file.toFile(), type);
     } catch (IOException e) {
-      throw new CraConfigException(what + " 解析失败: " + file + "（" + e.getMessage() + "）");
+      throw new CraConfigException(what + " 解析失败: " + file + "（" + e.getMessage() + "）", e);
     }
   }
 

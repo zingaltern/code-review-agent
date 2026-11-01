@@ -32,7 +32,7 @@ public final class ReportHasher {
     try (DigestInputStream dis = new DigestInputStream(Files.newInputStream(file), digest)) {
       dis.transferTo(java.io.OutputStream.nullOutputStream());
     } catch (IOException e) {
-      throw new CraConfigException("报告读取失败: " + file + "（" + e.getMessage() + "）");
+      throw new CraConfigException("报告读取失败: " + file + "（" + e.getMessage() + "）", e);
     }
     return HexFormat.of().formatHex(digest.digest());
   }
@@ -53,7 +53,7 @@ public final class ReportHasher {
       }
       Files.writeString(out, hex + "\n", StandardCharsets.UTF_8);
     } catch (IOException e) {
-      throw new CraConfigException("哈希文件写入失败: " + out + "（" + e.getMessage() + "）");
+      throw new CraConfigException("哈希文件写入失败: " + out + "（" + e.getMessage() + "）", e);
     }
     return hex;
   }
@@ -69,7 +69,7 @@ public final class ReportHasher {
     try {
       text = Files.readString(file, StandardCharsets.UTF_8).strip();
     } catch (IOException e) {
-      throw new CraConfigException("哈希文件读取失败: " + file + "（" + e.getMessage() + "）");
+      throw new CraConfigException("哈希文件读取失败: " + file + "（" + e.getMessage() + "）", e);
     }
     if (text.isEmpty()) {
       throw new CraConfigException("哈希文件为空: " + file);
