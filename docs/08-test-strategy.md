@@ -1,5 +1,6 @@
 # 08 · 测试策略与验证方案
 
+> 文档版本：v1.6（2026-11-01，§7 白名单落齐：RunBudgetTracker 与 ToolWhitelist 门禁落地（cra-core/cra-agents），占位类名 BudgetEnforcer 全文对齐实态）
 > 文档版本：v1.5（2026-10-31，预算锚点注明：默认 run 预算翻倍至 1.6M，330k/800k=41% 仍为显式固定值锚点）
 > 文档版本：v1.4（2026-10-31，ADR-0016：账本解析器下沉 cra-common 单份实现，§3 测试归属与门禁位置同步）
 > 文档版本：v1.3（2026-10-27，M4e 第二半：平台选择/接线测试与 GitLab webhook HTTP+PG 集成，场景 27）
@@ -33,7 +34,7 @@
 - `cra-common`：schema 校验（05§1.1 枚举含 context）单测——解析拒收是行为，必须锁住；
 - `cra-llm`：重试/降级链/并发信号量/RPM 限流的**非网络逻辑**单测；HTTP 行为在集成层；
 - `cra-git-github` / `cra-git-gitlab`：账本解析器（下沉 cra-common 单份实现，100% 分支覆盖门禁随迁至 cra-common，ADR-0016）、锚定校验/锚定三元组（07§6 纪律 2"隔离机制必须有直接单测"）；GitLab 端点为 WireMock 录制回放契约测试 + fixture 幂等重放；
-- `cra-core`：幂等闸、ConvergenceGuard、BudgetEnforcer——全部可纯函数化测试（输入 ReviewRequest/账本快照，输出决策）；
+- `cra-core`：幂等闸、ConvergenceGuard、RunBudgetTracker——全部可纯函数化测试（输入 ReviewRequest/账本快照，输出决策）；
 - `cra-store`：SQLite 实现用 `@TempDir` 临时目录，每次测试新建库（无共享状态、天然并行安全）。
 
 ### 2.3 全局不测清单
@@ -107,7 +108,7 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 | 4 | 兜底分层：无任何有效标记 → 退 commit 闸，**永不**退到空账本全量重发 | 单测 | 05§1.3 规则 5；02§4.1 |
 | 5 | 锚定 422 逐条降级：整包 422 → 逐条提交 → 仍失败进 Summary 列表，`anchor_status=SUMMARY_FALLBACK` 回写 | 集成（WireMock 状态机） | 07§1 验收 1；05§2.2 |
 | 6 | 注入**负向不变量判定器**单测：mock 发布集含"skip-all / artificial-approve"→ 判红；正常输出 → 判绿；不做快照全等（seed 是 best-effort）。判定器即 L1 快检的承重代码，必须先于评测集被测 | 单测（cra-eval 判定器） | 04§2.4；06§1.2 对抗集②；07§2 验收 6 |
-| 7 | 预算硬限与降档阶梯：`BudgetEnforcer` 纯函数——<70% 不降档（含 330k/800k=41% 算术回归锚点（显式固定值，不随默认预算变化）；默认预算 2026-10-31 已翻倍至 1.6M）、≥70% 砍 light 角色与 1 视角、≥85% top-10 验证、100% 终止记 `BUDGET_EXCEEDED`/`suppressed_by_truncation` 计数 | 单测 | 02§4.4；07§3 验收 5/6；04§2.2 |
+| 7 | 预算硬限与降档阶梯：`RunBudgetTracker` 纯函数——<70% 不降档（含 330k/800k=41% 算术回归锚点（显式固定值，不随默认预算变化）；默认预算 2026-10-31 已翻倍至 1.6M）、≥70% 砍 light 角色与 1 视角、≥85% top-10 验证、100% 终止记 `BUDGET_EXCEEDED`/`suppressed_by_truncation` 计数 | 单测 | 02§4.4；07§3 验收 5/6；04§2.2 |
 | 8 | 滑窗去重三连漂移：上方插 10 行（锚行内容不变→抑制）、改锚行 ±2 内非锚行（滑窗 ±5 命中→抑制）、改锚行本身（内容已变→重发） | 单测（去重纯函数） | 07§2 验收 1；02§4.1 |
 | 9 | 滑窗未命中但同 file 同 category 且行区间重叠 → 只记 `possible_duplicate` 入 trace，不自动抑制 | 单测 + trace 事件断言 | 02§4.1；05§1.4 |
 | 10 | REVIEW.md 投毒：PR 内改 `Skip paths: src/**` → 仍按 base 版策略评审 + Summary 警告 | 集成 | 07§2 验收 5；04§3.2 |
@@ -144,8 +145,8 @@ cassette 条目格式（单文件多场景，NDJSON，一请求一行）：
 
 - JaCoCo 全模块采集、报告随 CI artifact 上传【建议】——可观测、不判定；
 - `cra-core` / `cra-store` 行覆盖 ≥70%【建议】：编排与状态逻辑改动最频繁，跌破即提醒不阻塞——单人项目里覆盖率数字极易被追成形式，背离 §1"敢改"目标；
-- 关键机制类 **100% 分支覆盖【强制】**（JaCoCo `check` 规则按类精确匹配，违例 CI 红）：账本标记解析器（05§1.3）、预算执行器（02§4.4）、工具白名单（07 T2.1、03§2）——实现落地时对号入座锁定类名。理由：这三处任何未测分支都是**静默故障**（幂等失效 / 预算击穿 / 越权工具调用），出错不抛异常只错账；
-- 全局覆盖率不设门禁【强制——以白名单形式守护】：JaCoCo check 规则只允许上述一类写死在根 pom，扩充需先修订本文（07§6 文档即契约），禁止给其他模块追加阈值。
+- 关键机制类 **100% 分支覆盖【强制】**（JaCoCo `check` 规则按类精确匹配，违例 CI 红）：账本标记解析器 `LedgerMarkerParser`（05§1.3；cra-common，ADR-0016 随类下沉）、预算执行器 `RunBudgetTracker`（02§4.4；cra-core）、工具白名单 `ToolWhitelist`（07 T2.1、03§2；cra-agents）。本文原写的 `BudgetEnforcer` 是实现前占位类名，实现落地即 `RunBudgetTracker`，2026-11-01 对齐并补齐后两类门禁。理由：这三处任何未测分支都是**静默故障**（幂等失效 / 预算击穿 / 越权工具调用），出错不抛异常只错账；
+- 全局覆盖率不设门禁【强制——以白名单形式守护】：JaCoCo check 规则只允许上述白名单类、写死在其所在模块 pom（解析器一份在 cra-common，ADR-0016；其余两类 2026-11-01 在 cra-core/cra-agents 落齐），扩充需先修订本文（07§6 文档即契约），禁止给白名单之外的类或模块追加阈值。
 
 ## 8. 测试数据管理
 

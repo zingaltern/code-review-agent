@@ -62,4 +62,39 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>check-run-budget-tracker</id>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <!-- 08§7：预算执行器 100% 分支覆盖（静默故障类白名单三项之一，2026-11-01 落地门禁）；
+                   预算击穿不抛异常只错账，任何未测分支即静默故障 -->
+              <includes>
+                <include>org/cra/core/internal/pipeline/RunBudgetTracker*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>1.00</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <haltOnFailure>true</haltOnFailure>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
