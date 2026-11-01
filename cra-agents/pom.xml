@@ -29,4 +29,39 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>check-tool-whitelist</id>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <!-- 08§7：工具白名单 100% 分支覆盖（静默故障类白名单三项之一，2026-11-01 落地门禁）；
+                   越权工具调用不抛异常只放行，任何未测分支即静默故障 -->
+              <includes>
+                <include>org/cra/agents/api/ToolWhitelist*</include>
+              </includes>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>1.00</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <haltOnFailure>true</haltOnFailure>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>

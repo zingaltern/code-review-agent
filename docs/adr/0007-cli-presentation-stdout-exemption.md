@@ -11,3 +11,4 @@
   3. 守护调整：`SourceScanRulesTest` 的 System.out/err 检查对 `cra-runner-cli` 跳过，其余模块与两条禁止项不变。
 - 理由：契约优先级（07 T2.10 验收 8 可判定性依赖 stdout）+ 规则本意（日志统一 SLF4J），非放宽工程质量。
 - 复审条件：若 CLI 出现以 stdout 做诊断日志的用法（违反展示层语义），回滚本 ADR 并恢复全模块禁令。
+- 修订（2026-11-01，规约审计 P0——err 豁免经查无使用，收回）：实态核查 `grep -rn "System.err" cra-runner-cli/src/main` 零命中——决策 2 的两处展示点从未使用 `System.err`；期间 09§5 文本与 `SourceScanRulesTest` 把豁免从 `System.out` 漂移成 `System.out/err`（文档层漂移，无代码对应，与本 ADR 决策 2 原文"`System.err` 与 `printStackTrace` 禁令维持全局"相悖）。据此：收回 System.err 豁免——09§5 恢复 `System.err` 全局禁，`SourceScanRulesTest` 的 System.err 检查恢复全模块（含 `cra-runner-cli`）；System.out 豁免不变，仍仅 `BuildVerifyRunner`（实跑回显）与 `LocalPrePrCommandRunner`（报告输出；类名随 ADR-0017 由 `LocalPrePrCommand` 更名）两处展示点。
