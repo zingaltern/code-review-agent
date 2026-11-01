@@ -210,7 +210,11 @@ class VerificationPromotionTest {
     assertThat(result.stats().findingsPublished()).isZero();
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
-    assertThat(captor.getValue().summaryBody()).contains("UNVERIFIED");
+    assertThat(captor.getValue().summaryBody())
+        .contains("UNVERIFIED")
+        // 判决头三态护栏（02§4.2）：验证不可得 ≠ 真无问题——不得出现 ✅
+        .contains("**结论：⚠️ 无已确认问题，1 条候选未验证**")
+        .doesNotContain("✅");
     assertThat(result.stats().degradations()).contains("verifier-unavailable");
   }
 
@@ -230,6 +234,9 @@ class VerificationPromotionTest {
     assertThat(captor.getValue().inlineComments().get(0).body())
         .contains("[UNVERIFIED]")
         .contains("未经独立复核");
+    // 判决头（04§4.3）：labeled 发布的未验证条目计入"候选未验证"总数（标签发布 1 + 未发布 0）
+    assertThat(captor.getValue().summaryBody())
+        .contains("**结论：⚠️ 1 Important**（1 条候选未验证 · 0 条被去重抑制 · 0 条被截断）");
   }
 
   @Test
