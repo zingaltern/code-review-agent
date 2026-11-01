@@ -15,6 +15,9 @@ import org.cra.core.internal.pipeline.PreExistingBlameChecker;
  * 评审正文渲染（05§1.3 标记规则 / 05§2.2 发布顺序）：inline 评论、Summary 正文与转义。
  *
  * <p>从 {@link ReviewPipeline} 拆出：渲染是纯函数，不触达平台/账本；标记版本与转义规则集中在此，避免与发布流程漂移。
+ *
+ * <p>Summary 判决前置（02§4.2 护栏的阅读面落地）：标题之后紧跟判决头（结论行 + 状态表），读报告的人第一屏即得 有没有问题/问题在哪/还有哪些不确定；统计与签字建议收纳进
+ * {@code <details>} 折叠块（只收噪音，不收发现），空结果散文与账本标记语义不变。
  */
 final class ReviewBodyRenderer {
 
@@ -68,6 +71,9 @@ final class ReviewBodyRenderer {
   /**
    * Summary 正文渲染。
    *
+   * <p>结构（04§4.3）：标题 → 判决头（结论行 + 状态表，02§4.2 三态护栏）→ 变更概述 → 可疑注入警告 → 发现（详情块或分级列表，永远展开） → 收敛控制 →
+   * 签字建议（折叠）→ 覆盖与统计（折叠，含复核晋升/降级清单）→ run 完成标记（末位，05§1.3）。
+   *
    * @param detailed 载体无行级锚时为 true（M4c/M4d）：全部 finding 以详情块列出（描述/失败模式/证据/建议）， 不依赖 inline 评论承载正文；PR
    *     形态为 false（既有分级列表 + 位置非法段）
    * @param noReviewableChanges 评审计划为空（纯测试变更或全部被策略跳过）：空结果不得写成"评审返回空结果"（02§4.4）
@@ -91,8 +97,6 @@ final class ReviewBodyRenderer {
       SignoffAdvice signoff) {
     StringBuilder body = new StringBuilder();
     body.append("## cra 评审 Summary（").append(runId).append("）\n\n");
-    appendChangeHeader(body, request);
-    appendSuspectWarning(body, suspectWarning);
     List<FindingAggregator.Scored> important =
         ordered.stream().filter(s -> s.finding().severityProposed() == Severity.IMPORTANT).toList();
     List<FindingAggregator.Scored> nits =
@@ -101,6 +105,21 @@ final class ReviewBodyRenderer {
         ordered.stream()
             .filter(s -> s.verdict() == PreExistingBlameChecker.Verdict.CONFIRMED_PRE_EXISTING)
             .toList();
+    appendVerdictHeader(
+        body,
+        ordered,
+        important,
+        nits,
+        fallbacks,
+        skippedDuplicate,
+        suppressedByTruncation,
+        degradations,
+        degraded,
+        unverifiedIds,
+        unverifiedUnpublished,
+        noReviewableChanges);
+    appendChangeHeader(body, request);
+    appendSuspectWarning(body, suspectWarning);
     if (detailed) {
       appendDetailedFindings(
           body,
@@ -121,10 +140,118 @@ final class ReviewBodyRenderer {
       appendListSections(body, important, nits, preExisting, fallbacks);
     }
     appendConvergenceAndSignoff(body, convergenceAdvice, signoff);
-    appendCoverageLines(body, coverageLines, detailed, skippedDuplicate, fallbacks);
-    appendUnverifiedStats(body, ordered, unverifiedIds, unverifiedUnpublished, degradations);
+    appendCoverageAndStats(
+        body,
+        coverageLines,
+        detailed,
+        skippedDuplicate,
+        fallbacks,
+        ordered,
+        unverifiedIds,
+        unverifiedUnpublished,
+        degradations);
     appendRunMarker(body, request, runId, ordered, suppressedByTruncation, degraded);
     return body.toString();
+  }
+
+  /**
+   * 判决头（紧跟标题、先于一切内容）：结论行 + 状态表，从 available 计数推导，不改签名不硬造。
+   *
+   * <p>三态护栏（02§4.2）必须一眼可分——真无问题（✅）/ 有问题但未验证（⚠️ 计数或"无已确认问题，N 条候选未验证"）/ 评审不完整（降级标记行）；
+   * noReviewableChanges 是策略性豁免，不写成"无问题"（02§4.4）。
+   *
+   * @param body 输出
+   * @param ordered 已排序已发布候选（"发现"列与完成标记 findings= 同口径）
+   * @param important IMPORTANT 级候选（ordered 按 severity 拆分，与 appendListSections 同源）
+   * @param nits NIT 级候选
+   * @param fallbacks 位置非法降级进 Summary 的候选（ordered 子集）
+   * @param skippedDuplicate 指纹去重抑制数
+   * @param suppressedByTruncation 截断抑制数
+   * @param degradations 降级事件清单
+   * @param degraded run 是否 DEGRADED 收尾
+   * @param unverifiedIds 以 UNVERIFIED 标签发布的 finding id
+   * @param unverifiedUnpublished 验证不可得未发布数
+   * @param noReviewableChanges 是否无评审范围
+   */
+  private static void appendVerdictHeader(
+      StringBuilder body,
+      List<FindingAggregator.Scored> ordered,
+      List<FindingAggregator.Scored> important,
+      List<FindingAggregator.Scored> nits,
+      List<FindingAggregator.Scored> fallbacks,
+      int skippedDuplicate,
+      int suppressedByTruncation,
+      List<String> degradations,
+      boolean degraded,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished,
+      boolean noReviewableChanges) {
+    int unverified = unverifiedIds.size() + unverifiedUnpublished;
+    if (noReviewableChanges) {
+      body.append("**ℹ️ 按策略无可评审变更**\n\n");
+    } else if (!important.isEmpty() || !nits.isEmpty()) {
+      body.append("**结论：⚠️ ");
+      if (!important.isEmpty()) {
+        body.append(important.size()).append(" Important");
+      }
+      if (!important.isEmpty() && !nits.isEmpty()) {
+        body.append(" + ");
+      }
+      if (!nits.isEmpty()) {
+        body.append(nits.size()).append(" Nit");
+      }
+      body.append("**")
+          .append(
+              verdictUncertainty(
+                  unverified, skippedDuplicate, suppressedByTruncation, fallbacks.size()))
+          .append("\n\n");
+    } else if (unverifiedUnpublished > 0) {
+      body.append("**结论：⚠️ 无已确认问题，").append(unverifiedUnpublished).append(" 条候选未验证**\n\n");
+    } else {
+      body.append("**结论：✅ 未发现问题**\n\n");
+    }
+    if (degraded || !degradations.isEmpty()) {
+      body.append("**⚠️ 评审不完整（降级）**\n\n");
+    }
+    body.append("| 发现 | 未验证 | 去重抑制 | 截断 | 位置非法 |\n")
+        .append("|---|---|---|---|---|\n")
+        .append("| ")
+        .append(ordered.size())
+        .append(" | ")
+        .append(unverified)
+        .append(" | ")
+        .append(skippedDuplicate)
+        .append(" | ")
+        .append(suppressedByTruncation)
+        .append(" | ")
+        .append(fallbacks.size())
+        .append(" |\n\n");
+  }
+
+  /**
+   * 判决结论行的"不确定项"括注：未验证/去重抑制/截断恒列（0 也列，与设计样例一致），位置非法降级非零时追加—— fallback 是 ordered
+   * 子集，只作限定语不做加数，避免与完成标记 findings= 口径冲突。
+   *
+   * @param unverified 未验证候选数（UNVERIFIED 标签发布 + 未发布之和）
+   * @param skippedDuplicate 指纹去重抑制数
+   * @param suppressedByTruncation 截断抑制数
+   * @param fallbackCount 位置非法降级数
+   * @return 形如 {@code （2 条候选未验证 · 1 条被去重抑制 · 0 条被截断 · 1 条位置非法降级）}
+   */
+  private static String verdictUncertainty(
+      int unverified, int skippedDuplicate, int suppressedByTruncation, int fallbackCount) {
+    StringBuilder parenthetical =
+        new StringBuilder("（")
+            .append(unverified)
+            .append(" 条候选未验证 · ")
+            .append(skippedDuplicate)
+            .append(" 条被去重抑制 · ")
+            .append(suppressedByTruncation)
+            .append(" 条被截断");
+    if (fallbackCount > 0) {
+      parenthetical.append(" · ").append(fallbackCount).append(" 条位置非法降级");
+    }
+    return parenthetical.append("）").toString();
   }
 
   /**
@@ -236,8 +363,9 @@ final class ReviewBodyRenderer {
   }
 
   /**
-   * 收敛控制与签字建议段：T2.7 轮次超限建议（03§5，停止一切新 finding——人在这一关踩刹车）+ 签字建议（07§5 M4a， 建议型非审批，绑定 head
-   * commit，覆盖声明之前独立成段）。
+   * 收敛控制与签字建议段：T2.7 轮次超限建议（03§5，停止一切新 finding——人在这一关踩刹车，操作指令保持展开）+ 签字建议（07§5 M4a， 建议型非审批，绑定 head
+   * commit）——建议明细属参考噪音，收纳进 {@code <details>} 折叠块； {@code ### 签字建议} 段标题原样保留在块内（过期收尾
+   * hasSignoffSection 依赖该标题判定，05§1.3/07§5）。
    *
    * @param body 输出
    * @param convergenceAdvice 收敛建议（null/空白 = 无）
@@ -248,26 +376,42 @@ final class ReviewBodyRenderer {
     if (convergenceAdvice != null && !convergenceAdvice.isBlank()) {
       body.append("### 收敛控制\n> ⚠️ ").append(convergenceAdvice).append("\n\n");
     }
-    for (String line : SignoffSections.lines(signoff)) {
+    List<String> signoffLines = SignoffSections.lines(signoff);
+    if (signoffLines.isEmpty()) {
+      return;
+    }
+    body.append("<details>\n<summary>✍️ 签字建议（advisory，非审批）</summary>\n\n");
+    for (String line : signoffLines) {
       body.append(line).append("\n");
     }
+    body.append("</details>\n\n");
   }
 
   /**
-   * 覆盖声明清单段（"### 覆盖与统计" 标题 + 逐行声明 + 载体形态差异行）。
+   * 覆盖与统计折叠块（{@code <details><summary>📊 覆盖与统计</summary>}）："### 覆盖与统计" 声明清单 + 复核与晋升统计 + 降级事件清单
+   * 同块收纳——三者同为统计类内容，合并一个折叠块；行文案逐字节保持原有契约（SummarySections/02§4.2/02§4.4）。
    *
    * @param body 输出
    * @param coverageLines 覆盖声明行
    * @param detailed 是否详情形态（载体无行级锚）
    * @param skippedDuplicate 指纹去重抑制数
    * @param fallbacks 位置非法降级候选（计数用）
+   * @param ordered 已排序候选（复核与晋升统计）
+   * @param unverifiedIds 以 UNVERIFIED 标签发布的 finding id
+   * @param unverifiedUnpublished 验证不可得未发布数
+   * @param degradations 降级事件（空 = 无清单行）
    */
-  private static void appendCoverageLines(
+  private static void appendCoverageAndStats(
       StringBuilder body,
       List<String> coverageLines,
       boolean detailed,
       int skippedDuplicate,
-      List<FindingAggregator.Scored> fallbacks) {
+      List<FindingAggregator.Scored> fallbacks,
+      List<FindingAggregator.Scored> ordered,
+      Set<String> unverifiedIds,
+      int unverifiedUnpublished,
+      List<String> degradations) {
+    body.append("<details>\n<summary>📊 覆盖与统计</summary>\n\n");
     body.append("### 覆盖与统计\n");
     for (String line : coverageLines) {
       body.append("- ").append(line).append("\n");
@@ -281,10 +425,12 @@ final class ReviewBodyRenderer {
           .append(fallbacks.size())
           .append(" 条\n");
     }
+    appendUnverifiedStats(body, ordered, unverifiedIds, unverifiedUnpublished, degradations);
+    body.append("\n</details>\n");
   }
 
   /**
-   * 复核与晋升统计段（确认/UNVERIFIED 标签发布/验证不可得未发布计数 + 降级事件清单）。
+   * 复核与晋升统计行（确认/UNVERIFIED 标签发布/验证不可得未发布计数 + 降级事件清单）：渲染进"覆盖与统计"折叠块末尾。
    *
    * @param body 输出
    * @param ordered 已排序候选

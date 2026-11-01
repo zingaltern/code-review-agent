@@ -523,6 +523,10 @@ class ReviewPipelineTest {
     assertThat(captor.getValue().inlineComments()).isEmpty(); // 不发 inline，避免 422
     assertThat(captor.getValue().summaryBody()).contains("位置非法");
     assertThat(captor.getValue().summaryBody()).contains("不在 hunk 内");
+    // 判决头（04§4.3）：fallback 是 ordered 子集——结论行作限定语、状态表单列，不做加数
+    assertThat(captor.getValue().summaryBody())
+        .contains("1 条位置非法降级")
+        .contains("| 1 | 0 | 0 | 0 | 1 |");
     assertThat(result.stats().anchorFallback()).isEqualTo(1);
     assertThat(result.status()).isEqualTo(RunStatus.SUCCESS);
   }
@@ -545,12 +549,21 @@ class ReviewPipelineTest {
                     + "\\| run=run_\\S+ \\| commit="
                     + HEAD
                     + " \\| line=4 -->"));
-    assertThat(cmd.summaryBody())
+    String summary = cmd.summaryBody();
+    assertThat(summary)
         .containsPattern(
             Pattern.compile(
                 "<!-- cra:v=2\\.1 \\| run=run_\\S+ \\| commit="
                     + HEAD
                     + " \\| status=DONE \\| findings=1 \\| suppressed=0 -->"));
+    // 判决前置（04§4.3）：结论行紧跟标题、发现列表在其后、统计折叠块在最后——第一屏即得判决
+    assertThat(summary)
+        .contains("**结论：⚠️ 1 Important**（0 条候选未验证 · 0 条被去重抑制 · 0 条被截断）")
+        .contains("| 发现 | 未验证 | 去重抑制 | 截断 | 位置非法 |")
+        .contains("<summary>📊 覆盖与统计</summary>");
+    assertThat(summary.indexOf("**结论：")).isLessThan(summary.indexOf("### Important"));
+    assertThat(summary.indexOf("### Important")).isLessThan(summary.indexOf("<details>"));
+    assertThat(summary.stripTrailing()).endsWith("-->"); // 完成标记保持 body 末位
   }
 
   @Test
@@ -573,7 +586,10 @@ class ReviewPipelineTest {
     verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody())
         .contains("DEGRADED")
-        .contains("schema-violation-all-dropped");
+        .contains("schema-violation-all-dropped")
+        // 判决头三态护栏（02§4.2）：降级空结果 = "✅"与"评审不完整"并存，不得误读为真无问题
+        .contains("**结论：✅ 未发现问题**")
+        .contains("**⚠️ 评审不完整（降级）**");
   }
 
   @Test
@@ -632,6 +648,11 @@ class ReviewPipelineTest {
     verify(adapter).postReview(captor.capture());
     assertThat(captor.getValue().summaryBody()).contains("本次未发现问题");
     assertThat(captor.getValue().summaryBody()).contains("status=DONE");
+    // 判决头"全零"形态：真无问题 = ✅ 且无降级标记（02§4.2 三态护栏）
+    assertThat(captor.getValue().summaryBody())
+        .contains("**结论：✅ 未发现问题**")
+        .contains("| 0 | 0 | 0 | 0 | 0 |")
+        .doesNotContain("评审不完整");
     assertThat(captor.getValue().inlineComments()).isEmpty();
   }
 
@@ -771,7 +792,11 @@ class ReviewPipelineTest {
     String summary = captor.getValue().summaryBody();
     assertThat(summary)
         .contains("因预算截断丢弃 2 条候选（未验证、未发布；02§4.4）")
-        .containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"));
+        .containsPattern(Pattern.compile("status=DONE[^\n]*suppressed=2"))
+        // 判决头状态表："截断"列与 suppressed_by_truncation 同口径（02§4.4 截断必须可见）
+        .contains("**结论：⚠️ 10 Important**（0 条候选未验证 · 0 条被去重抑制 · 2 条被截断 · 6 条位置非法降级）")
+        .contains("| 10 | 0 | 0 | 2 | 6 |")
+        .contains("<summary>📊 覆盖与统计</summary>");
     assertThat(result.stats().degradations()).contains("budget-truncate-85");
   }
 
@@ -1075,6 +1100,8 @@ class ReviewPipelineTest {
     String summary = captor.getValue().summaryBody();
     assertThat(summary)
         .contains("### 签字建议（建议，非审批）")
+        .contains("<details>")
+        .contains("<summary>✍️ 签字建议（advisory，非审批）</summary>")
         .contains("风险分级：高风险 → 建议 2 人签字")
         .contains("绑定 commit：`abc1234`")
         .contains("approve 只对该 commit 有效")
@@ -1083,6 +1110,9 @@ class ReviewPipelineTest {
         .contains("agent 永远不是 approver")
         .contains("核实本次改动的意图、假设、设计")
         .contains("指挥 agent 写代码的人必须在签字名单上");
+    // 折叠块（04§4.3）：签字明细收进 <details>，段标题保留在块内（过期收尾 stale 判定依赖）
+    assertThat(summary.indexOf("<summary>✍️ 签字建议（advisory，非审批）</summary>"))
+        .isLessThan(summary.indexOf("### 签字建议（建议，非审批）"));
     Path runDir = Path.of(result.traceRef().substring("file://".length()));
     assertThat(Files.readString(runDir.resolve("trace.ndjson")))
         .contains("\"event\":\"signoff_advice\"")
@@ -1139,13 +1169,15 @@ class ReviewPipelineTest {
 
   @Test
   void signoffDisabledLeavesSummaryUnchanged() {
-    // 默认（旧构造）关闭签字建议：既有 Summary 行为不变（M0–M3 基线）
+    // 默认（旧构造）关闭签字建议：无签字段、无签字折叠块（判决头与统计折叠为全局行为，不随签字开关变化）
     gatewayReturns("{\"findings\":[]}");
     ReviewResult result = pipeline.run(request(false));
     assertThat(result.signoffAdvice().advisoryOnly()).isFalse();
     ArgumentCaptor<PostReviewCommand> captor = ArgumentCaptor.forClass(PostReviewCommand.class);
     verify(adapter).postReview(captor.capture());
-    assertThat(captor.getValue().summaryBody()).doesNotContain("### 签字建议");
+    assertThat(captor.getValue().summaryBody())
+        .doesNotContain("### 签字建议")
+        .doesNotContain("✍️ 签字建议");
   }
 
   // ---------- 评审范围默认不含测试文件（02§4.4） ----------
@@ -1209,7 +1241,10 @@ class ReviewPipelineTest {
         .contains("测试文件按策略不评审：1 个")
         .contains("本次无可评审变更")
         .doesNotContain("本次未发现问题")
-        .contains("status=DONE");
+        .contains("status=DONE")
+        // 判决头（02§4.4）：策略性豁免不写成"无问题"，无"结论："前缀
+        .contains("**ℹ️ 按策略无可评审变更**")
+        .doesNotContain("结论：");
     assertThat(captor.getValue().inlineComments()).isEmpty();
     assertThat(result.stats().coverage().filesReviewed()).isZero();
     assertThat(result.stats().coverage().filesChanged()).isEqualTo(1);

@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.14（2026-11-01，§1.3 Summary 正文示意同步 04§4.3 判决前置：判决头 + 折叠块注记；标记格式与末位规则不变）
 > 文档版本：v1.13（2026-11-01，§3.1 L2 报告绑定口径注记同步 06§1.2 v1.3.3——绑定 = 报告 commit 与 PR head 的 diff 仅含 eval/l2/，不再要求祖先关系；命令与参数不变）
 > 文档版本：v1.12（2026-11-01，§1.4 `verify_followup` 的 status 增 `provided-unchanged` 取值（#92 备案项：followup 执行后判定未更新的 trace 可见性）；事件名与判定逻辑不变）
 > 文档版本：v1.11（2026-10-31，默认预算翻倍：run 1.6M、单代理 03§6 全部 ×2（降档阈值不变））
@@ -99,7 +100,7 @@
 **run 完成标记**（每次 run 收尾发布的 Summary issue comment 末尾，v1.2.1 新增——commit 级幂等闸**只认它**）：
 
 ```markdown
-…(Summary 正文：概述/分级列表/覆盖声明/截断声明)…
+…(Summary 正文：判决头/概述/分级列表/覆盖声明与签字建议[折叠])…
 <!-- cra:v=2.1 | run=run_01hxy… | commit=abc1234 | status=DONE | findings=5 | suppressed=0 -->
 ```
 
