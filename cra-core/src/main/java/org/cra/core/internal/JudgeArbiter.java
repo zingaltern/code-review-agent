@@ -1,5 +1,9 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.AGENT_OUTPUT;
+import static org.cra.core.internal.TraceEvents.JUDGE;
+import static org.cra.core.internal.TraceEvents.JUDGE_START;
+
 import java.util.Map;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.JudgeCaseInput;
@@ -45,7 +49,7 @@ final class JudgeArbiter {
     AgentBrief brief = judge.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSlug(findingId));
     trace.emit(
-        "judge_start",
+        JUDGE_START,
         Map.of(
             "agent", judge.role().id(),
             "finding_id", findingId,
@@ -63,7 +67,7 @@ final class JudgeArbiter {
             },
             trace);
     trace.emit(
-        "agent_output",
+        AGENT_OUTPUT,
         Map.of(
             "agent", judge.role().id(),
             "finding_id", findingId,
@@ -71,7 +75,7 @@ final class JudgeArbiter {
             "latency_ms", run.latencyMs()));
     if (run.llmUnavailable() || run.output() == null) {
       trace.emit(
-          "judge",
+          JUDGE,
           Map.of(
               "finding_id",
               findingId,
@@ -82,7 +86,7 @@ final class JudgeArbiter {
       return new Judgement(null, null, false, run.tokensIn(), run.tokensOut(), run.model());
     }
     trace.emit(
-        "judge",
+        JUDGE,
         Map.of(
             "finding_id", findingId,
             "verdict", run.output().verdict().name(),

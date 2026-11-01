@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.cra.agents.api.AgentBrief;
 import org.cra.agents.api.AgentBudget;
@@ -244,10 +246,14 @@ class AgentRunnerToolLoopTest {
 
   @Test
   void timeBudgetKillsSlowAgent() {
+    // 慢模型占真实墙钟模拟（AgentRunner 以 System.currentTimeMillis 判 deadline，AgentRunner#execute）：
+    // 永不 countDown 的 latch.await(50ms) 与 Thread.sleep(50) 同为有界、可中断的墙钟阻塞——
+    // 被测语义不变（等待满 50ms 后放行，超出 timeoutMs=10 触发时间硬限）
+    CountDownLatch slowModel = new CountDownLatch(1);
     LlmGateway slow =
         request -> {
           try {
-            Thread.sleep(50);
+            slowModel.await(50, TimeUnit.MILLISECONDS);
           } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("interrupted", e);

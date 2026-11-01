@@ -1,5 +1,9 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.ANCHOR_CHECK;
+import static org.cra.core.internal.TraceEvents.BLAME_CHECK;
+import static org.cra.core.internal.TraceEvents.DEDUP;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,13 +64,13 @@ final class FindingGatekeeper {
             case SLIDING_WINDOW -> "sliding-window";
             case NONE -> decision.possibleDuplicate() ? "possible_duplicate" : "none";
           };
-      trace.emit("dedup", Map.of("finding_id", finding.id(), "match", matchValue));
+      trace.emit(DEDUP, Map.of("finding_id", finding.id(), "match", matchValue));
       if (decision.match() != FingerprintDeduper.Match.NONE) {
         skippedDuplicate++;
         continue;
       }
       AnchorStatus anchor = PipelineDataLoader.anchorStatus(diff, finding);
-      trace.emit("anchor_check", Map.of("finding_id", finding.id(), "status", anchor.name()));
+      trace.emit(ANCHOR_CHECK, Map.of("finding_id", finding.id(), "status", anchor.name()));
       candidates.add(
           new FindingAggregator.Scored(
               finding, decision.fingerprint(), anchor, PreExistingBlameChecker.Verdict.UNKNOWN));
@@ -81,7 +85,7 @@ final class FindingGatekeeper {
             candidates.stream().map(FindingAggregator.Scored::finding).toList(),
             prCommitShas,
             request.headSha());
-    blameOutcome.notes().forEach(n -> trace.emit("blame_check", Map.of("note", n)));
+    blameOutcome.notes().forEach(n -> trace.emit(BLAME_CHECK, Map.of("note", n)));
     List<FindingAggregator.Scored> checked =
         candidates.stream()
             .map(

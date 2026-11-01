@@ -1,5 +1,14 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.AGENT_START;
+import static org.cra.core.internal.TraceEvents.ANTI_ANCHOR_CHECK;
+import static org.cra.core.internal.TraceEvents.CALL_SITE_INDEX;
+import static org.cra.core.internal.TraceEvents.REFUTE_EVIDENCE_CHECK;
+import static org.cra.core.internal.TraceEvents.VERIFICATION;
+import static org.cra.core.internal.TraceEvents.VERIFY;
+import static org.cra.core.internal.TraceEvents.VERIFY_FOLLOWUP;
+import static org.cra.core.internal.TraceEvents.VERIFY_RETRY;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -320,7 +329,7 @@ final class VerificationWave {
       // 100% 预算击穿：验证不可得 → UNVERIFIED（02§4.2），不发布
       degradations.add(Degradations.VERIFIER_BUDGET_EXHAUSTED);
       trace.emit(
-          "verify",
+          VERIFY,
           Map.of(
               "file_batch",
               file,
@@ -349,7 +358,7 @@ final class VerificationWave {
     AgentBrief brief = verifier.buildBrief(input);
     var persisted = trace.persistBrief(brief, briefSuffix(file));
     trace.emit(
-        "agent_start",
+        AGENT_START,
         Map.of(
             "agent", verifier.role().id(),
             "file_batch", file,
@@ -357,7 +366,7 @@ final class VerificationWave {
     VerifierRun verifierRun = executeWithRetry(input, brief, file, runId, degradations);
     if (verifierRun.unavailable()) {
       trace.emit(
-          "verify",
+          VERIFY,
           Map.of(
               "file_batch",
               file,
@@ -378,7 +387,7 @@ final class VerificationWave {
       // schema 校验重试耗尽：本批无可信判定 → 全部验证不可得（UNVERIFIED 不发布）
       degradations.add(Degradations.VERIFIER_SCHEMA_VIOLATION);
       trace.emit(
-          "verify",
+          VERIFY,
           Map.of(
               "file_batch",
               file,
@@ -409,7 +418,7 @@ final class VerificationWave {
         countVerdict(outcomes, VerdictJsonCodec.VerifierVerdict.INSUFFICIENT_EVIDENCE);
     long downgraded = countDowngraded(outcomes);
     trace.emit(
-        "verify",
+        VERIFY,
         Map.of(
             "file_batch",
             file,
@@ -455,7 +464,7 @@ final class VerificationWave {
       return new VerifierRun(run, false, 0, 0);
     }
     // 缩上下文重试 1 次（02§4.2 验证不可得语义的前半段）
-    trace.emit("verify_retry", Map.of("file_batch", file, "reason", run.llmError()));
+    trace.emit(VERIFY_RETRY, Map.of("file_batch", file, "reason", run.llmError()));
     degradations.add(Degradations.VERIFIER_RETRY_ONCE);
     AgentRunner.AgentRun<VerdictJsonCodec.ParseResult> retry =
         agentRunner.executeParsed(
@@ -500,7 +509,7 @@ final class VerificationWave {
       Optional<String> followupContent =
           followupFile == null ? Optional.empty() : followupLookup.apply(followupFile);
       trace.emit(
-          "verify_followup",
+          VERIFY_FOLLOWUP,
           Map.of(
               "finding_id", finding.id(),
               "file", String.valueOf(followupFile),
@@ -526,7 +535,7 @@ final class VerificationWave {
         } else {
           // followup 已执行但判定未更新（LLM 不可用/解析失败/该 finding 无新判定）：如实留痕（#92 备案观测缺口），判定维持原状
           trace.emit(
-              "verify_followup",
+              VERIFY_FOLLOWUP,
               Map.of(
                   "finding_id", finding.id(),
                   "file", String.valueOf(followupFile),
@@ -566,7 +575,7 @@ final class VerificationWave {
         verdict = downgrade(verdict, refuteCheck.reason());
       }
       trace.emit(
-          "refute_evidence_check",
+          REFUTE_EVIDENCE_CHECK,
           Map.of(
               "finding_id", finding.id(),
               "status", refuteCheck.status().name(),
@@ -577,7 +586,7 @@ final class VerificationWave {
     if (verdict != null && verdict.verdict() == VerdictJsonCodec.VerifierVerdict.CONFIRMED) {
       antiAnchor = AntiAnchorValidator.check(findingText(finding), verdict.rationale());
       trace.emit(
-          "anti_anchor_check",
+          ANTI_ANCHOR_CHECK,
           Map.of(
               "finding_id", finding.id(),
               "status", antiAnchor.status().name(),
@@ -614,7 +623,7 @@ final class VerificationWave {
     if (verdict != null) {
       String rationale = verdict.rationale() == null ? "" : verdict.rationale();
       trace.emit(
-          "verification",
+          VERIFICATION,
           Map.of(
               "finding_id",
               finding.id(),
@@ -685,7 +694,7 @@ final class VerificationWave {
       return null;
     }
     trace.emit(
-        "call_site_index",
+        CALL_SITE_INDEX,
         Map.of(
             "file_batch", file,
             "available", index.available(),

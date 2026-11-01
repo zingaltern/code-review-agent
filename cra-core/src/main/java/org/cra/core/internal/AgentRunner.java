@@ -1,5 +1,9 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.AGENT_BUDGET_EXCEEDED;
+import static org.cra.core.internal.TraceEvents.TOOL_CALL;
+import static org.cra.core.internal.TraceEvents.TOOL_RESULT;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -349,7 +353,7 @@ public final class AgentRunner {
       AgentBrief brief, LoopState state, TraceWriter trace, List<String> degradations) {
     // 轮次硬限（03§6 轮次列 = LLM 调用次数上限；schema 重试同样消耗轮次）
     if (state.turns >= brief.budget().maxTurns()) {
-      trace.emit("agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "turns"));
+      trace.emit(AGENT_BUDGET_EXCEEDED, Map.of("agent", brief.role().id(), "limit", "turns"));
       return Optional.of(
           terminal(
               state,
@@ -364,7 +368,7 @@ public final class AgentRunner {
     long estimatedInput = TokenMath.estimateTokens(brief.systemPrompt() + state.conversation);
     if (estimatedInput > brief.budget().maxInputTokens()) {
       trace.emit(
-          "agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "input-tokens"));
+          AGENT_BUDGET_EXCEEDED, Map.of("agent", brief.role().id(), "limit", "input-tokens"));
       return Optional.of(
           terminal(
               state,
@@ -377,7 +381,7 @@ public final class AgentRunner {
     }
     // 时间硬限（03§1：超限即杀；deadline 恒为 start + timeoutMs，与原循环前置计算一致）
     if (System.currentTimeMillis() > state.start + brief.budget().timeoutMs()) {
-      trace.emit("agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "time"));
+      trace.emit(AGENT_BUDGET_EXCEEDED, Map.of("agent", brief.role().id(), "limit", "time"));
       return Optional.of(
           terminal(
               state,
@@ -432,7 +436,7 @@ public final class AgentRunner {
     // 输出预算（03§6 输出预算/代理，累计口径）
     if (state.tokensOut > brief.budget().maxOutputTokens()) {
       trace.emit(
-          "agent_budget_exceeded", Map.of("agent", brief.role().id(), "limit", "output-tokens"));
+          AGENT_BUDGET_EXCEEDED, Map.of("agent", brief.role().id(), "limit", "output-tokens"));
       return Optional.of(
           terminal(
               state,
@@ -472,7 +476,7 @@ public final class AgentRunner {
     String toolName = root.path("tool").asText();
     ScopedToolSet.ToolResult result = toolSet.execute(toolName, root);
     trace.emit(
-        "tool_call",
+        TOOL_CALL,
         Map.of(
             "agent",
             brief.role().id(),
@@ -496,7 +500,7 @@ public final class AgentRunner {
               degradations));
     }
     trace.emit(
-        "tool_result",
+        TOOL_RESULT,
         Map.of(
             "agent", brief.role().id(),
             "tool", toolName,

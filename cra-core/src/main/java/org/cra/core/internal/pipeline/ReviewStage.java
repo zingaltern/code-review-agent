@@ -1,5 +1,9 @@
 package org.cra.core.internal.pipeline;
 
+import static org.cra.core.internal.TraceEvents.BUDGET_CHECK;
+import static org.cra.core.internal.TraceEvents.CROSSCHECK;
+import static org.cra.core.internal.TraceEvents.PLAN_EMPTY;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -381,7 +385,7 @@ public final class ReviewStage {
   private StageOutcome emptyPlanOutcome(StageCtx ctx, DiffResult diff, ChunkPlanner.Plan plan) {
     ctx.trace()
         .emit(
-            "plan_empty",
+            PLAN_EMPTY,
             Map.of(
                 "files_changed", diff.files().size(),
                 "skipped_test_files", plan.skippedTestCount()));
@@ -465,7 +469,7 @@ public final class ReviewStage {
       loop.ctx
           .trace()
           .emit(
-              "budget_check",
+              BUDGET_CHECK,
               Map.of(
                   "phase",
                   "stop",
@@ -492,7 +496,7 @@ public final class ReviewStage {
       loop.degradations.add(Degradations.BUDGET_DEGRADE_70);
       loop.ctx
           .trace()
-          .emit("budget_check", Map.of("phase", "degrade", "ratio", loop.ctx.budget().ratio()));
+          .emit(BUDGET_CHECK, Map.of("phase", "degrade", "ratio", loop.ctx.budget().ratio()));
     }
     if (phase == RunBudgetTracker.Phase.TRUNCATE) {
       truncationReached = true;
@@ -500,7 +504,7 @@ public final class ReviewStage {
         loop.degradations.add(Degradations.BUDGET_TRUNCATE_85);
         loop.ctx
             .trace()
-            .emit("budget_check", Map.of("phase", "truncate", "ratio", loop.ctx.budget().ratio()));
+            .emit(BUDGET_CHECK, Map.of("phase", "truncate", "ratio", loop.ctx.budget().ratio()));
       }
     }
     return truncationReached;
@@ -701,7 +705,7 @@ public final class ReviewStage {
           ReviewRoutingPolicy.crossCheckSkipReason(
               ctx.depthPlan(), ctx.policy(), crew, crossHistory, crossEvents);
       contextNotes.add("CrossChecker 未触发：" + reason);
-      ctx.trace().emit("crosscheck", Map.of("triggered", false, "reason", reason));
+      ctx.trace().emit(CROSSCHECK, Map.of("triggered", false, "reason", reason));
     }
   }
 
@@ -758,7 +762,7 @@ public final class ReviewStage {
                 assumptionMode ? crossEvents.entries() : List.of(),
                 crossCheckerOptions.historyWeeks())));
     event.put("context_tokens", TokenMath.estimateTokens(materials.trustedSections()));
-    ctx.trace().emit("crosscheck", event);
+    ctx.trace().emit(CROSSCHECK, event);
     futures.add(
         dispatcher.submitCrossCheck(
             crew.crossChecker(),
@@ -782,7 +786,7 @@ public final class ReviewStage {
     contextNotes.add("run 预算耗尽：Test/Convention 全 PR 级专角色未派发（02§4.4）");
     if (crossCheckerOptions.enabled() && crew.crossChecker() != null) {
       contextNotes.add("run 预算耗尽：CrossChecker 未派发（02§4.4）");
-      ctx.trace().emit("crosscheck", Map.of("triggered", false, "reason", "budget-exhausted"));
+      ctx.trace().emit(CROSSCHECK, Map.of("triggered", false, "reason", "budget-exhausted"));
     }
   }
 
@@ -799,7 +803,7 @@ public final class ReviewStage {
       if (!degradations.contains(Degradations.BUDGET_TRUNCATE_85)) {
         degradations.add(Degradations.BUDGET_TRUNCATE_85);
         ctx.trace()
-            .emit("budget_check", Map.of("phase", "truncate-final", "ratio", ctx.budget().ratio()));
+            .emit(BUDGET_CHECK, Map.of("phase", "truncate-final", "ratio", ctx.budget().ratio()));
       }
       return true;
     }

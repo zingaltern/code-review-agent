@@ -1,5 +1,7 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.RUN_END;
+
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -88,7 +90,7 @@ final class ReviewRunFinisher {
     end.put("tokens_in", outcome.stats().tokensIn());
     end.put("tokens_out", outcome.stats().tokensOut());
     end.put("latency_ms", outcome.stats().latencyMs());
-    trace.emit("run_end", end);
+    trace.emit(RUN_END, end);
     return new ReviewResult(
         runId,
         request.repoOwner(),

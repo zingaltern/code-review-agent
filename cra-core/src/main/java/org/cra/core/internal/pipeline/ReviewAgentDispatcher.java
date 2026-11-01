@@ -1,5 +1,8 @@
 package org.cra.core.internal.pipeline;
 
+import static org.cra.core.internal.TraceEvents.AGENT_OUTPUT;
+import static org.cra.core.internal.TraceEvents.AGENT_START;
+
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -264,7 +267,7 @@ final class ReviewAgentDispatcher {
                   + Integer.toHexString(
                       scope.files().stream().map(DiffFile::path).sorted().toList().hashCode()));
       trace.emit(
-          "agent_start",
+          AGENT_START,
           Map.of(
               "agent", agent.role().id(),
               "chunk", scope.key(),
@@ -295,7 +298,7 @@ final class ReviewAgentDispatcher {
                           + (f.title().length() > 60 ? f.title().substring(0, 60) : f.title()))
               .toList();
       trace.emit(
-          "agent_output",
+          AGENT_OUTPUT,
           Map.of(
               "agent", agent.role().id(),
               "chunk", scope.key(),
@@ -333,7 +336,7 @@ final class ReviewAgentDispatcher {
     } catch (RuntimeException e) {
       // 失败隔离（03§2.3/09§4）：brief 组装/上下文等异常收敛为该代理空产出
       trace.emit(
-          "agent_output",
+          AGENT_OUTPUT,
           Map.of(
               "agent", agent.role().id(),
               "chunk", scope.key(),

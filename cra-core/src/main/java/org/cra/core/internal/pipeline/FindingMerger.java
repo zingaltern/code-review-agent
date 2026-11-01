@@ -1,5 +1,7 @@
 package org.cra.core.internal.pipeline;
 
+import static org.cra.core.internal.TraceEvents.DEDUP;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +51,7 @@ final class FindingMerger {
         loser = candidate;
       }
       trace.emit(
-          "dedup",
+          DEDUP,
           Map.of(
               "finding_id", loser.id(),
               "match", "in-run-exact",
