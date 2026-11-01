@@ -1,5 +1,8 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.PUBLISH;
+import static org.cra.core.internal.TraceEvents.SUMMARY_SUPERSEDE;
+
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -116,7 +119,7 @@ final class ReviewPublisher {
     if (request.dryRun()) {
       // dry-run：全程零写（05§6），发布器不触达 adapter 与账本写侧
       trace.emit(
-          "publish",
+          PUBLISH,
           Map.of(
               "mode",
               mode.name().toLowerCase(Locale.ROOT),
@@ -197,7 +200,7 @@ final class ReviewPublisher {
             .filter(i -> i.publishStatus() == PublishStatus.SUMMARY_FALLBACK)
             .count();
     trace.emit(
-        "publish",
+        PUBLISH,
         Map.of(
             "mode",
             "pull_request",
@@ -258,7 +261,7 @@ final class ReviewPublisher {
           case PULL_REQUEST -> throw new IllegalStateException("不可达：PR 形态走 postReview");
         };
     trace.emit(
-        "publish",
+        PUBLISH,
         Map.of(
             "mode",
             request.mode().name().toLowerCase(Locale.ROOT),
@@ -383,12 +386,11 @@ final class ReviewPublisher {
     String body =
         ledger.comment(request.key(), old.commentId()).map(LedgerComment::body).orElse(null);
     if (body == null) {
-      trace.emit(
-          "summary_supersede", Map.of("comment_id", old.commentId(), "status", "unavailable"));
+      trace.emit(SUMMARY_SUPERSEDE, Map.of("comment_id", old.commentId(), "status", "unavailable"));
       return 0;
     }
     if (body.startsWith(SUPERSEDED_PREFIX)) {
-      trace.emit("summary_supersede", Map.of("comment_id", old.commentId(), "status", "skipped"));
+      trace.emit(SUMMARY_SUPERSEDE, Map.of("comment_id", old.commentId(), "status", "skipped"));
       return 0;
     }
     if (SignoffSections.hasSignoffSection(body) && !SignoffSections.hasStaleNotice(body)) {
@@ -402,13 +404,13 @@ final class ReviewPublisher {
           old.commentId(),
           "[已被 " + runId + " 取代]\n\n" + body);
       trace.emit(
-          "summary_supersede",
+          SUMMARY_SUPERSEDE,
           Map.of("comment_id", old.commentId(), "status", "patched", "superseded_by", runId));
       return 0;
     } catch (RuntimeException e) {
       // 收尾失败不回滚完成标记（降级写状态，09§4）；次数计入 stats 供 Summary/健康度可见
       trace.emit(
-          "summary_supersede",
+          SUMMARY_SUPERSEDE,
           Map.of(
               "comment_id",
               old.commentId(),

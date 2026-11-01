@@ -229,12 +229,11 @@ class CrossCheckPipelineTest {
     // 增量实测：CrossChecker 单次输入估算（03§6 预算 ≤32k，2026-10-31 翻倍；04§2.2 文档算术 ≈14k in；
     // 断言沿用 ≤16k 作为更严的算术锚，不随默认预算放宽）
     long inputTokens = TokenMath.estimateTokens(crossCall.systemPrompt() + crossPrompt);
-    System.out.println(
-        "MEASURED CrossChecker input tokens (fixture) = "
-            + inputTokens
-            + ", output budget = "
-            + crossCall.maxOutputTokens());
-    assertThat(inputTokens).isLessThanOrEqualTo(16_000);
+    assertThat(inputTokens)
+        .as(
+            "measured CrossChecker input tokens (fixture) = %s, output budget = %s",
+            inputTokens, crossCall.maxOutputTokens())
+        .isLessThanOrEqualTo(16_000);
 
     // 验收证据落盘（target/，随构建清理；可直接作为 07§5 验收记录取证）
     Files.createDirectories(Path.of("target"));
@@ -435,19 +434,16 @@ class CrossCheckPipelineTest {
                     materials.trustedSections(),
                     Set.of("src/main/java/demo/File0.java")));
     long inputTokens = TokenMath.estimateTokens(brief.systemPrompt() + brief.userPrompt());
-    System.out.println(
-        "MEASURED CrossChecker input tokens (standard 10-file scale) = "
-            + inputTokens
-            + " (diff="
-            + TokenMath.estimateTokens(materials.diffDigest())
-            + ", history="
-            + TokenMath.estimateTokens(materials.historyText())
-            + ", context="
-            + TokenMath.estimateTokens(materials.trustedSections())
-            + ", output budget="
-            + brief.budget().maxOutputTokens()
-            + ")");
-    assertThat(inputTokens).isLessThanOrEqualTo(16_000);
+    assertThat(inputTokens)
+        .as(
+            "measured CrossChecker input tokens (standard 10-file scale) = %s (diff=%s,"
+                + " history=%s, context=%s, output budget=%s)",
+            inputTokens,
+            TokenMath.estimateTokens(materials.diffDigest()),
+            TokenMath.estimateTokens(materials.historyText()),
+            TokenMath.estimateTokens(materials.trustedSections()),
+            brief.budget().maxOutputTokens())
+        .isLessThanOrEqualTo(16_000);
     assertThat(TokenMath.estimateTokens(materials.diffDigest()))
         .isLessThanOrEqualTo(
             org.cra.core.internal.pipeline.CrossCheckMaterials.DIFF_TOKEN_CAP + 10);

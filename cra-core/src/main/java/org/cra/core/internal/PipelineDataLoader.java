@@ -1,5 +1,11 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.CONVERGENCE;
+import static org.cra.core.internal.TraceEvents.JAVA_FILE_INDEX;
+import static org.cra.core.internal.TraceEvents.POLICY_LOAD;
+import static org.cra.core.internal.TraceEvents.SEMANTIC_CONTEXT;
+import static org.cra.core.internal.TraceEvents.TEST_INDEX;
+
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
@@ -149,7 +155,7 @@ final class PipelineDataLoader {
               semanticContextOptions,
               SymbolIndexSnapshot.unavailable(
                   request.headSha(), "quick 档不触发（02§4.3；语义上下文仅 standard/deep）"));
-      trace.emit("semantic_context", quick.traceFields());
+      trace.emit(SEMANTIC_CONTEXT, quick.traceFields());
       return quick;
     }
     SymbolIndexSnapshot snapshot;
@@ -161,7 +167,7 @@ final class PipelineDataLoader {
       snapshot = symbolIndex.build(request.headSha(), semanticContextOptions.indexOptions());
     }
     SemanticContext context = SemanticContext.of(semanticContextOptions, snapshot);
-    trace.emit("semantic_context", context.traceFields());
+    trace.emit(SEMANTIC_CONTEXT, context.traceFields());
     return context;
   }
 
@@ -258,11 +264,11 @@ final class PipelineDataLoader {
       List<String> files =
           adapter.listFiles(
               new RepoRef(request.repoOwner(), request.repoName()), request.headSha(), "**/*.java");
-      trace.emit("java_file_index", Map.of("available", true, "files", files.size()));
+      trace.emit(JAVA_FILE_INDEX, Map.of("available", true, "files", files.size()));
       return files;
     } catch (RuntimeException e) {
       trace.emit(
-          "java_file_index",
+          JAVA_FILE_INDEX,
           Map.of(
               "available",
               false,
@@ -289,11 +295,11 @@ final class PipelineDataLoader {
               new RepoRef(request.repoOwner(), request.repoName()),
               request.headSha(),
               "**/test/**/*.java");
-      trace.emit("test_index", Map.of("available", true, "files", files.size()));
+      trace.emit(TEST_INDEX, Map.of("available", true, "files", files.size()));
       return files;
     } catch (RuntimeException e) {
       trace.emit(
-          "test_index",
+          TEST_INDEX,
           Map.of(
               "available",
               false,
@@ -312,12 +318,12 @@ final class PipelineDataLoader {
               new RepoRef(request.repoOwner(), request.repoName()), request.baseSha(), REVIEW_MD);
       markdown = content.binary() ? null : content.text();
     } catch (CraIntegrationException e) {
-      trace.emit("policy_load", Map.of("present", false, "reason", "read-failed"));
+      trace.emit(POLICY_LOAD, Map.of("present", false, "reason", "read-failed"));
       return ReviewPolicy.empty();
     }
     ReviewPolicy policy = policyParser.parse(markdown);
     trace.emit(
-        "policy_load",
+        POLICY_LOAD,
         Map.of(
             "present", policy.present(),
             "modified_in_pr", hasReviewMdChange(diff),
@@ -356,7 +362,7 @@ final class PipelineDataLoader {
           new RepoRef(request.repoOwner(), request.repoName()), lastHead, request.headSha());
     } catch (RuntimeException e) {
       trace.emit(
-          "convergence",
+          CONVERGENCE,
           Map.of(
               "note", "increment-diff-unavailable",
               "last_head", ReviewBodyRenderer.shortSha(lastHead),

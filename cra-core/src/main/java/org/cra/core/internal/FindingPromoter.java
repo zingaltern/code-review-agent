@@ -1,5 +1,7 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.PROMOTION;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -75,7 +77,7 @@ final class FindingPromoter {
           SpotCheckFuse.hit(runId, finding.id(), options.importantRefutedSpotCheckPercent());
       PromotionEngine.Promotion promotion = PromotionEngine.promote(verdict, finding, fuseHit);
       trace.emit(
-          "promotion",
+          PROMOTION,
           Map.of(
               "finding_id", finding.id(),
               "verifier_verdict", verdict.name(),

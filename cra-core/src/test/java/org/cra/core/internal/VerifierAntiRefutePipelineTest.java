@@ -332,9 +332,9 @@ class VerifierAntiRefutePipelineTest {
         TokenMath.estimateTokens(
             scripted.verifierCalls.get(0).systemPrompt()
                 + scripted.verifierCalls.get(0).userPrompt());
-    System.out.println(
-        "MEASURED verifier input tokens (bug brief + call-site index) = " + inputTokens);
-    assertThat(inputTokens).isLessThanOrEqualTo(16_000);
+    assertThat(inputTokens)
+        .as("measured verifier input tokens (bug brief + call-site index) = %s", inputTokens)
+        .isLessThanOrEqualTo(16_000);
     assertThat(traceOf(result))
         .contains("\"event\":\"call_site_index\"")
         .contains("\"available\":true");

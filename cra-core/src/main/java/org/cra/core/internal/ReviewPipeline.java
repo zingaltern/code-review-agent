@@ -1,5 +1,17 @@
 package org.cra.core.internal;
 
+import static org.cra.core.internal.TraceEvents.AGGREGATE;
+import static org.cra.core.internal.TraceEvents.CONVERGENCE;
+import static org.cra.core.internal.TraceEvents.GATE_CHECK;
+import static org.cra.core.internal.TraceEvents.LEDGER_PARSE;
+import static org.cra.core.internal.TraceEvents.MERGE;
+import static org.cra.core.internal.TraceEvents.MERGE_SUMMARY;
+import static org.cra.core.internal.TraceEvents.PLAN;
+import static org.cra.core.internal.TraceEvents.RUN_START;
+import static org.cra.core.internal.TraceEvents.SIGNOFF_ADVICE;
+import static org.cra.core.internal.TraceEvents.TEMPLATE_VERSIONS;
+import static org.cra.core.internal.TraceEvents.VALIDATION_TRUNCATION;
+
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -292,7 +304,7 @@ public final class ReviewPipeline implements Orchestrator {
     int suspectCount = ledger.suspectMarkerCount(request.key());
     boolean anyValidMarker = !publishedMarkers.isEmpty() || !completedRuns.isEmpty();
     trace.emit(
-        "ledger_parse",
+        LEDGER_PARSE,
         Map.of(
             "valid",
             publishedMarkers.size() + completedRuns.size(),
@@ -309,7 +321,7 @@ public final class ReviewPipeline implements Orchestrator {
     ConvergenceGuard.RoundPlan roundPlan =
         ConvergenceGuard.resolve(completedRuns, request.headSha());
     trace.emit(
-        "convergence",
+        CONVERGENCE,
         Map.of(
             "round",
             roundPlan.round(),
@@ -368,7 +380,7 @@ public final class ReviewPipeline implements Orchestrator {
     long start = System.currentTimeMillis();
     try {
       trace.emit(
-          "run_start",
+          RUN_START,
           Map.of(
               "repo", request.repoOwner() + "/" + request.repoName(),
               "mode", request.mode().name().toLowerCase(Locale.ROOT),
@@ -381,7 +393,7 @@ public final class ReviewPipeline implements Orchestrator {
       // 第一道闸：commit 级幂等（02§4.1，只认完整发布 DONE|DEGRADED；命中即全量跳过——Summary
       // 保持历史原样，避免 CI 重跑反复 PATCH 旧评论；更新语义如有需要随流水线线统一加）
       Optional<LedgerRunMarker> completion = ledger.findCompletion(request.key());
-      trace.emit("gate_check", Map.of("gate", "commit", "hit", completion.isPresent()));
+      trace.emit(GATE_CHECK, Map.of("gate", "commit", "hit", completion.isPresent()));
       if (completion.isPresent()) {
         return ReviewRunFinisher.finish(
             trace,
@@ -403,7 +415,7 @@ public final class ReviewPipeline implements Orchestrator {
       DiffResult diff = dataLoader.fetchDiff(request);
       // 07§5 M4a：风险分级与签字建议（确定性规则，不依赖 LLM；绑定本次 head commit）
       SignoffAdvice signoff = signoffAdvisor.assess(request, diff);
-      trace.emit("signoff_advice", signoffEvent(signoff, signoffAdvisor.ruleVersion()));
+      trace.emit(SIGNOFF_ADVICE, signoffEvent(signoff, signoffAdvisor.ruleVersion()));
       List<String> earlyDegradations = new ArrayList<>();
       DiffResult reviewDiff =
           roundPlan
@@ -431,7 +443,7 @@ public final class ReviewPipeline implements Orchestrator {
           ChunkPlanner.plan(
               reviewDiff.files(), policy, depthPlan.priorityOnly(), options.includeTestFiles());
       trace.emit(
-          "plan",
+          PLAN,
           Map.of(
               "effective_depth", depthPlan.effectiveDepth().name().toLowerCase(Locale.ROOT),
               "window_lines", depthPlan.windowLines(),
@@ -490,7 +502,7 @@ public final class ReviewPipeline implements Orchestrator {
               crossCheckEvents,
               semanticContext);
       // T2.11：模板版本与 run 关联——trace 事件先行（05§1.4 template_versions；落库随发布成功）
-      trace.emit("template_versions", Map.of("versions", outcome.templateVersions()));
+      trace.emit(TEMPLATE_VERSIONS, Map.of("versions", outcome.templateVersions()));
       if (outcome.llmUnavailable()) {
         // LLM 不可得：run FAILED，不发布、无 DONE 标记——重跑重试（02§4.2）
         return ReviewRunFinisher.finish(
@@ -519,10 +531,9 @@ public final class ReviewPipeline implements Orchestrator {
           .mergedFrom()
           .forEach(
               (keptId, sources) ->
-                  trace.emit("merge", Map.of("finding_id", keptId, "merged_from", sources)));
+                  trace.emit(MERGE, Map.of("finding_id", keptId, "merged_from", sources)));
       trace.emit(
-          "merge_summary",
-          Map.of("clusters", merged.clusters(), "merged_away", merged.mergedAway()));
+          MERGE_SUMMARY, Map.of("clusters", merged.clusters(), "merged_away", merged.mergedAway()));
 
       // 去重（指纹 exact → ±5 滑窗 → possible_duplicate，02§4.1）+ 锚定校验（05§2.2）+ blame 复核
       // 内容缓存跨门禁/验证/调用点索引共享，验证波与补查在并发池内读取 → 必须线程安全
@@ -540,7 +551,7 @@ public final class ReviewPipeline implements Orchestrator {
         validationSuppressed = candidates.size() - window.size();
         candidates = window;
         trace.emit(
-            "validation_truncation",
+            VALIDATION_TRUNCATION,
             Map.of("kept", window.size(), "suppressed", validationSuppressed));
       }
 
@@ -613,7 +624,7 @@ public final class ReviewPipeline implements Orchestrator {
       List<FindingAggregator.Scored> toPublish = new ArrayList<>(aggregation.ordered());
       toPublish.addAll(unverifiedLabeled);
       trace.emit(
-          "aggregate",
+          AGGREGATE,
           Map.of(
               "candidates", confirmedCandidates.size(),
               "ordered", aggregation.ordered().size(),
