@@ -1,5 +1,6 @@
 # 05 · 数据模型与集成设计
 
+> 文档版本：v1.13（2026-11-01，§3.1 L2 报告绑定口径注记同步 06§1.2 v1.3.3——绑定 = 报告 commit 与 PR head 的 diff 仅含 eval/l2/，不再要求祖先关系；命令与参数不变）
 > 文档版本：v1.12（2026-11-01，§1.4 `verify_followup` 的 status 增 `provided-unchanged` 取值（#92 备案项：followup 执行后判定未更新的 trace 可见性）；事件名与判定逻辑不变）
 > 文档版本：v1.11（2026-10-31，默认预算翻倍：run 1.6M、单代理 03§6 全部 ×2（降档阈值不变））
 > 文档版本：v1.10（2026-10-31，§5 配置面补全：`CRA_LLM_MAX_CONCURRENCY`（1..64，有效并发 = min(值, 线程池宽度)）与 `CRA_REVIEW_*` 七项（review/sweep/server 共用）；`review.large-diff-lines` / `hard-cap-lines` 示例值同步 4000/16000）
@@ -402,7 +403,7 @@ cra-eval run --dataset cra-eval/dataset --set l2 --k 2 --depth quick --tier l2 \
   --json eval/l2/report.json --sha256-out eval/l2/report.json.sha256
 
 # 报告校验（CI 的 L2 门禁：哈希 + 门禁结论为绿 + commit 绑定；荣誉制，04§2.4）
-# REPORT_COMMIT = 报告内 commit 字段（被测代码提交）；须为 PR head 祖先，其后仅允许 eval/l2/ 变更
+# REPORT_COMMIT = 报告内 commit 字段（被测代码提交）；绑定 = 该 commit 与 PR head 的 diff 仅含 eval/l2/（代码同一性，06§1.2 v1.3.3；不再要求祖先关系——squash 免疫），代码一变即过期
 cra-eval verify --report eval/l2/report.json --sha256-file eval/l2/report.json.sha256 \
   --tier l2 --expect-commit "$REPORT_COMMIT"
 
